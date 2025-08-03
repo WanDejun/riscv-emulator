@@ -1,0 +1,11 @@
+/target
+.vscode
+Cargo.lock
+
+
+/test/obj
+/test/bin
+/test/compile_commands.json
+/test/*.S
+/test/*.s
+*/.cache
