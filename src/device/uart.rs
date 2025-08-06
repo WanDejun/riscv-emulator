@@ -1,6 +1,12 @@
-use std::{cell::RefCell, rc::Rc, u8};
+#![allow(unused)]
+
+use std::{cell::RefCell, rc::Rc, sync::WaitTimeoutResult, u8};
 
 use log::error;
+
+use crate::{config::arch_config::WordType, device::DeviceTrait};
+
+const UART_DATA_LENGTH: u8 = 8;
 
 #[allow(unused)]
 mod offset {
@@ -59,21 +65,104 @@ impl Uart16550Reg {
     fn get_divisor(&self) -> u16 {
         (self.DLL as u16) + ((self.DLM as u16) << 8)
     }
+
+    fn get_tx_data(&mut self) -> Option<u8> {
+        if self.LSR & (1 << 5) != 0 {
+            self.LSR &= !(1 << 5);
+            Some(self.THR)
+        } else {
+            None
+        }
+    }
+
+    fn get_stop_bits(&self) -> u8 {
+        if self.LCR & (1 << 2) != 0 { 2 } else { 1 }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Uart16550Status {
     IDLE,
     START,
-    DATA(u8),
-    STOP,
-    END,
+    DATA(u8, u8),
+    STOP(u8),
 }
 
-struct Uart16550TX {}
+struct Uart16550TX {
+    uart_reg: Rc<RefCell<Uart16550Reg>>,
+    status: Uart16550Status,
+    div_counter: u32, // count frequency. Switch output data in (DLL + (DLM << 8)) * 16 clocks;
+
+    tx_data: Option<u8>,
+    tx_reg: u8,
+}
 impl Uart16550TX {
-    fn new(uart_reg: &Rc<RefCell<Uart16550Reg>>, rx_wiring: *mut u8) -> Self {
-        Self {}
+    fn new(uart_reg: &Rc<RefCell<Uart16550Reg>>) -> Self {
+        Self {
+            uart_reg: uart_reg.clone(),
+            status: Uart16550Status::IDLE,
+            div_counter: 0,
+            tx_reg: 0,
+            tx_data: None,
+        }
+    }
+
+    fn get_wire(&self) -> *const u8 {
+        (&self.tx_reg) as *const u8
+    }
+
+    fn read_tx_data(&self) -> Option<u8> {
+        self.uart_reg.borrow_mut().get_tx_data()
+    }
+
+    fn advance_state_machine(&mut self) {
+        match self.status {
+            Uart16550Status::START => {
+                let data = self.tx_data.unwrap();
+                self.status = Uart16550Status::DATA(1, data >> 1);
+                self.tx_reg = data & 0x01;
+            }
+            Uart16550Status::DATA(mut cnt, data) => {
+                cnt += 1;
+                self.tx_reg = data & 0x01;
+                if cnt == UART_DATA_LENGTH {
+                    self.status = Uart16550Status::STOP(0);
+                } else {
+                    self.status = Uart16550Status::DATA(cnt, data >> 1);
+                }
+            }
+            Uart16550Status::STOP(cnt) => {
+                let nxt_cnt = cnt + 1;
+                if nxt_cnt == self.uart_reg.borrow().get_stop_bits() {
+                    self.status = Uart16550Status::STOP(nxt_cnt);
+                } else {
+                    self.status = Uart16550Status::IDLE;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn one_shot(&mut self) {
+        if self.status == Uart16550Status::IDLE {
+            self.tx_data = self.read_tx_data();
+            if self.tx_data.is_some() {
+                self.status = Uart16550Status::START;
+                self.tx_reg = 0;
+            }
+        }
+
+        if self.status == Uart16550Status::IDLE {
+            return;
+        }
+
+        self.div_counter += 1;
+        if self.div_counter < ((self.uart_reg.borrow().get_divisor() as u32) << 4) {
+            return;
+        }
+        self.div_counter = 0;
+
+        self.advance_state_machine();
     }
 }
 
@@ -85,9 +174,7 @@ struct Uart16550RX {
     rx_wiring: *const u8,
 
     sample_count: u8, // 16 times sampling for a bit
-    bit_counter: u8,
 }
-
 impl Uart16550RX {
     fn new(uart_reg: &Rc<RefCell<Uart16550Reg>>, rx_wiring: *const u8) -> Self {
         Self {
@@ -96,7 +183,6 @@ impl Uart16550RX {
             div_counter: 0,
             sample_data: 0,
             sample_count: 0,
-            bit_counter: 0,
             rx_wiring,
         }
     }
@@ -133,22 +219,21 @@ impl Uart16550RX {
                 if bit_data {
                     self.status = Uart16550Status::IDLE; // False Start
                 } else {
-                    self.bit_counter = 0;
-                    self.status = Uart16550Status::DATA(0);
+                    self.status = Uart16550Status::DATA(0, 0);
                 }
             }
-            Uart16550Status::DATA(cur) => {
+            Uart16550Status::DATA(mut cnt, cur) => {
                 let mut nxt = cur;
                 if bit_data {
-                    nxt |= 1 << self.bit_counter;
+                    nxt |= 1 << cnt;
                 }
-                self.bit_counter += 1;
+                cnt += 1;
 
-                if self.bit_counter == 8 {
+                if cnt == UART_DATA_LENGTH {
                     self.write_data2reg(nxt);
                     self.status = Uart16550Status::IDLE;
                 } else {
-                    self.status = Uart16550Status::DATA(nxt);
+                    self.status = Uart16550Status::DATA(cnt, nxt);
                 }
             }
             _ => {
@@ -199,8 +284,6 @@ pub struct Uart16550 {
     reg_lcr_ptr: [*mut u8; 8],
 
     rx: Uart16550RX,
-
-    tx_data_vaild: bool,
     tx: Uart16550TX,
 }
 
@@ -246,14 +329,31 @@ impl Uart16550 {
             reg_mut_ptr,
             reg_lcr_ptr,
             rx: Uart16550RX::new(&reg, rx_wiring),
-            tx_data_vaild: false,
-            tx: Uart16550TX::new(&reg, tx_wiring),
+            tx: Uart16550TX::new(&reg),
         }
     }
 
     pub fn one_shot(&mut self) {
         self.rx.one_shot();
     }
+
+    #[allow(non_snake_case)]
+    fn read_RBR(&mut self) -> u8 {
+        self.reg.borrow_mut().LSR &= !(1 << 0); // receive data ready.
+        self.reg.borrow().RBR
+    }
+
+    #[allow(non_snake_case)]
+    fn write_THR(&mut self, tx_data: u8) {
+        self.reg.borrow_mut().LSR |= (1 << 5);
+    }
+}
+
+impl DeviceTrait for Uart16550 {
+    fn read(device: &mut Self, addr: usize, data: WordType) -> WordType {
+        0
+    }
+    fn write(device: &mut Self, addr: usize, data: WordType) {}
 }
 
 #[cfg(test)]
@@ -263,7 +363,7 @@ mod test {
     use log::error;
 
     use crate::{
-        device::uart::{Uart16550RX, Uart16550Reg},
+        device::uart::{self, Uart16550RX, Uart16550Reg, Uart16550TX},
         *,
     };
 
@@ -275,7 +375,6 @@ mod test {
 
         uart_reg.borrow_mut().DLL = 0xe8;
         uart_reg.borrow_mut().DLM = 0x03;
-        uart_reg.borrow_mut().LCR = 0x03;
 
         for _ in 0..10000 {
             rx.one_shot();
@@ -294,5 +393,54 @@ mod test {
         }
         assert!(uart_reg.borrow_mut().LSR | 0x01 == 0x01);
         assert!(uart_reg.borrow_mut().RBR == 0x55);
+    }
+
+    #[test]
+    fn tx_test() {
+        let uart_reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let mut tx = Uart16550TX::new(&uart_reg);
+        let tx_wire = tx.get_wire();
+
+        uart_reg.borrow_mut().DLL = 0xe8;
+        uart_reg.borrow_mut().DLM = 0x03;
+
+        uart_reg.borrow_mut().THR = 0xaa;
+        uart_reg.borrow_mut().LSR |= 0x20;
+
+        let mut data: u16 = 0;
+
+        for i in 0..12 {
+            for j in 0..1000 * 16 {
+                tx.one_shot();
+                if (j == 8000) {
+                    data |= ((unsafe { tx_wire.read_volatile() } as u16) << i);
+                }
+            }
+            assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
+        }
+        assert!(((data >> 1) & 0xff) == 0xaa);
+    }
+
+    #[test]
+    fn tx_rx_test() {
+        let uart_reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let mut tx = Uart16550TX::new(&uart_reg);
+        let mut rx = Uart16550RX::new(&uart_reg, tx.get_wire());
+
+        uart_reg.borrow_mut().DLL = 0xe8;
+        uart_reg.borrow_mut().DLM = 0x03;
+        uart_reg.borrow_mut().THR = 0xaa;
+        uart_reg.borrow_mut().LSR |= 0x20;
+
+        let mut data: u16 = 0;
+        for i in 0..12 {
+            for j in 0..1000 * 16 {
+                rx.one_shot();
+                tx.one_shot();
+            }
+        }
+        assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
+        assert!(uart_reg.borrow_mut().LSR | 0x01 == 0x01);
+        assert!(uart_reg.borrow_mut().RBR == 0xaa);
     }
 }
