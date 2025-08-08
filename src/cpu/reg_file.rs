@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::config::arch_config::{REGFILE_CNT, WordType};
+use crate::config::arch_config::{REG_NAME, REGFILE_CNT, WordType};
 
 pub struct RegFile {
     data: [WordType; REGFILE_CNT],
@@ -35,7 +35,13 @@ impl Debug for RegFile {
                 write!(f, "  ")?; // 缩进
             }
 
-            write!(f, "x{:02}: 0x{:0width$x}  ", i, val, width = hex_width)?;
+            write!(
+                f,
+                "{:>6}: 0x{:0width$x}  ",
+                REG_NAME[i],
+                val,
+                width = hex_width
+            )?;
 
             if i % 8 == 7 {
                 writeln!(f)?;
@@ -57,12 +63,26 @@ impl RegFile {
             data: [0; REGFILE_CNT],
         }
     }
+
+    pub fn read(&self, id1: u8, id2: u8) -> (WordType, WordType) {
+        (self.data[id1 as usize], self.data[id2 as usize])
+    }
+
+    #[cfg(any(feature = "riscv64", feature = "riscv32"))]
+    /// id == 0 will be ignored, if an instruction do not need to WriteBack, set id = 0.
+    pub fn write(&mut self, id: u8, data: WordType) {
+        if id == 0u8 {
+            return;
+        }
+
+        self.data[id as usize] = data
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
     use super::*;
+    use rand::Rng;
 
     #[test]
     fn test_fmt_output() {
