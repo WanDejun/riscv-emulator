@@ -17,8 +17,8 @@ fn init() {
 }
 
 fn main() {
-    init();
     let _logger_handle = logging::init();
+    init();
 
     const A: [&'static str; 12] = gen_reg_name_list!("a", 1, 5; "b", 6, 10; "c"; "d");
     for i in 0..12 {
@@ -28,6 +28,7 @@ fn main() {
             print!("{}, ", A[i]);
         }
     }
+
     log::error!("[Error] ");
     log::warn!("[Warn]   ");
     log::info!("[info]   ");

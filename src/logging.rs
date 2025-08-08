@@ -27,3 +27,13 @@ pub fn init() -> LoggerHandle {
         .start()
         .unwrap()
 }
+
+#[macro_export]
+macro_rules! error_and_panic {
+    ($($arg:tt)*) => {
+        {
+            log::error!($($arg)*);
+            panic!();
+        }
+    };
+}

@@ -102,8 +102,6 @@ impl Ram {
 mod tests {
     use std::ptr::addr_of;
 
-    use crate::logging;
-
     use super::*;
 
     #[test]
@@ -118,7 +116,6 @@ mod tests {
     #[test]
     fn test_insert_section_and_read() {
         let mut r = Ram::new();
-        logging::init();
 
         // 插入一段数据，地址从 ram_config::BASE_ADDR 开始
         let base = ram_config::BASE_ADDR;
