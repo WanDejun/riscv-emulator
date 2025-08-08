@@ -1,27 +1,42 @@
+//! Only realize the basic functions of Uart16550J: TX, RX for 8bits data, 2stop bits.
+//! # TODO
+//! - [ ] interrupt
+//! - [ ] FIFO
+//! - [ ] DMA support
+//! - [ ] Even/Odd Parity
+//! - [ ] Different length of data bits;
+
+
 #![allow(unused)]
 
 use std::{cell::RefCell, rc::Rc, sync::WaitTimeoutResult, u8};
 
 use log::error;
 
-use crate::{config::arch_config::WordType, device::DeviceTrait};
+use crate::{
+    config::arch_config::WordType,
+    device::DeviceTrait,
+    utils::{clear_bit, read_bit, set_bit},
+};
 
 const UART_DATA_LENGTH: u8 = 8;
 
 #[allow(unused)]
 mod offset {
-    const RBR: usize = 0x00;
-    const THR: usize = 0x00;
-    const IER: usize = 0x04;
-    const IIR: usize = 0x08;
-    const FCR: usize = 0x08;
-    const LCR: usize = 0x0C;
-    const MCR: usize = 0x10;
-    const LSR: usize = 0x14;
-    const MSR: usize = 0x18;
-    const SCR: usize = 0x1C;
-    const DLL: usize = 0x00;
-    const DLM: usize = 0x04;
+    use super::WordType;
+
+    pub const RBR: WordType = 0x00;
+    pub const THR: WordType = 0x00;
+    pub const IER: WordType = 0x01;
+    pub const IIR: WordType = 0x02;
+    pub const FCR: WordType = 0x02;
+    pub const LCR: WordType = 0x03;
+    pub const MCR: WordType = 0x04;
+    pub const LSR: WordType = 0x05;
+    pub const MSR: WordType = 0x06;
+    pub const SCR: WordType = 0x07;
+    pub const DLL: WordType = 0x00;
+    pub const DLM: WordType = 0x01;
 }
 
 #[rustfmt::skip]
@@ -52,9 +67,9 @@ impl Uart16550Reg {
             IER: 0,
             IIR: 0,
             FCR: 0,
-            LCR: 0,
+            LCR: 0x07,
             MCR: 0,
-            LSR: 0,
+            LSR: 0x60,
             MSR: 0,
             SCR: 0,
             DLL: u8::MAX,
@@ -67,11 +82,19 @@ impl Uart16550Reg {
     }
 
     fn get_tx_data(&mut self) -> Option<u8> {
-        if self.LSR & (1 << 5) != 0 {
-            self.LSR &= !(1 << 5);
-            Some(self.THR)
-        } else {
+        if read_bit(&self.LSR, 6) {
             None
+        } else {
+            set_bit(&mut self.LSR, 6);
+            Some(self.THR)
+        }
+    }
+
+    fn write_transmit_holding_empty<const BIT: bool>(&mut self) {
+        if BIT {
+            set_bit(&mut self.LSR, 5);
+        } else {
+            clear_bit(&mut self.LSR, 5);
         }
     }
 
@@ -102,7 +125,7 @@ impl Uart16550TX {
             uart_reg: uart_reg.clone(),
             status: Uart16550Status::IDLE,
             div_counter: 0,
-            tx_reg: 0,
+            tx_reg: 1,
             tx_data: None,
         }
     }
@@ -149,6 +172,13 @@ impl Uart16550TX {
             if self.tx_data.is_some() {
                 self.status = Uart16550Status::START;
                 self.tx_reg = 0;
+                self.uart_reg
+                    .borrow_mut()
+                    .write_transmit_holding_empty::<false>();
+            } else {
+                self.uart_reg
+                    .borrow_mut()
+                    .write_transmit_holding_empty::<true>();
             }
         }
 
@@ -189,7 +219,7 @@ impl Uart16550RX {
 
     fn write_data2reg(&self, data: u8) {
         self.uart_reg.borrow_mut().RBR = data;
-        self.uart_reg.borrow_mut().LSR |= 0x01; // set receive data ready.
+        set_bit(&mut self.uart_reg.borrow_mut().LSR, 0); // set receive data ready.
     }
 
     fn advance_idle_status(&mut self) {
@@ -274,6 +304,10 @@ impl Uart16550RX {
         self.sample_count = 0;
         self.sample_data = 0;
     }
+
+    pub fn change_rx_wiring(&mut self, rx_wiring: *const u8) {
+        self.rx_wiring = rx_wiring
+    }
 }
 
 #[allow(non_snake_case)]
@@ -286,13 +320,12 @@ pub struct Uart16550 {
     rx: Uart16550RX,
     tx: Uart16550TX,
 }
-
 impl Uart16550 {
-    pub fn new(rx_wiring: *const u8, tx_wiring: *mut u8) -> Self {
+    pub fn new(rx_wiring: *const u8) -> Self {
         let reg = Rc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
-            (&reg_ref.DLL) as *const u8,
+            (&reg_ref.RBR) as *const u8,
             (&reg_ref.IER) as *const u8,
             (&reg_ref.IIR) as *const u8,
             (&reg_ref.LCR) as *const u8,
@@ -334,26 +367,86 @@ impl Uart16550 {
     }
 
     pub fn one_shot(&mut self) {
+        self.tx.one_shot();
         self.rx.one_shot();
     }
 
     #[allow(non_snake_case)]
     fn read_RBR(&mut self) -> u8 {
-        self.reg.borrow_mut().LSR &= !(1 << 0); // receive data ready.
+        clear_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
         self.reg.borrow().RBR
     }
 
     #[allow(non_snake_case)]
     fn write_THR(&mut self, tx_data: u8) {
-        self.reg.borrow_mut().LSR |= (1 << 5);
+        clear_bit(&mut self.reg.borrow_mut().LSR, 6); // transmit empty
+        self.reg.borrow_mut().THR = tx_data;
+    }
+
+    pub fn change_rx_wiring(&mut self, rx_wiring: *const u8) {
+        self.rx.change_rx_wiring(rx_wiring);
     }
 }
 
 impl DeviceTrait for Uart16550 {
-    fn read(device: &mut Self, addr: usize, data: WordType) -> WordType {
-        0
+    fn read<T>(&mut self, inner_addr: WordType) -> T
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        let inner_addr: usize = inner_addr as usize;
+        let size = size_of::<T>();
+        assert!(inner_addr as usize + size <= 8);
+
+        let mut data: T = 0u8.into();
+        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
+            // LCR
+            for i in inner_addr..8.min(inner_addr + size) {
+                data |= T::from(
+                    unsafe { self.reg_lcr_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
+                )
+            }
+        } else {
+            // Normal
+            for i in inner_addr..8.min(inner_addr + size) {
+                if i == 0 {
+                    data = self.read_RBR().into(); // RBR must be the first byte.
+                } else {
+                    data |= T::from(
+                        unsafe { self.reg_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
+                    );
+                }
+            }
+        }
+
+        data
     }
-    fn write(device: &mut Self, addr: usize, data: WordType) {}
+    fn write<T>(&mut self, inner_addr: WordType, data: T)
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        let inner_addr: usize = inner_addr as usize;
+        let size = size_of::<T>();
+        assert!(inner_addr as usize + size <= 8);
+        let mut data: u64 = data.into();
+
+        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
+            // LCR
+            for i in inner_addr..8.min(inner_addr + size) {
+                unsafe { self.reg_lcr_ptr[i].write_volatile((data & (0xff)) as u8) }
+                data >>= 1;
+            }
+        } else {
+            // Normal
+            for i in inner_addr..8.min(inner_addr + size) {
+                if i == 0 {
+                    self.write_THR((data & (0xff)) as u8);
+                } else {
+                    unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
+                }
+                data >>= 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -363,7 +456,14 @@ mod test {
     use log::error;
 
     use crate::{
-        device::uart::{self, Uart16550RX, Uart16550Reg, Uart16550TX},
+        device::{
+            DeviceTrait,
+            uart::{
+                self, Uart16550, Uart16550RX, Uart16550Reg, Uart16550TX,
+                offset::{self, THR},
+            },
+        },
+        utils::{clear_bit, set_bit},
         *,
     };
 
@@ -382,7 +482,7 @@ mod test {
 
         assert!(uart_reg.borrow_mut().DLL == 0xe8);
         assert!(uart_reg.borrow_mut().DLM == 0x03);
-        assert!(uart_reg.borrow_mut().LSR == 0x00);
+        assert!(uart_reg.borrow_mut().LSR == 0x60);
 
         let data: [u8; 14] = [1, 1, 0x00, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1]; // 0x55
         for data_bit in data {
@@ -391,7 +491,7 @@ mod test {
                 rx.one_shot();
             }
         }
-        assert!(uart_reg.borrow_mut().LSR | 0x01 == 0x01);
+        assert!(uart_reg.borrow_mut().LSR & 0x01 != 0);
         assert!(uart_reg.borrow_mut().RBR == 0x55);
     }
 
@@ -405,7 +505,7 @@ mod test {
         uart_reg.borrow_mut().DLM = 0x03;
 
         uart_reg.borrow_mut().THR = 0xaa;
-        uart_reg.borrow_mut().LSR |= 0x20;
+        clear_bit(&mut uart_reg.borrow_mut().LSR, 6);
 
         let mut data: u16 = 0;
 
@@ -416,7 +516,9 @@ mod test {
                     data |= ((unsafe { tx_wire.read_volatile() } as u16) << i);
                 }
             }
-            assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
+            if i == 2 {
+                assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
+            }
         }
         assert!(((data >> 1) & 0xff) == 0xaa);
     }
@@ -430,7 +532,7 @@ mod test {
         uart_reg.borrow_mut().DLL = 0xe8;
         uart_reg.borrow_mut().DLM = 0x03;
         uart_reg.borrow_mut().THR = 0xaa;
-        uart_reg.borrow_mut().LSR |= 0x20;
+        clear_bit(&mut uart_reg.borrow_mut().LSR, 6);
 
         let mut data: u16 = 0;
         for i in 0..12 {
@@ -439,8 +541,31 @@ mod test {
                 tx.one_shot();
             }
         }
-        assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
-        assert!(uart_reg.borrow_mut().LSR | 0x01 == 0x01);
+        assert!((uart_reg.borrow_mut().LSR & (1 << 5)) != 0);
+        assert!(uart_reg.borrow_mut().LSR & 0x01 != 0);
         assert!(uart_reg.borrow_mut().RBR == 0xaa);
+    }
+
+    #[test]
+    fn uart_test() {
+        let mut uart = Uart16550::new(0 as *const u8);
+        uart.change_rx_wiring(uart.tx.get_wire());
+
+        set_bit(&mut uart.reg.borrow_mut().LCR, 7); // set LCR
+        uart.write(offset::DLL, 0xe8u8); // set DLL
+        uart.write(offset::DLM, 0x03u8); // set DLM
+
+        clear_bit(&mut uart.reg.borrow_mut().LCR, 7); // clear LCR
+        uart.write(THR, 0xaau8);
+
+        for i in 0..12 {
+            for j in 0..1000 * 16 {
+                uart.one_shot();
+            }
+        }
+        assert!((uart.read::<u8>(offset::LSR) & (1 << 5)) != 0);
+        assert!((uart.read::<u8>(offset::LSR) & 0x01) != 0);
+        assert!(uart.read::<u8>(offset::RBR) == 0xaa);
+        assert!((uart.read::<u8>(offset::LSR) & 0x01) == 0);
     }
 }

@@ -2,7 +2,7 @@
 
 ## 寄存器概述
 
-### LCR(Line Control Register   +0x0C):
+### LCR(Line Control Register   +0x03):
 
 控制串口的行为
 
@@ -13,10 +13,10 @@
 | 3     | Parity Enable             | 0 : disable; 1: enable;                           |
 | 4     | Even Parity               | 0: Odd Parity; 1: Even Parity;                    |
 | 5     | Stick Parity              | NULL                                              |
-| 6     | Break Control             | 1: Set TXD to idle statu                          |
+| 6     | Break Control             | 1: Set TXD to idle status                         |
 | 7     | divisor latch Access Bit  | Allow to Access DLL/DLM/FCR(RO) reg               |
 
-### `IER`(Interrupt Enable Register +0x04):
+### `IER`(Interrupt Enable Register +0x01):
 
 控制中断的行为
 
@@ -30,7 +30,7 @@
 `IER` = `Line Status` 时, 由 `LSR` 控制中断行为
 `IER` = `Modem Status` 时, 由 `MSR` 控制中断行为
 
-### `LSR`(Line Status Register +0x14):
+### `LSR`(Line Status Register +0x5):
 
 | Register  |  Bit7	        | Bit6	        | Bit5                  | Bit4              | Bit3          | Bit2          | Bit1          | Bit0              |
 | :-:       |  :-:	        | :-:	        | :-:                   | :-:               | :-:           | :-:           | :-:           | :-:               |
