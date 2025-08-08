@@ -14,5 +14,6 @@ xmas-elf = "0.7.0"
 log = "0.4"
 rand = "0.9.2"
 seq-macro = "0.3.0"
+flexi_logger = "0.31.2"
 
 [profile.release]

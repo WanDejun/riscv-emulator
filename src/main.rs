@@ -13,11 +13,13 @@ mod utils;
 pub use config::ram_config;
 
 fn init() {
-    logging::init();
+
 }
 
 fn main() {
     init();
+    let _logger_handle = logging::init();
+
     const A: [&'static str; 12] = gen_reg_name_list!("a", 1, 5; "b", 6, 10; "c"; "d");
     for i in 0..12 {
         if i == 11 {

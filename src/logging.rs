@@ -1,48 +1,29 @@
-use log::{
-    self,
-    Level,
-    LevelFilter,
-    Log,
-    Metadata,
-    Record,
+use flexi_logger::{
+    Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
+    detailed_format,
 };
 
-struct SimpleLogger;
-
-impl Log for SimpleLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
-        let color = match record.level() {
-            Level::Error => 31, // Red
-            Level::Warn => 93,  // BrightYellow
-            Level::Info => 34,  // Blue
-            Level::Debug => 32, // Green
-            Level::Trace => 90, // BrightBlack
-        };
-        println!(
-            "\u{1B}[{}m[{:>5}] {}\u{1B}[0m",
-            color,
-            record.level(),
-            record.args(),
-        );
-    }
-    fn flush(&self) {}
-}
-
-pub fn init() {
-    static LOGGER: SimpleLogger = SimpleLogger;
-    log::set_logger(&LOGGER).unwrap();
-    log::set_max_level(match option_env!("DEFAULT") {
-        Some("ERROR") => LevelFilter::Error,
-        Some("WARN") => LevelFilter::Warn,
-        Some("INFO") => LevelFilter::Info,
-        Some("DEBUG") => LevelFilter::Debug,
-        Some("TRACE") => LevelFilter::Trace,
-        _ => LevelFilter::Info,
-    });
+/// Initialize the logger.
+/// Must keep the [`LoggerHandle`] (returned value) alive up to the very end of your program
+/// to ensure that all buffered log lines are flushed out.
+#[must_use]
+pub fn init() -> LoggerHandle {
+    Logger::try_with_str("trace")
+        .unwrap()
+        .log_to_file(
+            FileSpec::default()
+                .directory("logs")
+                .basename("emulator")
+                .suffix("log"),
+        )
+        .rotate(
+            Criterion::Size(10_000_000), // 10 MB
+            Naming::Numbers,
+            Cleanup::KeepLogFiles(3),
+        )
+        .write_mode(WriteMode::BufferAndFlush)
+        .duplicate_to_stderr(Duplicate::Warn)
+        .format_for_files(detailed_format)
+        .start()
+        .unwrap()
 }

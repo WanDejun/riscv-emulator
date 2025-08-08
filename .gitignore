@@ -2,6 +2,8 @@
 .vscode
 Cargo.lock
 
+/logs
+*.log
 
 /test/obj
 /test/bin
