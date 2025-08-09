@@ -5,6 +5,7 @@ mod config;
 mod cpu;
 mod load;
 mod ram;
+mod vaddr;
 
 mod device;
 mod logging;

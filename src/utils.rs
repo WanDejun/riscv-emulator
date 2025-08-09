@@ -1,4 +1,8 @@
-use std::{fmt::{Debug, Display}, ops::*, usize};
+use std::{
+    fmt::{Debug, Display},
+    ops::*,
+    usize,
+};
 
 use crate::config::arch_config::WordType;
 
@@ -62,6 +66,11 @@ pub unsafe fn write_raw_ptr<T>(addr: *mut u8, data: T) {
 
     let ptr = addr as *mut T;
     unsafe { ptr.write_volatile(data) }
+}
+
+pub fn check_align<T>(addr: WordType) -> bool {
+    let size_of_t: usize = size_of::<T>();
+    (addr as WordType) & ALIGN_ILST[size_of_t] == 0
 }
 
 // ========================================
