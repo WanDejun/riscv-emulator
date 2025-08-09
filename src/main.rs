@@ -8,6 +8,7 @@ mod ram;
 mod vaddr;
 
 mod device;
+mod isa;
 mod logging;
 mod utils;
 
