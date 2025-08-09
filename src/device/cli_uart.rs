@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossterm::{
     event::{self, Event, KeyCode},
-    terminal::enable_raw_mode,
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
 
 use crate::device::{DeviceTrait, Mem, uart::Uart16550};
@@ -34,6 +34,12 @@ impl Cli {
                 }
             }
         }
+    }
+}
+
+impl Drop for Cli {
+    fn drop(&mut self) {
+        disable_raw_mode().unwrap(); // 恢复终端原始状态
     }
 }
 
