@@ -57,8 +57,8 @@ mod test {
         let mut uart = Uart16550::new((&rx) as *const u8);
         let mut cli = Cli::new(uart.get_tx_wiring());
         uart.write(0, 'a' as u8);
-        for i in 0..20 {
-            for j in 0..UART_DEFAULT_DIV * 16 {
+        for _ in 0..20 {
+            for _ in 0..UART_DEFAULT_DIV * 16 {
                 cli.one_shot();
                 uart.one_shot();
             }
@@ -72,7 +72,7 @@ mod test {
         let rx = 1u8;
         let mut cli = Cli::new((&rx) as *const u8);
         let mut uart = Uart16550::new(cli.uart.get_tx_wiring());
-        let tx_wriing = cli.uart.get_tx_wiring();
+        let _tx_wriing = cli.uart.get_tx_wiring();
         loop {
             cli.one_shot();
             uart.one_shot();

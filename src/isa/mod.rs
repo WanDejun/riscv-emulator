@@ -1,2 +1,2 @@
-mod utils;
 mod riscv32;
+mod utils;

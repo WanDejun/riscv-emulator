@@ -1,8 +1,8 @@
 use crate::{config::arch_config::WordType, utils::UnsignedInteger};
+pub mod cli_uart;
 mod config;
 pub mod mmio;
 pub mod uart;
-pub mod cli_uart;
 
 pub trait Mem {
     fn read<T>(&mut self, addr: WordType) -> T

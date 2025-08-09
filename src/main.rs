@@ -1,3 +1,4 @@
+#![cfg_attr(debug_assertions, allow(dead_code))]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
@@ -14,9 +15,7 @@ mod utils;
 
 pub use config::ram_config;
 
-fn init() {
-
-}
+fn init() {}
 
 fn main() {
     let _logger_handle = logging::init();

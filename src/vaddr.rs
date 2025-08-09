@@ -1,4 +1,4 @@
-use crate::device::{mmio::MemoryMapIO, DeviceTrait, Mem};
+use crate::device::{DeviceTrait, Mem, mmio::MemoryMapIO};
 
 pub struct VirtAddrManager {
     mmio: MemoryMapIO,
@@ -6,14 +6,16 @@ pub struct VirtAddrManager {
 
 impl Mem for VirtAddrManager {
     fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> T
-        where
-            T: crate::utils::UnsignedInteger {
+    where
+        T: crate::utils::UnsignedInteger,
+    {
         self.mmio.read(addr)
     }
 
     fn write<T>(&mut self, addr: crate::config::arch_config::WordType, data: T)
-        where
-            T: crate::utils::UnsignedInteger {
+    where
+        T: crate::utils::UnsignedInteger,
+    {
         self.mmio.write(addr, data);
     }
 }

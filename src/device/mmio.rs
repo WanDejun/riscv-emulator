@@ -80,10 +80,7 @@ impl MemoryMapIO {
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, uart1.clone()),
             MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram.clone()),
         ];
-        Self {
-            cli,
-            map,
-        }
+        Self { cli, map }
     }
 
     fn read_from_device<T>(&mut self, index: usize, p_addr: WordType) -> T
