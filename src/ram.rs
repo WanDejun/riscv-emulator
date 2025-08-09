@@ -3,7 +3,8 @@ use std::ops::{Index, IndexMut};
 
 use crate::{
     config::arch_config::WordType,
-    ram_config::{self, BASE_ADDR},
+    device::{DeviceTrait, Mem},
+    ram_config,
     utils::{read_raw_ptr, write_raw_ptr},
 };
 
@@ -34,9 +35,7 @@ impl Ram {
     }
 
     pub fn insert_section(&mut self, elf_section_data: &[u8], start_addr: WordType) {
-        if start_addr < ram_config::BASE_ADDR
-            || start_addr - ram_config::BASE_ADDR >= ram_config::SIZE as WordType
-        {
+        if start_addr >= ram_config::SIZE as WordType {
             log::error!(
                 "ram::insert_section out of range! start_addr = {}",
                 start_addr
@@ -44,58 +43,61 @@ impl Ram {
             panic!();
         }
 
-        let start_addr = (start_addr - BASE_ADDR) as usize;
+        let start_addr = start_addr as usize;
         elf_section_data.iter().enumerate().for_each(|(index, v)| {
             self.data[start_addr + index] = *v;
         });
     }
 
-    pub fn read<T>(&self, addr: WordType) -> T {
-        unsafe { read_raw_ptr::<T>(self.data.as_ptr().add((addr - BASE_ADDR) as usize)) }
-    }
-
     #[allow(unused)]
-    pub fn read_byte(&self, addr: WordType) -> u8 {
+    pub fn read_byte(&mut self, addr: WordType) -> u8 {
         Self::read::<u8>(self, addr)
     }
     #[allow(unused)]
-    pub fn read_word(&self, addr: WordType) -> u16 {
+    pub fn read_word(&mut self, addr: WordType) -> u16 {
         Self::read::<u16>(self, addr)
     }
     #[allow(unused)]
-    pub fn read_dword(&self, addr: WordType) -> u32 {
+    pub fn read_dword(&mut self, addr: WordType) -> u32 {
         Self::read::<u32>(self, addr)
     }
     #[allow(unused)]
-    pub fn read_qword(&self, addr: WordType) -> u64 {
+    pub fn read_qword(&mut self, addr: WordType) -> u64 {
         Self::read::<u64>(self, addr)
-    }
-
-    pub fn write<T>(&mut self, data: T, addr: WordType) {
-        unsafe {
-            write_raw_ptr(
-                self.data.as_mut_ptr().add((addr - BASE_ADDR) as usize),
-                data,
-            );
-        }
     }
 
     #[allow(unused)]
     pub fn write_byte(&mut self, data: u8, addr: WordType) {
-        Self::write::<u8>(self, data, addr)
+        Self::write::<u8>(self, addr, data)
     }
     #[allow(unused)]
     pub fn write_word(&mut self, data: u16, addr: WordType) {
-        Self::write::<u16>(self, data, addr)
+        Self::write::<u16>(self, addr, data)
     }
     #[allow(unused)]
     pub fn write_dword(&mut self, data: u32, addr: WordType) {
-        Self::write::<u32>(self, data, addr)
+        Self::write::<u32>(self, addr, data)
     }
     #[allow(unused)]
     pub fn write_qword(&mut self, data: u64, addr: WordType) {
-        Self::write::<u64>(self, data, addr)
+        Self::write::<u64>(self, addr, data)
     }
+}
+
+impl Mem for Ram {
+    fn read<T>(&mut self, addr: WordType) -> T {
+        unsafe { read_raw_ptr::<T>(self.data.as_ptr().add(addr as usize)) }
+    }
+
+    fn write<T>(&mut self, addr: WordType, data: T) {
+        unsafe {
+            write_raw_ptr(self.data.as_mut_ptr().add(addr as usize), data);
+        }
+    }
+}
+
+impl DeviceTrait for Ram {
+    fn one_shot(&mut self) {}
 }
 
 #[cfg(test)]
@@ -118,7 +120,7 @@ mod tests {
         let mut r = Ram::new();
 
         // 插入一段数据，地址从 ram_config::BASE_ADDR 开始
-        let base = ram_config::BASE_ADDR;
+        let base = 0x00;
         let section = [0x12u8, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
         r.insert_section(&section, base);
 
@@ -153,28 +155,28 @@ mod tests {
     #[test]
     #[should_panic(expected = "read_word -> addr")]
     fn test_read_unaligned_address() {
-        let r = Ram::new();
+        let mut r = Ram::new();
         // 这里用一个不对齐的地址试试，比如 addr & align_ilst[size_of_t] != 0 会断言失败
-        r.read_dword(1 + BASE_ADDR); // 如果1不对齐，应该panic
+        r.read_dword(1); // 如果1不对齐，应该panic
     }
 
     #[test]
     fn test_write_byte() {
         let mut ram = Ram::new();
-        ram.write_byte(0xAB, 0x00 + BASE_ADDR);
+        ram.write_byte(0xAB, 0x00);
         assert_eq!(ram.data[0], 0xAB);
 
-        ram.write_word(0x1234, 0x00 + BASE_ADDR);
+        ram.write_word(0x1234, 0x00);
         assert_eq!(ram.data[0], 0x34); // little endian
         assert_eq!(ram.data[1], 0x12);
 
-        ram.write_dword(0x12345678, 0x00 + BASE_ADDR);
+        ram.write_dword(0x12345678, 0x00);
         assert_eq!(ram.data[0], 0x78);
         assert_eq!(ram.data[1], 0x56);
         assert_eq!(ram.data[2], 0x34);
         assert_eq!(ram.data[3], 0x12);
 
-        ram.write_qword(0x1122334455667788, 0x00 + BASE_ADDR);
+        ram.write_qword(0x1122334455667788, 0x00);
         assert_eq!(ram.data[0], 0x88);
         assert_eq!(ram.data[1], 0x77);
         assert_eq!(ram.data[2], 0x66);
