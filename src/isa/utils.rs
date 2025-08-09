@@ -1,3 +1,24 @@
+pub struct ISABuilder<Desc: Clone> {
+    instructions: Vec<Desc>,
+}
+
+impl<Desc: Clone> ISABuilder<Desc> {
+    pub fn new() -> Self {
+        ISABuilder {
+            instructions: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, desc: &[Desc]) -> &mut Self {
+        self.instructions.extend_from_slice(desc);
+        self
+    }
+
+    pub fn build(&mut self) -> Vec<Desc> {
+        std::mem::take(&mut self.instructions)
+    }
+}
+
 #[macro_export]
 macro_rules! define_instr_enum {
     ($isa_name:ident, $($name:ident),* $(,)?) => {

@@ -49,26 +49,41 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
 }
 
 impl Decoder {
+    /// Build a new decoder with RV32I by default
     pub fn new() -> Self {
+        Decoder::from(TABLE_RV32I.iter().cloned())
+    }
+
+    pub fn from<I>(instrs: I) -> Self
+    where
+        I: IntoIterator<Item = RV32Desc>,
+    {
         let mut decode_table = HashMap::new();
         let mut decode_table_f3 = HashMap::new();
         let mut decode_table_f7 = HashMap::new();
 
-        for instr in TABLE_RV32I {
-            let (opcode, funct3, funct7, instr, fmt, _) = instr.clone();
-            match fmt {
+        for desc in instrs.into_iter() {
+            let RV32Desc {
+                opcode,
+                funct3,
+                funct7,
+                instr,
+                format,
+            } = desc;
+
+            match format {
                 InstrFormat::R => {
                     decode_table.insert(opcode, PartialDecode::RequireF7);
-                    decode_table_f7.insert((opcode, funct3, funct7), (instr, fmt));
+                    decode_table_f7.insert((opcode, funct3, funct7), (instr, format));
                 }
 
                 InstrFormat::I | InstrFormat::S | InstrFormat::B => {
                     decode_table.insert(opcode, PartialDecode::RequireF3);
-                    decode_table_f3.insert((opcode, funct3), (instr, fmt));
+                    decode_table_f3.insert((opcode, funct3), (instr, format));
                 }
 
                 _ => {
-                    decode_table.insert(opcode, PartialDecode::Complete(instr, fmt));
+                    decode_table.insert(opcode, PartialDecode::Complete(instr, format));
                 }
             }
         }

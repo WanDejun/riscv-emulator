@@ -1,5 +1,3 @@
-type ExecuteFn = fn(); // TODO
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum RVInstrInfo {
     R { rs1: u8, rs2: u8, rd: u8 },
@@ -32,7 +30,6 @@ macro_rules! define_riscv_isa {
                     funct3: $funct3:literal,
                     funct7: $funct7:literal,
                     format: $fmt:expr,
-                    execute: $execute:expr,
                 }),* $(,)?
             }
         ),* $(,)?
@@ -40,15 +37,25 @@ macro_rules! define_riscv_isa {
 
         define_instr_enum!($tot_instr_name, $($($name,)*)*);
 
+        #[derive(Debug, Clone)]
+        pub struct RV32Desc {
+            pub opcode: u8,
+            pub funct3: u8,
+            pub funct7: u8,
+            pub instr: $tot_instr_name,
+            pub format: InstrFormat,
+        }
+
         $(
-            pub const $isa_table_name: &[(u8, u8, u8, $tot_instr_name, InstrFormat, ExecuteFn)] = &[
+            pub const $isa_table_name: &[RV32Desc] = &[
                 $(
-                    (
-                        $opcode, $funct3, $funct7,
-                        $tot_instr_name::$name,
-                        $fmt,
-                        $execute,
-                    )
+                    RV32Desc {
+                        opcode: $opcode,
+                        funct3: $funct3,
+                        funct7: $funct7,
+                        instr: $tot_instr_name::$name,
+                        format: $fmt,
+                    }
                 ),*
             ];
         )*
@@ -65,21 +72,18 @@ define_riscv_isa!(
             funct3: 0b000,
             funct7: 0b0000000,
             format: InstrFormat::I,
-            execute: || { todo!() },
         },
         ADD {
             opcode: 0b0110011,
             funct3: 0b000,
             funct7: 0b0000000,
             format: InstrFormat::R,
-            execute: || { todo!() },
         },
         SUB {
             opcode: 0b0110011,
             funct3: 0b000,
             funct7: 0b0100000,
             format: InstrFormat::R,
-            execute: || { todo!() },
         },
     },
 );
