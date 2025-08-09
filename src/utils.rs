@@ -1,4 +1,4 @@
-use std::{ops::*, usize};
+use std::{fmt::{Debug, Display}, ops::*, usize};
 
 use crate::config::arch_config::WordType;
 
@@ -154,6 +154,8 @@ pub trait UnsignedInteger:
     + ShlAssign<u32>
     + Shr<u32, Output = Self>
     + ShrAssign<u32>
+    + Debug
+    + Display
 {
 }
 impl UnsignedInteger for u8 {}

@@ -1,11 +1,10 @@
-//! Only realize the basic functions of Uart16550J: TX, RX for 8bits data, 2stop bits.
+//! Only realize the basic functions of Uart16550J: TX, RX for 8bits data, 2/1stop bits.
 //! # TODO
 //! - [ ] interrupt
 //! - [ ] FIFO
 //! - [ ] DMA support
 //! - [ ] Even/Odd Parity
 //! - [ ] Different length of data bits;
-
 
 #![allow(unused)]
 
@@ -15,7 +14,7 @@ use log::error;
 
 use crate::{
     config::arch_config::WordType,
-    device::DeviceTrait,
+    device::{DeviceTrait, Mem, config::UART_DEFAULT_DIV},
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -72,8 +71,8 @@ impl Uart16550Reg {
             LSR: 0x60,
             MSR: 0,
             SCR: 0,
-            DLL: u8::MAX,
-            DLM: u8::MAX,
+            DLL: UART_DEFAULT_DIV as u8,
+            DLM: (UART_DEFAULT_DIV >> 8) as u8,
         }
     }
 
@@ -99,7 +98,7 @@ impl Uart16550Reg {
     }
 
     fn get_stop_bits(&self) -> u8 {
-        if self.LCR & (1 << 2) != 0 { 2 } else { 1 }
+        if (self.LCR & (1 << 2)) != 0 { 2 } else { 1 }
     }
 }
 
@@ -148,7 +147,8 @@ impl Uart16550TX {
             Uart16550Status::DATA(mut cnt, data) => {
                 cnt += 1;
                 self.tx_reg = data & 0x01;
-                if cnt == UART_DATA_LENGTH {
+                if cnt > UART_DATA_LENGTH {
+                    self.tx_reg = 0x01;
                     self.status = Uart16550Status::STOP(0);
                 } else {
                     self.status = Uart16550Status::DATA(cnt, data >> 1);
@@ -157,9 +157,9 @@ impl Uart16550TX {
             Uart16550Status::STOP(cnt) => {
                 let nxt_cnt = cnt + 1;
                 if nxt_cnt == self.uart_reg.borrow().get_stop_bits() {
-                    self.status = Uart16550Status::STOP(nxt_cnt);
-                } else {
                     self.status = Uart16550Status::IDLE;
+                } else {
+                    self.status = Uart16550Status::STOP(nxt_cnt);
                 }
             }
             _ => {}
@@ -366,11 +366,6 @@ impl Uart16550 {
         }
     }
 
-    pub fn one_shot(&mut self) {
-        self.tx.one_shot();
-        self.rx.one_shot();
-    }
-
     #[allow(non_snake_case)]
     fn read_RBR(&mut self) -> u8 {
         clear_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
@@ -386,9 +381,13 @@ impl Uart16550 {
     pub fn change_rx_wiring(&mut self, rx_wiring: *const u8) {
         self.rx.change_rx_wiring(rx_wiring);
     }
+
+    pub fn get_tx_wiring(&self) -> *const u8 {
+        self.tx.get_wire()
+    }
 }
 
-impl DeviceTrait for Uart16550 {
+impl Mem for Uart16550 {
     fn read<T>(&mut self, inner_addr: WordType) -> T
     where
         T: crate::utils::UnsignedInteger,
@@ -448,6 +447,12 @@ impl DeviceTrait for Uart16550 {
         }
     }
 }
+impl DeviceTrait for Uart16550 {
+    fn one_shot(&mut self) {
+        self.tx.one_shot();
+        self.rx.one_shot();
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -457,7 +462,8 @@ mod test {
 
     use crate::{
         device::{
-            DeviceTrait,
+            DeviceTrait, Mem,
+            config::UART_DEFAULT_DIV,
             uart::{
                 self, Uart16550, Uart16550RX, Uart16550Reg, Uart16550TX,
                 offset::{self, THR},
@@ -552,14 +558,15 @@ mod test {
         uart.change_rx_wiring(uart.tx.get_wire());
 
         set_bit(&mut uart.reg.borrow_mut().LCR, 7); // set LCR
-        uart.write(offset::DLL, 0xe8u8); // set DLL
-        uart.write(offset::DLM, 0x03u8); // set DLM
+        set_bit(&mut uart.reg.borrow_mut().LCR, 2); // set LCR(2 stop bits)
+        // uart.write(offset::DLL, 0xe8u8); // set DLL
+        // uart.write(offset::DLM, 0x03u8); // set DLM
 
         clear_bit(&mut uart.reg.borrow_mut().LCR, 7); // clear LCR
         uart.write(THR, 0xaau8);
 
         for i in 0..12 {
-            for j in 0..1000 * 16 {
+            for j in 0..UART_DEFAULT_DIV * 16 {
                 uart.one_shot();
             }
         }
