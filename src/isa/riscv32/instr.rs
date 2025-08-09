@@ -29,8 +29,8 @@ macro_rules! define_riscv_isa {
         $( $isa_name:ident, $isa_table_name:ident, {$(
                 $name:ident {
                     opcode: $opcode:literal,
-                    func3: $func3:literal,
-                    func7: $func7:literal,
+                    funct3: $funct3:literal,
+                    funct7: $funct7:literal,
                     format: $fmt:expr,
                     execute: $execute:expr,
                 }),* $(,)?
@@ -44,7 +44,7 @@ macro_rules! define_riscv_isa {
             pub const $isa_table_name: &[(u8, u8, u8, $tot_instr_name, InstrFormat, ExecuteFn)] = &[
                 $(
                     (
-                        $opcode, $func3, $func7,
+                        $opcode, $funct3, $funct7,
                         $tot_instr_name::$name,
                         $fmt,
                         $execute,
@@ -62,22 +62,22 @@ define_riscv_isa!(
     RV32I, TABLE_RV32I, {
         ADDI {
             opcode: 0b0010011,
-            func3: 0b000,
-            func7: 0b0000000,
+            funct3: 0b000,
+            funct7: 0b0000000,
             format: InstrFormat::I,
             execute: || { todo!() },
         },
         ADD {
             opcode: 0b0110011,
-            func3: 0b000,
-            func7: 0b0000000,
+            funct3: 0b000,
+            funct7: 0b0000000,
             format: InstrFormat::R,
             execute: || { todo!() },
         },
         SUB {
             opcode: 0b0110011,
-            func3: 0b000,
-            func7: 0b0100000,
+            funct3: 0b000,
+            funct7: 0b0100000,
             format: InstrFormat::R,
             execute: || { todo!() },
         },

@@ -6,13 +6,13 @@ macro_rules! define_instr_enum {
             $($name),*
         }
 
-        impl $isa_name {
-            pub fn name(&self) -> &'static str {
-                match self {
-                    $($isa_name::$name => stringify!($name)),*
-                }
-            }
-        }
+        // impl $isa_name {
+        //     pub fn name(&self) -> &'static str {
+        //         match self {
+        //             $($isa_name::$name => stringify!($name)),*
+        //         }
+        //     }
+        // }
     }
 }
 

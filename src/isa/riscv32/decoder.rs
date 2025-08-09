@@ -55,16 +55,16 @@ impl Decoder {
         let mut decode_table_f7 = HashMap::new();
 
         for instr in TABLE_RV32I {
-            let (opcode, func3, func7, instr, fmt, _) = instr.clone();
+            let (opcode, funct3, funct7, instr, fmt, _) = instr.clone();
             match fmt {
                 InstrFormat::R => {
                     decode_table.insert(opcode, PartialDecode::RequireF7);
-                    decode_table_f7.insert((opcode, func3, func7), (instr, fmt));
+                    decode_table_f7.insert((opcode, funct3, funct7), (instr, fmt));
                 }
 
                 InstrFormat::I | InstrFormat::S | InstrFormat::B => {
                     decode_table.insert(opcode, PartialDecode::RequireF3);
-                    decode_table_f3.insert((opcode, func3), (instr, fmt));
+                    decode_table_f3.insert((opcode, funct3), (instr, fmt));
                 }
 
                 _ => {
@@ -82,8 +82,8 @@ impl Decoder {
 
     pub fn decode(&self, instr: u32) -> Result<(Riscv32Instr, RVInstrInfo), Exception> {
         let opcode = (instr & 0b1111111) as u8;
-        let func3 = ((instr >> 12) & 0b111) as u8;
-        let func7 = (instr >> 25) as u8;
+        let funct3 = ((instr >> 12) & 0b111) as u8;
+        let funct7 = (instr >> 25) as u8;
 
         let partial = self
             .decode_table
@@ -98,7 +98,7 @@ impl Decoder {
             PartialDecode::RequireF3 => {
                 let (instr_kind, fmt) = self
                     .decode_table_f3
-                    .get(&(opcode, func3))
+                    .get(&(opcode, funct3))
                     .ok_or(Exception::InvalidInstruction)?
                     .clone();
                 return Ok((instr_kind, decode_info(instr, fmt)));
@@ -106,7 +106,7 @@ impl Decoder {
             PartialDecode::RequireF7 => {
                 let (instr_kind, fmt) = self
                     .decode_table_f7
-                    .get(&(opcode, func3, func7))
+                    .get(&(opcode, funct3, funct7))
                     .ok_or(Exception::InvalidInstruction)?
                     .clone();
 
@@ -123,19 +123,19 @@ mod tests {
 
     // TODO: add more tests
 
-    fn get_instr_r(opcode: u8, func3: u8, func7: u8, rd: u8, rs1: u8, rs2: u8) -> u32 {
+    fn get_instr_r(opcode: u8, funct3: u8, funct7: u8, rd: u8, rs1: u8, rs2: u8) -> u32 {
         (opcode as u32)
             | ((rd as u32) << 7)
-            | ((func3 as u32) << 12)
+            | ((funct3 as u32) << 12)
             | ((rs1 as u32) << 15)
             | ((rs2 as u32) << 20)
-            | ((func7 as u32) << 25)
+            | ((funct7 as u32) << 25)
     }
 
-    fn get_instr_i(opcode: u8, func3: u8, rd: u8, rs1: u8, imm: u32) -> u32 {
+    fn get_instr_i(opcode: u8, funct3: u8, rd: u8, rs1: u8, imm: u32) -> u32 {
         (opcode as u32)
             | ((rd as u32) << 7)
-            | ((func3 as u32) << 12)
+            | ((funct3 as u32) << 12)
             | ((rs1 as u32) << 15)
             | (imm << 20)
     }
@@ -158,12 +158,12 @@ mod tests {
             assert_eq!(result, (expected, expected_info));
         }
 
-        fn test_instr_r(&mut self, instr_kind: Riscv32Instr, opcode: u8, func3: u8, func7: u8) {
+        fn test_instr_r(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8, funct7: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let rs2 = self.rng.random_range(0..=0b11111) as u8;
 
-            let instr = get_instr_r(opcode, func3, func7, rd, rs1, rs2);
+            let instr = get_instr_r(opcode, funct3, funct7, rd, rs1, rs2);
             self.check(
                 instr,
                 instr_kind,
@@ -175,12 +175,12 @@ mod tests {
             );
         }
 
-        fn test_instr_i(&mut self, instr_kind: Riscv32Instr, opcode: u8, func3: u8) {
+        fn test_instr_i(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0xFFF) as u32;
 
-            let instr = get_instr_i(opcode, func3, rd, rs1, imm);
+            let instr = get_instr_i(opcode, funct3, rd, rs1, imm);
             self.check(
                 instr,
                 instr_kind,
