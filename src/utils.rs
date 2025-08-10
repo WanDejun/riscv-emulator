@@ -6,6 +6,24 @@ use std::{
 
 use crate::config::arch_config::WordType;
 
+fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
+where
+    T: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+    F: Fn() -> T,
+{
+    let mut set = std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(cnt);
+
+    while result.len() < cnt {
+        let val = rd();
+        if set.insert(val) {
+            result.push(val);
+        }
+    }
+
+    result
+}
+
 #[macro_export]
 macro_rules! concat_bits {
     // End case (only one argument)
@@ -140,6 +158,10 @@ pub trait TruncateFrom<T>: Sized {
     fn truncate_from(value: T) -> Self;
 }
 
+pub trait TruncateTo<T>: Sized {
+    fn truncate_to(self, bits: u32) -> Self;
+}
+
 macro_rules! impl_truncate_from {
     ($from:ty, $to:ty) => {
         impl TruncateFrom<$from> for $to {
@@ -150,10 +172,25 @@ macro_rules! impl_truncate_from {
     };
 }
 
+macro_rules! impl_truncate_to {
+    ($T:ty) => {
+        impl TruncateTo<$T> for $T {
+            fn truncate_to(self, bits: u32) -> Self {
+                self & ((1 << bits) - 1)
+            }
+        }
+    };
+}
+
 impl_truncate_from!(WordType, u8);
 impl_truncate_from!(WordType, u16);
 impl_truncate_from!(WordType, u32);
 impl_truncate_from!(WordType, u64);
+
+impl_truncate_to!(u8);
+impl_truncate_to!(u16);
+impl_truncate_to!(u32);
+impl_truncate_to!(u64);
 
 pub trait UnsignedInteger:
     Copy
