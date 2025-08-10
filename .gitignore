@@ -1,14 +1,40 @@
-/target
-.vscode
-Cargo.lock
-/tmp
+*
 
-/logs
-*.log
+!.gitignore
+!**/Makefile
+!**/makefile
+!Cargo.toml
 
-/test/obj
-/test/bin
-/test/compile_commands.json
-/test/*.S
-/test/*.s
-*/.cache
+# track `.github` directory
+!.github/
+!.github/**/
+# track all files in `.github/`
+!.github/**
+
+# track `src` directory
+!src/
+!src/**/
+# track `*.rs` files in `src/`
+!src/**/*.rs
+
+# track `doc` directory
+!doc/
+!doc/**/
+# track `*.md` files in `doc/`
+!doc/**/*.md
+
+# track `test` directory
+!test/
+!test/**/
+# track `*.h *.hpp *.c *.C *.cpp *.cxx *.cc *.s *.S *.ld` files in `test/`
+!test/**/*.h
+!test/**/*.hpp
+!test/**/*.c
+!test/**/*.C
+!test/**/*.cpp
+!test/**/*.cxx
+!test/**/*.cc
+!test/**/*.s
+!test/**/*.S
+!test/**/*.ld
+
