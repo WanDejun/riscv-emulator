@@ -62,33 +62,10 @@ macro_rules! define_riscv_isa {
     };
 }
 
-// you can leave funct3 and funct7 any value if this format don't need it
-// TODO: make funct3 and funct7 optional
-define_riscv_isa!(
-    Riscv32Instr,
-    RV32I, TABLE_RV32I, {
-        ADDI {
-            opcode: 0b0010011,
-            funct3: 0b000,
-            funct7: 0b0000000,
-            format: InstrFormat::I,
-        },
-        ADD {
-            opcode: 0b0110011,
-            funct3: 0b000,
-            funct7: 0b0000000,
-            format: InstrFormat::R,
-        },
-        SUB {
-            opcode: 0b0110011,
-            funct3: 0b000,
-            funct7: 0b0100000,
-            format: InstrFormat::R,
-        },
-    },
-);
-
 #[derive(Debug, Clone)]
 pub enum Exception {
     InvalidInstruction,
 }
+
+// call [`define_riscv_isa!`] to generate instructions
+include!(concat!(env!("OUT_DIR"), "/rv32i_gen.rs"));

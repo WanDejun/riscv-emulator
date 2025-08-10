@@ -4,6 +4,7 @@
 !**/Makefile
 !**/makefile
 !Cargo.toml
+!build.rs
 
 # track `.github` directory
 !.github/
@@ -38,3 +39,7 @@
 !test/**/*.S
 !test/**/*.ld
 
+# track `data` directory
+!data/
+# track all files in `data/`
+!data/**
