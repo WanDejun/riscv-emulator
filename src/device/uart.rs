@@ -8,7 +8,11 @@
 
 #![allow(unused)]
 
-use std::{cell::RefCell, sync::{Arc, WaitTimeoutResult}, u8};
+use std::{
+    cell::RefCell,
+    sync::{Arc, WaitTimeoutResult},
+    u8,
+};
 
 use log::error;
 
@@ -309,7 +313,6 @@ impl Uart16550RX {
         self.rx_wiring = rx_wiring
     }
 }
-
 
 unsafe impl Send for Uart16550 {}
 #[allow(non_snake_case)]

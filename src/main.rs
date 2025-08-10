@@ -60,7 +60,7 @@ fn main() {
             print!("{}, ", A[i]);
         }
     }
-    
+
     let _init_handle = init();
 
     println!(
