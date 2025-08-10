@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::isa::riscv32::instr::*;
+use crate::{config::arch_config::WordType, isa::riscv32::instr::*};
 
 #[derive(Debug, Clone)]
 enum PartialDecode {
@@ -9,7 +9,7 @@ enum PartialDecode {
     RequireF7,
 }
 
-struct Decoder {
+pub struct Decoder {
     decode_table: HashMap<u8, PartialDecode>,
     decode_table_f3: HashMap<(u8, u8), (Riscv32Instr, InstrFormat)>,
     decode_table_f7: HashMap<(u8, u8, u8), (Riscv32Instr, InstrFormat)>,
@@ -23,7 +23,7 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
     match fmt {
         InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },
         InstrFormat::I => {
-            let imm = ((instr >> 20) & 0xFFF) as u32;
+            let imm = ((instr >> 20) & 0xFFF) as WordType;
             RVInstrInfo::I {
                 rd: rd,
                 rs1: rs1,
@@ -35,12 +35,15 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
             RVInstrInfo::S {
                 rs1: rs1,
                 rs2: rs2,
-                imm: imm,
+                imm: imm as WordType,
             }
         }
         InstrFormat::U => {
             let imm = (instr >> 12) & 0xFFFFF;
-            RVInstrInfo::U { rd: rd, imm: imm }
+            RVInstrInfo::U {
+                rd: rd,
+                imm: imm as WordType,
+            }
         }
         InstrFormat::B | InstrFormat::J => {
             todo!("I'm tired")
@@ -202,7 +205,7 @@ mod tests {
                 RVInstrInfo::I {
                     rs1: rs1,
                     rd: rd,
-                    imm: imm,
+                    imm: imm as WordType,
                 },
             );
         }

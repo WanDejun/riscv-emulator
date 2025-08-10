@@ -1,11 +1,13 @@
+use crate::{config::arch_config::WordType, define_instr_enum};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RVInstrInfo {
     R { rs1: u8, rs2: u8, rd: u8 },
-    I { rs1: u8, rd: u8, imm: u32 },
-    S { rs1: u8, rs2: u8, imm: u32 },
-    B { rs1: u8, rs2: u8, imm: u32 },
-    U { rd: u8, imm: u32 },
-    J { rd: u8, imm: u32 },
+    I { rs1: u8, rd: u8, imm: WordType },
+    S { rs1: u8, rs2: u8, imm: WordType },
+    B { rs1: u8, rs2: u8, imm: WordType },
+    U { rd: u8, imm: WordType },
+    J { rd: u8, imm: WordType },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -17,8 +19,6 @@ pub enum InstrFormat {
     S,
     R,
 }
-
-use crate::define_instr_enum;
 
 // define a single enum for every instruction
 // define tables for each instruction set
