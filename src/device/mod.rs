@@ -1,6 +1,4 @@
 use std::sync::{Arc, Mutex};
-
-use crossterm::{terminal::enable_raw_mode, tty::IsTty};
 use lazy_static::lazy_static;
 
 #[cfg(not(test))]
@@ -52,9 +50,6 @@ lazy_static! {
 }
 
 pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
-    if std::io::stdin().is_tty() {
-        enable_raw_mode().unwrap();
-    }
     // Uart
     if let Ok(mut device_guard) = UART1.lock() {
         if let Device::Uart16550(uart) = &mut *device_guard {
@@ -64,5 +59,5 @@ pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
         }
     }
 
-    return vec![Box::new(CliUartHandle {})];
+    return vec![Box::new(CliUartHandle::new())];
 }

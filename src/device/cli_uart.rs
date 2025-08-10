@@ -2,7 +2,7 @@ use std::{collections::VecDeque, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode},
-    terminal::disable_raw_mode,
+    terminal::{disable_raw_mode, enable_raw_mode},
     tty::IsTty,
 };
 
@@ -40,7 +40,16 @@ impl CliUart {
     }
 }
 
+/// Set terminal to raw mode. RAII to unset terminal raw mode.
 pub struct CliUartHandle {}
+impl CliUartHandle {
+    pub fn new() -> Self {
+        if std::io::stdin().is_tty() {
+            enable_raw_mode().unwrap();
+        }
+        Self {}
+    }
+}
 impl HandleTrait for CliUartHandle {}
 impl Drop for CliUartHandle {
     fn drop(&mut self) {
@@ -50,6 +59,17 @@ impl Drop for CliUartHandle {
     }
 }
 
+/// # FIFOUart
+/// - for test, easy to set input and get output from raw test code.
+/// DO NOT input/output to terminal. BUT to inner fifo.
+/// ```
+/// let mut debug_uart = FIFOUart::new(rx_wiring);
+/// // Equal type into terminal
+/// debug_uart.send('a' as u8);
+/// // Equal get output from terminal
+/// // BUT `debug_uart.receive` is non-blocking function
+/// debug_uart.receive();
+/// ```
 pub struct FIFOUart {
     pub uart: Uart16550,
     input_fifo: VecDeque<u8>,
