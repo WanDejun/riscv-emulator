@@ -154,6 +154,8 @@ impl Decoder {
 
 #[cfg(test)]
 mod tests {
+    use crate::{isa::riscv32::executor::negative_of, utils::TruncateTo};
+
     use super::*;
     use rand::{Rng, rngs::ThreadRng};
 
@@ -346,5 +348,58 @@ mod tests {
 
             checker.test_instr_j(Riscv32Instr::JAL, 0b1101111);
         }
+    }
+
+    #[test]
+    fn test_decoder_instr() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            0x123450b7,
+            Riscv32Instr::LUI,
+            RVInstrInfo::U {
+                rd: 1,
+                imm: 0x12345000,
+            },
+        );
+
+        checker.check(
+            0x12233097,
+            Riscv32Instr::AUIPC,
+            RVInstrInfo::U {
+                rd: 1,
+                imm: 0x12233000,
+            },
+        );
+
+        checker.check(
+            0xffb18113,
+            Riscv32Instr::ADDI,
+            RVInstrInfo::I {
+                rs1: 3,
+                rd: 2,
+                imm: negative_of(5).truncate_to(12),
+            },
+        );
+
+        checker.check(
+            0x00210083,
+            Riscv32Instr::LB,
+            RVInstrInfo::I {
+                rs1: 2,
+                rd: 1,
+                imm: 2,
+            },
+        );
+
+        checker.check(
+            0xf8c318e3,
+            Riscv32Instr::BNE,
+            RVInstrInfo::B {
+                rs1: 6,
+                rs2: 12,
+                imm: negative_of(112).truncate_to(13),
+            },
+        );
     }
 }
