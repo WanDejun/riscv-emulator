@@ -78,7 +78,7 @@ impl RV32CPU {
             Riscv32Instr::ADD => self.execute_arith(info, |a, b| Ok(a.wrapping_add(b))),
             Riscv32Instr::SUB => self.execute_arith(info, |a, b| Ok(a.wrapping_sub(b))),
             Riscv32Instr::ADDI => self.execute_arith(info, |a, b| Ok(a.wrapping_add(b))),
-            _ => todo!()
+            _ => todo!(),
         }?;
 
         self.reg_file[0] = 0;

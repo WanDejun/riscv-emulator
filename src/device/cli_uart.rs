@@ -1,10 +1,8 @@
 use std::{collections::VecDeque, time::Duration};
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode},
-    tty::IsTty,
-};
+use crossterm::event::{self, Event, KeyCode};
+#[cfg(not(test))]
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use crate::{
     device::{DeviceTrait, Mem, uart::Uart16550},
@@ -44,18 +42,17 @@ impl CliUart {
 pub struct CliUartHandle {}
 impl CliUartHandle {
     pub fn new() -> Self {
-        if std::io::stdin().is_tty() {
-            enable_raw_mode().unwrap();
-        }
+        #[cfg(not(test))]
+        enable_raw_mode().unwrap();
+
         Self {}
     }
 }
 impl HandleTrait for CliUartHandle {}
 impl Drop for CliUartHandle {
     fn drop(&mut self) {
-        if std::io::stdin().is_tty() {
-            disable_raw_mode().unwrap(); // 恢复终端原始状态
-        }
+        #[cfg(not(test))]
+        disable_raw_mode().unwrap(); // 恢复终端原始状态
     }
 }
 
@@ -111,6 +108,8 @@ impl FIFOUart {
 
 #[cfg(test)]
 mod test {
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
     use crate::device::config::UART_DEFAULT_DIV;
 
     use super::*;
@@ -119,6 +118,7 @@ mod test {
     #[test]
     /// just for debug, not an test.
     fn cli_output_test() {
+        enable_raw_mode().unwrap();
         let rx = 1u8;
         let mut uart = Uart16550::new((&rx) as *const u8);
         let mut cli = CliUart::new(uart.get_tx_wiring());
@@ -129,12 +129,14 @@ mod test {
                 uart.one_shot();
             }
         }
+        disable_raw_mode().unwrap();
     }
 
     #[ignore = "debug"]
     #[test]
     /// just for debug, not an test.
     fn cli_input_test() {
+        enable_raw_mode().unwrap();
         let rx = 1u8;
         let mut cli = CliUart::new((&rx) as *const u8);
         let mut uart = Uart16550::new(cli.uart.get_tx_wiring());
@@ -148,5 +150,6 @@ mod test {
                 break;
             }
         }
+        disable_raw_mode().unwrap();
     }
 }
