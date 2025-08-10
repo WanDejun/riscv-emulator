@@ -2,18 +2,21 @@ use std::time::Duration;
 
 use crossterm::{
     event::{self, Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::disable_raw_mode,
+    tty::IsTty,
 };
 
-use crate::device::{DeviceTrait, Mem, uart::Uart16550};
+use crate::{
+    device::{DeviceTrait, Mem, uart::Uart16550},
+    handle_trait::HandleTrait,
+};
 
-pub struct Cli {
+pub struct CliUart {
     pub uart: Uart16550,
 }
 
-impl Cli {
+impl CliUart {
     pub fn new(rx_wiring: *const u8) -> Self {
-        enable_raw_mode().unwrap();
         Self {
             uart: Uart16550::new(rx_wiring),
         }
@@ -37,9 +40,13 @@ impl Cli {
     }
 }
 
-impl Drop for Cli {
+pub struct CliUartHandle {}
+impl HandleTrait for CliUartHandle {}
+impl Drop for CliUartHandle {
     fn drop(&mut self) {
-        disable_raw_mode().unwrap(); // 恢复终端原始状态
+        if std::io::stdin().is_tty() {
+            disable_raw_mode().unwrap(); // 恢复终端原始状态
+        }
     }
 }
 
@@ -55,7 +62,7 @@ mod test {
     fn cli_output_test() {
         let rx = 1u8;
         let mut uart = Uart16550::new((&rx) as *const u8);
-        let mut cli = Cli::new(uart.get_tx_wiring());
+        let mut cli = CliUart::new(uart.get_tx_wiring());
         uart.write(0, 'a' as u8);
         for _ in 0..20 {
             for _ in 0..UART_DEFAULT_DIV * 16 {
@@ -70,7 +77,7 @@ mod test {
     /// just for debug, not an test.
     fn cli_input_test() {
         let rx = 1u8;
-        let mut cli = Cli::new((&rx) as *const u8);
+        let mut cli = CliUart::new((&rx) as *const u8);
         let mut uart = Uart16550::new(cli.uart.get_tx_wiring());
         let _tx_wriing = cli.uart.get_tx_wiring();
         loop {

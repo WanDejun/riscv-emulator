@@ -8,7 +8,7 @@
 
 #![allow(unused)]
 
-use std::{cell::RefCell, rc::Rc, sync::WaitTimeoutResult, u8};
+use std::{cell::RefCell, sync::{Arc, WaitTimeoutResult}, u8};
 
 use log::error;
 
@@ -111,26 +111,26 @@ enum Uart16550Status {
 }
 
 struct Uart16550TX {
-    uart_reg: Rc<RefCell<Uart16550Reg>>,
+    uart_reg: Arc<RefCell<Uart16550Reg>>,
     status: Uart16550Status,
     div_counter: u32, // count frequency. Switch output data in (DLL + (DLM << 8)) * 16 clocks;
 
     tx_data: Option<u8>,
-    tx_reg: u8,
+    tx_reg: Box<u8>,
 }
 impl Uart16550TX {
-    fn new(uart_reg: &Rc<RefCell<Uart16550Reg>>) -> Self {
+    fn new(uart_reg: &Arc<RefCell<Uart16550Reg>>) -> Self {
         Self {
             uart_reg: uart_reg.clone(),
             status: Uart16550Status::IDLE,
             div_counter: 0,
-            tx_reg: 1,
+            tx_reg: Box::new(1),
             tx_data: None,
         }
     }
 
     fn get_wire(&self) -> *const u8 {
-        (&self.tx_reg) as *const u8
+        &*self.tx_reg
     }
 
     fn read_tx_data(&self) -> Option<u8> {
@@ -142,13 +142,13 @@ impl Uart16550TX {
             Uart16550Status::START => {
                 let data = self.tx_data.unwrap();
                 self.status = Uart16550Status::DATA(1, data >> 1);
-                self.tx_reg = data & 0x01;
+                *self.tx_reg = data & 0x01;
             }
             Uart16550Status::DATA(mut cnt, data) => {
                 cnt += 1;
-                self.tx_reg = data & 0x01;
+                *self.tx_reg = data & 0x01;
                 if cnt > UART_DATA_LENGTH {
-                    self.tx_reg = 0x01;
+                    *self.tx_reg = 0x01;
                     self.status = Uart16550Status::STOP(0);
                 } else {
                     self.status = Uart16550Status::DATA(cnt, data >> 1);
@@ -171,7 +171,7 @@ impl Uart16550TX {
             self.tx_data = self.read_tx_data();
             if self.tx_data.is_some() {
                 self.status = Uart16550Status::START;
-                self.tx_reg = 0;
+                *self.tx_reg = 0;
                 self.uart_reg
                     .borrow_mut()
                     .write_transmit_holding_empty::<false>();
@@ -197,7 +197,7 @@ impl Uart16550TX {
 }
 
 struct Uart16550RX {
-    uart_reg: Rc<RefCell<Uart16550Reg>>,
+    uart_reg: Arc<RefCell<Uart16550Reg>>,
     status: Uart16550Status,
     div_counter: u16, // count frequency. Take one sample in DLL + (DLM << 8) clocks;
     sample_data: u8,  // Increasing when get high bit.
@@ -206,7 +206,7 @@ struct Uart16550RX {
     sample_count: u8, // 16 times sampling for a bit
 }
 impl Uart16550RX {
-    fn new(uart_reg: &Rc<RefCell<Uart16550Reg>>, rx_wiring: *const u8) -> Self {
+    fn new(uart_reg: &Arc<RefCell<Uart16550Reg>>, rx_wiring: *const u8) -> Self {
         Self {
             uart_reg: uart_reg.clone(),
             status: Uart16550Status::IDLE,
@@ -310,9 +310,11 @@ impl Uart16550RX {
     }
 }
 
+
+unsafe impl Send for Uart16550 {}
 #[allow(non_snake_case)]
 pub struct Uart16550 {
-    reg: Rc<RefCell<Uart16550Reg>>,
+    reg: Arc<RefCell<Uart16550Reg>>,
     reg_ptr: [*const u8; 8],
     reg_mut_ptr: [*mut u8; 8],
     reg_lcr_ptr: [*mut u8; 8],
@@ -322,7 +324,7 @@ pub struct Uart16550 {
 }
 impl Uart16550 {
     pub fn new(rx_wiring: *const u8) -> Self {
-        let reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
             (&reg_ref.RBR) as *const u8,
@@ -456,7 +458,7 @@ impl DeviceTrait for Uart16550 {
 
 #[cfg(test)]
 mod test {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, sync::Arc};
 
     use log::error;
 
@@ -475,7 +477,7 @@ mod test {
 
     #[test]
     fn rx_test() {
-        let uart_reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let uart_reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut rx_wiring: u8 = 1;
         let mut rx = Uart16550RX::new(&uart_reg, (&rx_wiring) as *const u8);
 
@@ -503,7 +505,7 @@ mod test {
 
     #[test]
     fn tx_test() {
-        let uart_reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let uart_reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut tx = Uart16550TX::new(&uart_reg);
         let tx_wire = tx.get_wire();
 
@@ -531,7 +533,7 @@ mod test {
 
     #[test]
     fn tx_rx_test() {
-        let uart_reg = Rc::new(RefCell::new(Uart16550Reg::new()));
+        let uart_reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut tx = Uart16550TX::new(&uart_reg);
         let mut rx = Uart16550RX::new(&uart_reg, tx.get_wire());
 

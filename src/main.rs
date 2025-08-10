@@ -9,6 +9,7 @@ mod ram;
 mod vaddr;
 
 mod device;
+mod handle_trait;
 mod isa;
 mod logging;
 mod utils;
@@ -18,12 +19,22 @@ pub use config::ram_config;
 use flexi_logger::LoggerHandle;
 use lazy_static::lazy_static;
 
+use crate::{device::peripheral_init, handle_trait::HandleTrait};
+
 lazy_static! {
-    static ref _logger_handle: LoggerHandle = logging::init();
     static ref cli_args: Args = Args::parse();
+    static ref _logger_handle: LoggerHandle = logging::init();
 }
 
-fn init() {}
+fn init() -> Vec<Box<dyn HandleTrait>> {
+    let mut handles = vec![];
+    let peripheral_handle = peripheral_init();
+    for handle in peripheral_handle {
+        handles.push(handle);
+    }
+
+    handles
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -41,13 +52,6 @@ struct Args {
 }
 
 fn main() {
-    init();
-
-    println!(
-        "path = {:?}, debug = {}, verbose = {}.",
-        cli_args.path, cli_args.debug, cli_args.verbose
-    );
-
     const A: [&'static str; 12] = gen_reg_name_list!("a", 1, 5; "b", 6, 10; "c"; "d");
     for i in 0..12 {
         if i == 11 {
@@ -56,10 +60,11 @@ fn main() {
             print!("{}, ", A[i]);
         }
     }
+    
+    let _init_handle = init();
 
-    log::error!("[Error] ");
-    log::warn!("[Warn]   ");
-    log::info!("[info]   ");
-    log::debug!("[debug] ");
-    log::trace!("[trace] ");
+    println!(
+        "path = {:?}, debug = {}, verbose = {}.",
+        cli_args.path, cli_args.debug, cli_args.verbose
+    );
 }
