@@ -9,13 +9,13 @@ impl<Desc: Clone> ISABuilder<Desc> {
         }
     }
 
-    pub fn add(&mut self, desc: &[Desc]) -> &mut Self {
+    pub fn add(mut self, desc: &[Desc]) -> Self {
         self.instructions.extend_from_slice(desc);
         self
     }
 
-    pub fn build(&mut self) -> Vec<Desc> {
-        std::mem::take(&mut self.instructions)
+    pub fn build(self) -> Vec<Desc> {
+        self.instructions
     }
 }
 
