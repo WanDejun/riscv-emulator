@@ -4,6 +4,14 @@ pub struct VirtAddrManager {
     mmio: MemoryMapIO,
 }
 
+impl VirtAddrManager {
+    pub fn new() -> Self {
+        Self {
+            mmio: MemoryMapIO::new(),
+        }
+    }
+}
+
 impl Mem for VirtAddrManager {
     fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> T
     where

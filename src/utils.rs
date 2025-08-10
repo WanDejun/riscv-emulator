@@ -163,6 +163,10 @@ pub trait UnsignedInteger:
     + ShlAssign<u32>
     + Shr<u32, Output = Self>
     + ShrAssign<u32>
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
     + Debug
     + Display
 {
