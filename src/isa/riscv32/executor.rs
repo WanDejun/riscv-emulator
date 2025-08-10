@@ -24,15 +24,8 @@ fn sign_extend(value: WordType, from_bits: u32) -> WordType {
 }
 
 /// get the negative of given number of [`WordType`] in 2's complement.
-fn negative_of(value: WordType) -> WordType {
+pub fn negative_of(value: WordType) -> WordType {
     !value + 1
-}
-
-/// load 'upper' to the upper of `lower`, like `auipc` or `lui`
-///
-/// XXX: This function requires `upper` has been shifted
-fn load_to_upper(lower: WordType, upper: WordType, lower_cnt: u32) -> WordType {
-    (lower & ((1u64 << lower_cnt) - 1)) | upper
 }
 
 pub struct RV32CPU {
@@ -215,7 +208,8 @@ impl RV32CPU {
             Riscv32Instr::AUIPC => {
                 if let RVInstrInfo::U { rd, imm } = info {
                     self.reg_file
-                        .write(rd, load_to_upper(self.pc, sign_extend(imm, 20), 12));
+                        .write(rd, self.pc.wrapping_add(sign_extend(imm, 32)));
+                    self.pc = self.pc.wrapping_add(4);
                     Ok(())
                 } else {
                     std::unreachable!();
@@ -224,9 +218,8 @@ impl RV32CPU {
 
             Riscv32Instr::LUI => {
                 if let RVInstrInfo::U { rd, imm } = info {
-                    let value = self.reg_file.read(rd, 0).0;
-                    self.reg_file
-                        .write(rd, load_to_upper(value, sign_extend(imm, 20), 12));
+                    self.reg_file.write(rd, sign_extend(imm, 32));
+                    self.pc = self.pc.wrapping_add(4);
                     Ok(())
                 } else {
                     std::unreachable!();
