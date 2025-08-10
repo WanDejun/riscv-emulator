@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -47,6 +47,45 @@ impl Drop for CliUartHandle {
         if std::io::stdin().is_tty() {
             disable_raw_mode().unwrap(); // 恢复终端原始状态
         }
+    }
+}
+
+pub struct FIFOUart {
+    pub uart: Uart16550,
+    input_fifo: VecDeque<u8>,
+    output_fifo: VecDeque<u8>,
+}
+
+impl FIFOUart {
+    pub fn new(rx_wiring: *const u8) -> Self {
+        Self {
+            uart: Uart16550::new(rx_wiring),
+            input_fifo: VecDeque::new(),
+            output_fifo: VecDeque::new(),
+        }
+    }
+    pub fn one_shot(&mut self) {
+        self.uart.one_shot();
+
+        // Output
+        if (self.uart.read::<u8>(5) & 0b1) != 0 {
+            self.output_fifo.push_back(self.uart.read::<u8>(0));
+        }
+
+        // Input
+        if (self.uart.read::<u8>(5) & 0x40) != 0 {
+            if let Some(val) = self.input_fifo.pop_front() {
+                self.uart.write(0x00, val);
+            }
+        }
+    }
+
+    pub fn send(&mut self, data: u8) {
+        self.input_fifo.push_back(data);
+    }
+
+    pub fn receive(&mut self) -> Option<u8> {
+        self.output_fifo.pop_front()
     }
 }
 

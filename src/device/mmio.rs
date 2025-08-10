@@ -6,7 +6,7 @@ use std::{
 use crate::{
     config::arch_config::WordType,
     device::{
-        CLI_UART, DeviceTrait, Mem, UART1,
+        DEBUG_UART, DeviceTrait, Mem, UART1,
         config::{Device, UART_SIZE, UART1_ADDR},
     },
     ram::Ram,
@@ -169,7 +169,7 @@ impl DeviceTrait for MemoryMapIO {
         for item in self.map.iter() {
             item.device.lock().unwrap().one_shot();
         }
-        CLI_UART.lock().unwrap().one_shot();
+        DEBUG_UART.lock().unwrap().one_shot();
     }
 }
 
@@ -202,20 +202,21 @@ mod test {
         for _ in 0..UART_DEFAULT_DIV * 16 * 20 {
             mmio.one_shot();
         }
-        assert!((mmio.read::<u8>(UART1_ADDR + 5) & 0x20) != 0);
-        assert!((CLI_UART.lock().unwrap().uart.read::<u8>(5) & 0x01) == 0);
+        assert_ne!((mmio.read::<u8>(UART1_ADDR + 5) & 0x20), 0);
+        assert_eq!((DEBUG_UART.lock().unwrap().uart.read::<u8>(5) & 0x01), 0);
+        assert_eq!(DEBUG_UART.lock().unwrap().receive(), Some('a' as u8));
     }
 
-    #[ignore = "debug"]
     #[test]
     /// just for debug, not an test.
-    fn mmio_stdin_test() {
+    fn mmio_stdio_test() {
         let _handles = peripheral_init();
         let mut mmio = MemoryMapIO::new();
+        DEBUG_UART.lock().unwrap().send('x' as u8);
         loop {
             mmio.one_shot();
             if (mmio.read::<u8>(UART1_ADDR + 5) & 0x01) != 0 {
-                print!("{}", mmio.read::<u8>(UART1_ADDR + 0));
+                assert_eq!(mmio.read::<u8>(UART1_ADDR + 0), 'x' as u8);
                 break;
             }
         }
