@@ -136,6 +136,25 @@ macro_rules! gen_reg_name_list {
     };
 }
 
+pub trait TruncateFrom<T>: Sized {
+    fn truncate_from(value: T) -> Self;
+}
+
+macro_rules! impl_truncate_from {
+    ($from:ty, $to:ty) => {
+        impl TruncateFrom<$from> for $to {
+            fn truncate_from(val: $from) -> Self {
+                val as $to
+            }
+        }
+    };
+}
+
+impl_truncate_from!(WordType, u8);
+impl_truncate_from!(WordType, u16);
+impl_truncate_from!(WordType, u32);
+impl_truncate_from!(WordType, u64);
+
 pub trait UnsignedInteger:
     Copy
     + Sized
@@ -169,6 +188,7 @@ pub trait UnsignedInteger:
     + Ord
     + Debug
     + Display
+    + TruncateFrom<WordType>
 {
 }
 impl UnsignedInteger for u8 {}

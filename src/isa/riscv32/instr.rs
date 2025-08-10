@@ -1,5 +1,6 @@
 use crate::{config::arch_config::WordType, define_instr_enum};
 
+/// `imm` values saved should be shifted, like B, U and J type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RVInstrInfo {
     R { rs1: u8, rs2: u8, rd: u8 },

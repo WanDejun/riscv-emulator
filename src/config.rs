@@ -39,6 +39,7 @@ pub mod arch_config {
                 $feature:literal => {
                     arch: $arch:path,
                     word: $word:ty,
+                    signed_word: $signed_word:ty,
                     endian: $endian:path,
                     reg_name: $reg_name: expr,
                 }
@@ -50,6 +51,9 @@ pub mod arch_config {
 
                 #[cfg(feature = $feature)]
                 pub type WordType = $word;
+
+                #[cfg(feature = $feature)]
+                pub type SignedWordType = $signed_word;
 
                 #[cfg(feature = $feature)]
                 pub const MEM_ORDER: $crate::config::arch_config::Endianness = $endian;
@@ -70,6 +74,7 @@ pub mod arch_config {
         @item "riscv32" => {
             arch: Arch::RISCV32,
             word: u32,
+            signed_word: i32,
             endian: Endianness::Big,
             reg_name: gen_reg_name_list!(   "zero";     "ra";           "sp";       "gp";
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
@@ -78,6 +83,7 @@ pub mod arch_config {
         @item "riscv64" => {
             arch: Arch::RISCV64,
             word: u64,
+            signed_word: i64,
             endian: Endianness::Big,
             reg_name: gen_reg_name_list!(   "zero";     "ra";   "sp";   "gp";
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
