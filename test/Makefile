@@ -5,12 +5,14 @@ LIB := ./lib
 OBJ := ./obj
 BIN := ./bin
 CC := $(ARCH)-elf-gcc
-C_FLAG := -ffreestanding -nostdlib -march=rv64gc -mabi=lp64d -mcmodel=medany -I$(INC) -g
+C_FLAG := -ffreestanding -nostdlib -march=rv64im -mabi=lp64 -mcmodel=medany -I$(INC) -g
 LD := $(ARCH)-elf-ld
 LD_FLAG := -static -g
 QEMU := qemu-system-$(ARCH)
 
 TARGET := main
+
+DEFAULT_TARGET: build
 
 .PNONY:
 	build_lib build run clear 
