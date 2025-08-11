@@ -6,6 +6,7 @@ use crate::{
         decoder::Decoder,
         instr::{Exception, RVInstrInfo, Riscv32Instr},
     },
+    ram_config::DEFAULT_PC_VALUE,
     utils::UnsignedInteger,
     vaddr::VirtAddrManager,
 };
@@ -36,11 +37,21 @@ pub struct RV32CPU {
 }
 
 impl RV32CPU {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             reg_file: RegFile::new(),
             memory: VirtAddrManager::new(),
-            pc: 0,
+            pc: DEFAULT_PC_VALUE,
+            decoder: Decoder::new(),
+        }
+    }
+
+    // TODO: A builder struct may be useful for future use.
+    pub fn from_memory(v_memory: VirtAddrManager) -> Self {
+        Self {
+            reg_file: RegFile::new(),
+            memory: v_memory,
+            pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
         }
     }
@@ -271,11 +282,11 @@ mod tests {
         assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
     }
 
-    struct CPUBuilder {
+    struct TestCPUBuilder {
         cpu: RV32CPU,
     }
 
-    impl CPUBuilder {
+    impl TestCPUBuilder {
         fn new() -> Self {
             Self {
                 cpu: RV32CPU::new(),
@@ -354,20 +365,20 @@ mod tests {
 
     fn run_test_exec<F, G>(instr: Riscv32Instr, info: RVInstrInfo, build: F, check: G)
     where
-        F: FnOnce(CPUBuilder) -> CPUBuilder,
+        F: FnOnce(TestCPUBuilder) -> TestCPUBuilder,
         G: FnOnce(CPUChecker) -> CPUChecker,
     {
-        let mut cpu = build(CPUBuilder::new()).build();
+        let mut cpu = build(TestCPUBuilder::new()).build();
         cpu.execute(instr, info).unwrap();
         check(CPUChecker::new(&mut cpu));
     }
 
     fn run_test_exec_decode<F, G>(raw_instr: u32, build: F, check: G)
     where
-        F: FnOnce(CPUBuilder) -> CPUBuilder,
+        F: FnOnce(TestCPUBuilder) -> TestCPUBuilder,
         G: FnOnce(CPUChecker) -> CPUChecker,
     {
-        let mut cpu = build(CPUBuilder::new()).build();
+        let mut cpu = build(TestCPUBuilder::new()).build();
         let (instr, info) = cpu.decoder.decode(raw_instr).unwrap();
         cpu.execute(instr, info).unwrap();
         check(CPUChecker::new(&mut cpu));

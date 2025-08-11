@@ -3,6 +3,7 @@
 pub mod ram_config {
     use crate::config::arch_config::WordType;
     pub const BASE_ADDR: WordType = 0x8000_0000;
+    pub const DEFAULT_PC_VALUE: WordType = BASE_ADDR;
 
     pub const SIZE: usize = 0x8000;
 }

@@ -63,9 +63,12 @@ pub struct MemoryMapIO {
 }
 
 impl MemoryMapIO {
-    #[allow(unused)]
     pub fn new() -> Self {
-        let ram = Arc::new(Mutex::new(Device::Ram(Ram::new())));
+        Self::from_ram(Ram::new())
+    }
+
+    pub fn from_ram(ram: Ram) -> Self {
+        let ram = Arc::new(Mutex::new(Device::Ram(ram)));
 
         let map = vec![
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, UART1.clone()),

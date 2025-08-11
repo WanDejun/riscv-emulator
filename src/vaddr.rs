@@ -1,4 +1,7 @@
-use crate::device::{DeviceTrait, Mem, mmio::MemoryMapIO};
+use crate::{
+    device::{DeviceTrait, Mem, mmio::MemoryMapIO},
+    ram::Ram,
+};
 
 pub struct VirtAddrManager {
     mmio: MemoryMapIO,
@@ -8,6 +11,12 @@ impl VirtAddrManager {
     pub fn new() -> Self {
         Self {
             mmio: MemoryMapIO::new(),
+        }
+    }
+
+    pub fn from_ram(ram: Ram) -> Self {
+        Self {
+            mmio: MemoryMapIO::from_ram(ram),
         }
     }
 }

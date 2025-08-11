@@ -60,4 +60,22 @@ fn main() {
         "path = {:?}, debug = {}, verbose = {}.",
         cli_args.path, cli_args.debug, cli_args.verbose
     );
+
+    let mut ram = Ram::new();
+
+    if cli_args.path.extension() == Some("elf".as_ref()) {
+        println!("ELF file detected");
+
+        let bytes = std::fs::read(&cli_args.path).unwrap();
+        load::load_elf(&mut ram, &bytes);
+    } else {
+        println!("Non-ELF file detected");
+        todo!();
+    }
+
+    let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
+
+    loop {
+        cpu.step().unwrap();
+    }
 }
