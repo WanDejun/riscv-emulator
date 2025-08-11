@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{config::arch_config::WordType, isa::riscv32::instr::*};
+use crate::{
+    config::arch_config::WordType,
+    isa::{riscv32::instr::*, utils::ISABuilder},
+};
 
 #[derive(Debug, Clone)]
 enum PartialDecode {
@@ -72,7 +75,7 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
 impl Decoder {
     /// Build a new decoder with RV32I by default
     pub fn new() -> Self {
-        Decoder::from(TABLE_RV32I.iter().cloned())
+        Decoder::from(ISABuilder::new().add(TABLE_RV32I).add(TABLE_RV32M).build())
     }
 
     pub fn from<I>(instrs: I) -> Self

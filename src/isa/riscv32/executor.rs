@@ -147,6 +147,29 @@ impl RV32CPU {
             Riscv32Instr::ADD => self.exec_arith(info, |a, b| Ok(a.wrapping_add(b))),
             Riscv32Instr::SUB => self.exec_arith(info, |a, b| Ok(a.wrapping_sub(b))),
             Riscv32Instr::ADDI => self.exec_arith(info, |a, b| Ok(a.wrapping_add(b))),
+            Riscv32Instr::MUL => self.exec_arith(info, |a, b| Ok(a.wrapping_mul(b))),
+            Riscv32Instr::MULH => self.exec_arith(info, |a, b| {
+                Ok((((a as u64)
+                    .cast_signed()
+                    .wrapping_mul((b as u64).cast_signed()))
+                    >> 32) as WordType)
+            }),
+            Riscv32Instr::MULHU => {
+                self.exec_arith(info, |a, b| Ok((u64::from(a).wrapping_mul(b as u64)) >> 32))
+            }
+            Riscv32Instr::MULHSU => self.exec_arith(info, |a, b| {
+                Ok(((a as isize >> (size_of::<WordType>() >> 1))
+                    * ((b >> (size_of::<WordType>() >> 1)) as isize))
+                    as WordType)
+            }),
+            Riscv32Instr::DIV => self.exec_arith(info, |a, b| {
+                Ok((a.cast_signed() / b.cast_signed()) as WordType)
+            }),
+            Riscv32Instr::DIVU => self.exec_arith(info, |a, b| Ok(a / b)),
+            Riscv32Instr::REM => self.exec_arith(info, |a, b| {
+                Ok((a.cast_signed() % b.cast_signed()) as WordType)
+            }),
+            Riscv32Instr::REMU => self.exec_arith(info, |a, b| Ok(a % b)),
 
             // Shift
             Riscv32Instr::SLL => self.exec_arith(info, |a, b| Ok(a << b)),
@@ -245,10 +268,6 @@ impl RV32CPU {
             Riscv32Instr::ECALL | Riscv32Instr::EBREAK => {
                 todo!()
             }
-
-            _ => {
-                todo!()
-            }
         };
 
         self.reg_file[0] = 0;
@@ -258,7 +277,9 @@ impl RV32CPU {
 
     pub fn step(&mut self) -> Result<(), Exception> {
         let instr_bytes = self.memory.read::<u32>(self.pc);
+        log::trace!("{:#x}", instr_bytes);
         let (instr, info) = self.decoder.decode(instr_bytes)?;
+        log::trace!("Decoded instruction: {:#?}, info: {:#?}", instr, info);
         self.execute(instr, info)
     }
 }
@@ -512,6 +533,16 @@ mod tests {
                 ((lhs) < (sign_extend(imm, 12))) as WordType
             });
         }
+    }
+
+    #[test]
+    fn test_exec_arith_decode() {
+        // TODO: add checks for boundary cases
+        run_test_exec_decode(
+            0x02520333, // mul x6, x4, x5
+            |builder| builder.reg(4, 5).reg(5, 10).pc(0x1000),
+            |checker| checker.reg(6, 50).pc(0x1004),
+        );
     }
 
     #[test]
