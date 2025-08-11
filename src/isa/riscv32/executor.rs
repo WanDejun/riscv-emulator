@@ -4,7 +4,7 @@ use crate::{
     device::Mem,
     isa::riscv32::{
         decoder::Decoder,
-        instr::{Exception, RVInstrInfo, Riscv32Instr},
+        instruction::{Exception, RVInstrInfo, rv32i_table::Riscv32Instr},
     },
     ram_config::DEFAULT_PC_VALUE,
     utils::UnsignedInteger,
@@ -30,10 +30,10 @@ pub fn negative_of(value: WordType) -> WordType {
 }
 
 pub struct RV32CPU {
-    reg_file: RegFile,
-    memory: VirtAddrManager,
-    pc: WordType,
-    decoder: Decoder,
+    pub(super) reg_file: RegFile,
+    pub(super) memory: VirtAddrManager,
+    pub(super) pc: WordType,
+    pub(super) decoder: Decoder,
 }
 
 impl RV32CPU {

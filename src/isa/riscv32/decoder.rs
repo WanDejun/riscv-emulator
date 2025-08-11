@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 
-use crate::{config::arch_config::WordType, isa::riscv32::instr::*};
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv32::instruction::{
+        rv32i_table::{RV32Desc, Riscv32Instr, TABLE_RV32I},
+        *,
+    },
+};
 
 #[derive(Debug, Clone)]
 enum PartialDecode {
@@ -90,6 +96,7 @@ impl Decoder {
                 funct7,
                 instr,
                 format,
+                callback,
             } = desc;
 
             match format {
