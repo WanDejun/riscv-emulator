@@ -245,6 +245,10 @@ impl RV32CPU {
             Riscv32Instr::ECALL | Riscv32Instr::EBREAK => {
                 todo!()
             }
+
+            _ => {
+                todo!()
+            }
         };
 
         self.reg_file[0] = 0;
