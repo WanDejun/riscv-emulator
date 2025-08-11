@@ -50,15 +50,15 @@ macro_rules! count_args {
 // read raw ptr ans check align.
 // ==================================
 const ALIGN_ILST: [WordType; 9] = [
-    0x0,
-    0x1,
+    0x00,
+    0x00,
+    0x01,
+    WordType::MAX,
     0x03,
     WordType::MAX,
+    WordType::MAX,
+    WordType::MAX,
     0x07,
-    WordType::MAX,
-    WordType::MAX,
-    WordType::MAX,
-    0x15,
 ];
 
 pub unsafe fn read_raw_ptr<T>(addr: *const u8) -> T {
