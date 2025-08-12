@@ -74,17 +74,17 @@ impl DecoderTrait for Decoder {
 
         match partial {
             PartialDecode::Complete(instr_kind, fmt) => {
-                return Some((instr_kind, decode_info(instr, fmt)));
+                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
             }
             PartialDecode::RequireF3 => {
                 let (instr_kind, fmt) = self.decode_table_f3.get(&(opcode, funct3))?.clone();
-                return Some((instr_kind, decode_info(instr, fmt)));
+                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
             }
             PartialDecode::RequireF7 => {
                 let (instr_kind, fmt) =
                     self.decode_table_f7.get(&(opcode, funct3, funct7))?.clone();
 
-                return Some((instr_kind, decode_info(instr, fmt)));
+                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
             }
         }
     }

@@ -17,7 +17,7 @@ impl DecoderTrait for MaskDecoder {
     fn decode(&self, raw_instr: u32) -> Option<(RiscvInstr, RVInstrInfo)> {
         for (mask, instr, fmt) in self.masks.iter() {
             if mask.matches(raw_instr) {
-                return Some((*instr, decode_info(raw_instr, *fmt)));
+                return Some((*instr, decode_info(raw_instr, *instr, *fmt)));
             }
         }
 

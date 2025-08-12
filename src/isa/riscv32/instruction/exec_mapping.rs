@@ -120,7 +120,7 @@ pub(in crate::isa::riscv32) fn get_exec_func(
         },
 
         RiscvInstr::EBREAK | RiscvInstr::ECALL => {
-            todo!()
+            todo!("Both ebreak and ecall are not implemented yet.")
         }
 
         // We are executing in order, so don't need to do anything.

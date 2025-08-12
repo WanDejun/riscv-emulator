@@ -43,21 +43,30 @@ impl Decoder {
     }
 
     pub fn decode(&self, instr: u32) -> Result<(RiscvInstr, RVInstrInfo), Exception> {
+        // TODO: Should we call `decode_info` here instead of in `mask_decoder` and `funct3_decoder`?
         None.or_else(|| self.mask_decoder.decode(instr))
             .or_else(|| self.funct3_decoder.decode(instr))
             .ok_or(Exception::InvalidInstruction)
     }
 }
 
-fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
-    let rd = ((instr >> 7) & 0b11111) as u8;
-    let rs1 = ((instr >> 15) & 0b11111) as u8;
-    let rs2 = ((instr >> 20) & 0b11111) as u8;
+fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrInfo {
+    let rd = ((raw_instr >> 7) & 0b11111) as u8;
+    let rs1 = ((raw_instr >> 15) & 0b11111) as u8;
+    let rs2 = ((raw_instr >> 20) & 0b11111) as u8;
 
     match fmt {
         InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },
         InstrFormat::I => {
-            let imm = ((instr >> 20) & 0xFFF) as WordType;
+            let mut imm = ((raw_instr >> 20) & 0xFFF) as WordType;
+
+            match instr {
+                RiscvInstr::SRAI | RiscvInstr::SRAIW => {
+                    imm &= 0x1F;
+                }
+                _ => {}
+            }
+
             RVInstrInfo::I {
                 rd: rd,
                 rs1: rs1,
@@ -65,7 +74,7 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
             }
         }
         InstrFormat::S => {
-            let imm = (((instr >> 25) & 0xFF) << 5) | ((instr >> 7) & 0b11111);
+            let imm = (((raw_instr >> 25) & 0xFF) << 5) | ((raw_instr >> 7) & 0b11111);
             RVInstrInfo::S {
                 rs1: rs1,
                 rs2: rs2,
@@ -73,17 +82,17 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
             }
         }
         InstrFormat::U => {
-            let imm = (instr >> 12) << 12;
+            let imm = (raw_instr >> 12) << 12;
             RVInstrInfo::U {
                 rd: rd,
                 imm: imm as WordType,
             }
         }
         InstrFormat::B => {
-            let imm = (((instr >> 31) & 1) << 12)
-                | (((instr >> 7) & 1) << 11)
-                | (((instr >> 25) & 0b111111) << 5)
-                | (((instr >> 8) & 0b1111) << 1);
+            let imm = (((raw_instr >> 31) & 1) << 12)
+                | (((raw_instr >> 7) & 1) << 11)
+                | (((raw_instr >> 25) & 0b111111) << 5)
+                | (((raw_instr >> 8) & 0b1111) << 1);
             RVInstrInfo::B {
                 rs1: rs1,
                 rs2: rs2,
@@ -91,10 +100,10 @@ fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
             }
         }
         InstrFormat::J => {
-            let imm = (((instr >> 31) & 1) << 20)
-                | (((instr >> 12) & 0xFF) << 12)
-                | (((instr >> 20) & 1) << 11)
-                | (((instr >> 21) & 0x3FF) << 1);
+            let imm = (((raw_instr >> 31) & 1) << 20)
+                | (((raw_instr >> 12) & 0xFF) << 12)
+                | (((raw_instr >> 20) & 1) << 11)
+                | (((raw_instr >> 21) & 0x3FF) << 1);
             RVInstrInfo::J {
                 rd: rd,
                 imm: imm as WordType,
