@@ -3,17 +3,9 @@ use crate::{
     define_instr_enum, define_riscv_isa,
     isa::riscv32::{
         executor::RV32CPU,
-        instruction::{
-            Exception, InstrFormat, RVInstrInfo,
-            exec_function::{
-                ExecAdd, ExecAnd, ExecDivSigned, ExecDivUnsigned, ExecEqual, ExecMulHighSighed,
-                ExecMulHighSignedUnsigned, ExecMulHighUnsigned, ExecMulLow, ExecNotEqual, ExecOr,
-                ExecRemSigned, ExecRemUnsigned, ExecSLL, ExecSRA, ExecSRL, ExecSignedGreatEqual,
-                ExecSignedLess, ExecSub, ExecUnsignedGreatEqual, ExecUnsignedLess, ExecXor,
-                exec_arith, exec_branch, exec_load, exec_store, exec_todo, sign_extend,
-            },
-        },
+        instruction::{Exception, InstrFormat, RVInstrInfo, exec_function::*},
     },
+    utils::sign_extend,
 };
 
 define_riscv_isa!(

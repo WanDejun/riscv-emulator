@@ -5,7 +5,7 @@ use crate::{
         executor::RV32CPU,
         instruction::{Exception, RVInstrInfo},
     },
-    utils::UnsignedInteger,
+    utils::{UnsignedInteger, sign_extend},
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
@@ -13,17 +13,6 @@ use crate::{
 /// `exec_xxx` function interact with other mod in CPU.
 pub(super) trait ExecTrait<T> {
     fn exec(a: WordType, b: WordType) -> T;
-}
-
-pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
-    let sign_bit = (1u64 << (from_bits - 1)) as WordType;
-
-    if (value & sign_bit) != 0 {
-        let mask = (!0u64 ^ ((1u64 << from_bits) - 1)) as WordType;
-        value | mask
-    } else {
-        value
-    }
 }
 
 /// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I.

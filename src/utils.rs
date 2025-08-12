@@ -24,6 +24,22 @@ where
     result
 }
 
+pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
+    let sign_bit = (1u64 << (from_bits - 1)) as WordType;
+
+    if (value & sign_bit) != 0 {
+        let mask = (!0u64 ^ ((1u64 << from_bits) - 1)) as WordType;
+        value | mask
+    } else {
+        value
+    }
+}
+
+/// get the negative of given number of [`WordType`] in 2's complement.
+pub fn negative_of(value: WordType) -> WordType {
+    !value + 1
+}
+
 #[macro_export]
 macro_rules! concat_bits {
     // End case (only one argument)
@@ -255,4 +271,23 @@ where
     T: BitAnd<Output = T> + From<u8> + Shl<u32, Output = T> + Copy + Not<Output = T> + Eq,
 {
     (*data & (T::from(1u8) << idx)) != T::from(0u8)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_sign_extend() {
+        assert_eq!(sign_extend(0x123, 12), 0x123);
+        assert_eq!(sign_extend(0x7FF, 12), 0x7FF);
+        assert_eq!(sign_extend(0xFFF, 12), !0 as WordType);
+        assert_eq!(sign_extend(0xF0F, 12), (!0 - 0xF0) as WordType);
+    }
+
+    #[test]
+    fn test_negative_of() {
+        assert_eq!(negative_of(1 as WordType), (!0) as WordType);
+        assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
+    }
 }

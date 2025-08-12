@@ -13,24 +13,6 @@ use crate::{
     vaddr::VirtAddrManager,
 };
 
-// TODO: Move some of the codes about number to utils in the root.
-
-fn sign_extend(value: WordType, from_bits: u32) -> WordType {
-    let sign_bit = (1u64 << (from_bits - 1)) as WordType;
-
-    if (value & sign_bit) != 0 {
-        let mask = (!0u64 ^ ((1u64 << from_bits) - 1)) as WordType;
-        value | mask
-    } else {
-        value
-    }
-}
-
-/// get the negative of given number of [`WordType`] in 2's complement.
-pub fn negative_of(value: WordType) -> WordType {
-    !value + 1
-}
-
 pub struct RV32CPU {
     pub(super) reg_file: RegFile,
     pub(super) memory: VirtAddrManager,
@@ -79,23 +61,13 @@ mod tests {
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha12Rng;
 
-    use crate::{config::arch_config::REGFILE_CNT, ram_config::BASE_ADDR, utils::UnsignedInteger};
+    use crate::{
+        config::arch_config::REGFILE_CNT,
+        ram_config::BASE_ADDR,
+        utils::{UnsignedInteger, negative_of, sign_extend},
+    };
 
     use super::*;
-
-    #[test]
-    fn test_sign_extend() {
-        assert_eq!(sign_extend(0x123, 12), 0x123);
-        assert_eq!(sign_extend(0x7FF, 12), 0x7FF);
-        assert_eq!(sign_extend(0xFFF, 12), !0 as WordType);
-        assert_eq!(sign_extend(0xF0F, 12), (!0 - 0xF0) as WordType);
-    }
-
-    #[test]
-    fn test_negative_of() {
-        assert_eq!(negative_of(1 as WordType), (!0) as WordType);
-        assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
-    }
 
     struct TestCPUBuilder {
         cpu: RV32CPU,

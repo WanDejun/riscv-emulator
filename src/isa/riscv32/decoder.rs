@@ -163,7 +163,7 @@ impl Decoder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{isa::riscv32::executor::negative_of, utils::TruncateTo};
+    use crate::utils::{TruncateTo, negative_of};
 
     use super::*;
     use rand::{Rng, rngs::ThreadRng};
