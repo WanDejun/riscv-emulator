@@ -8,7 +8,10 @@ use crate::{
     utils::UnsignedInteger,
 };
 
-pub trait ExecTrait<T> {
+/// ExecTrait will generate operation result to `exec_xxx` function.
+/// ExecTrait::exec only do calculate.
+/// `exec_xxx` function interact with other mod in CPU.
+pub(super) trait ExecTrait<T> {
     fn exec(a: WordType, b: WordType) -> T;
 }
 
@@ -23,7 +26,14 @@ pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
     }
 }
 
-pub fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+/// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I.
+///
+/// # NOTE
+///
+/// Not sure about extended ISAs.
+///
+/// This will always do signed extension to `imm` as 12 bit.
+pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     F: ExecTrait<Result<WordType, Exception>>,
 {
@@ -46,7 +56,7 @@ where
     Ok(())
 }
 
-pub fn exec_branch<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_branch<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     F: ExecTrait<bool>,
 {
@@ -65,7 +75,7 @@ where
     Ok(())
 }
 
-pub fn exec_load<T, const EXTEND: bool>(
+pub(super) fn exec_load<T, const EXTEND: bool>(
     info: RVInstrInfo,
     cpu: &mut RV32CPU,
 ) -> Result<(), Exception>
@@ -88,7 +98,7 @@ where
     Ok(())
 }
 
-pub fn exec_store<T>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_store<T>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     T: UnsignedInteger,
 {
@@ -108,63 +118,66 @@ pub fn exec_todo<T>(_info: RVInstrInfo, _cpu: &mut RV32CPU) -> Result<(), Except
     todo!();
 }
 
-pub struct ExecAdd {}
+// =============================================
+//                  ExecTrait
+// =============================================
+pub(super) struct ExecAdd {}
 impl ExecTrait<Result<WordType, Exception>> for ExecAdd {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a.wrapping_add(b))
     }
 }
 
-pub struct ExecSub {}
+pub(super) struct ExecSub {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSub {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a.wrapping_sub(b))
     }
 }
 
-pub struct ExecSLL {}
+pub(super) struct ExecSLL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a << b)
     }
 }
 
-pub struct ExecSRL {}
+pub(super) struct ExecSRL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a >> b)
     }
 }
 
-pub struct ExecSRA {}
+pub(super) struct ExecSRA {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRA {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok((a.cast_signed() >> b.cast_signed()).cast_unsigned())
     }
 }
 
-pub struct ExecAnd {}
+pub(super) struct ExecAnd {}
 impl ExecTrait<Result<WordType, Exception>> for ExecAnd {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a & b)
     }
 }
 
-pub struct ExecOr {}
+pub(super) struct ExecOr {}
 impl ExecTrait<Result<WordType, Exception>> for ExecOr {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a | b)
     }
 }
 
-pub struct ExecXor {}
+pub(super) struct ExecXor {}
 impl ExecTrait<Result<WordType, Exception>> for ExecXor {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok(a ^ b)
     }
 }
 
-pub struct ExecSignedLess {}
+pub(super) struct ExecSignedLess {}
 impl ExecTrait<bool> for ExecSignedLess {
     fn exec(a: WordType, b: WordType) -> bool {
         a.cast_signed() < b.cast_signed()
@@ -176,7 +189,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecSignedLess {
     }
 }
 
-pub struct ExecUnsignedLess {}
+pub(super) struct ExecUnsignedLess {}
 impl ExecTrait<bool> for ExecUnsignedLess {
     fn exec(a: WordType, b: WordType) -> bool {
         a < b
@@ -188,35 +201,35 @@ impl ExecTrait<Result<WordType, Exception>> for ExecUnsignedLess {
     }
 }
 
-pub struct ExecEqual {}
+pub(super) struct ExecEqual {}
 impl ExecTrait<bool> for ExecEqual {
     fn exec(a: WordType, b: WordType) -> bool {
         a == b
     }
 }
 
-pub struct ExecNotEqual {}
+pub(super) struct ExecNotEqual {}
 impl ExecTrait<bool> for ExecNotEqual {
     fn exec(a: WordType, b: WordType) -> bool {
         a != b
     }
 }
 
-pub struct ExecSignedGreatEqual {}
+pub(super) struct ExecSignedGreatEqual {}
 impl ExecTrait<bool> for ExecSignedGreatEqual {
     fn exec(a: WordType, b: WordType) -> bool {
         a.cast_signed() >= b.cast_signed()
     }
 }
 
-pub struct ExecUnsignedGreatEqual {}
+pub(super) struct ExecUnsignedGreatEqual {}
 impl ExecTrait<bool> for ExecUnsignedGreatEqual {
     fn exec(a: WordType, b: WordType) -> bool {
         a >= b
     }
 }
 
-pub struct ExecNothing {}
+pub(super) struct ExecNothing {}
 impl ExecTrait<bool> for ExecNothing {
     fn exec(_: WordType, _: WordType) -> bool {
         todo!()

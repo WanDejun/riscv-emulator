@@ -96,7 +96,6 @@ impl Decoder {
                 funct7,
                 instr,
                 format,
-                callback,
             } = desc;
 
             match format {
