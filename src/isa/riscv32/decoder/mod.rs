@@ -1,24 +1,23 @@
-use crate::isa::{
-    riscv32::instruction::{
-        Exception, RVInstrInfo,
-        rv32i_table::{RV32Desc, RiscvInstr, TABLE_RV32I, TABLE_RV32M, TABLE_RV64I, TABLE_RV64M},
+use crate::{
+    config::arch_config::WordType,
+    isa::{
+        riscv32::instruction::{Exception, InstrFormat, RVInstrInfo, rv32i_table::*},
+        utils::ISABuilder,
     },
-    utils::ISABuilder,
 };
 
 mod funct_decoder;
 mod mask_decoder;
 
 trait DecoderTrait {
-    fn from_isa<I>(instrs: I) -> Self
-    where
-        I: IntoIterator<Item = RV32Desc>;
+    fn from_isa(instrs: &[RV32Desc]) -> Self;
 
     fn decode(&self, instr: u32) -> Option<(RiscvInstr, RVInstrInfo)>;
 }
 
 pub struct Decoder {
     funct3_decoder: funct_decoder::Decoder,
+    mask_decoder: mask_decoder::MaskDecoder,
 }
 
 impl Decoder {
@@ -30,23 +29,77 @@ impl Decoder {
             .add(TABLE_RV64M)
             .build();
         Self {
-            funct3_decoder: funct_decoder::Decoder::from_isa(isa),
+            funct3_decoder: funct_decoder::Decoder::from_isa(&isa),
+            mask_decoder: mask_decoder::MaskDecoder::from_isa(&isa),
         }
     }
 
-    pub fn from_isa<I>(instrs: I) -> Self
-    where
-        I: IntoIterator<Item = RV32Desc>,
-    {
+    pub fn from_isa(instrs: &[RV32Desc]) -> Self {
         Self {
+            // TODO: Unnecessary copy happens in funct_decoder::from_isa
             funct3_decoder: funct_decoder::Decoder::from_isa(instrs),
+            mask_decoder: mask_decoder::MaskDecoder::from_isa(instrs),
         }
     }
 
     pub fn decode(&self, instr: u32) -> Result<(RiscvInstr, RVInstrInfo), Exception> {
-        self.funct3_decoder
-            .decode(instr)
+        None.or_else(|| self.mask_decoder.decode(instr))
+            .or_else(|| self.funct3_decoder.decode(instr))
             .ok_or(Exception::InvalidInstruction)
+    }
+}
+
+fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
+    let rd = ((instr >> 7) & 0b11111) as u8;
+    let rs1 = ((instr >> 15) & 0b11111) as u8;
+    let rs2 = ((instr >> 20) & 0b11111) as u8;
+
+    match fmt {
+        InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },
+        InstrFormat::I => {
+            let imm = ((instr >> 20) & 0xFFF) as WordType;
+            RVInstrInfo::I {
+                rd: rd,
+                rs1: rs1,
+                imm: imm,
+            }
+        }
+        InstrFormat::S => {
+            let imm = (((instr >> 25) & 0xFF) << 5) | ((instr >> 7) & 0b11111);
+            RVInstrInfo::S {
+                rs1: rs1,
+                rs2: rs2,
+                imm: imm as WordType,
+            }
+        }
+        InstrFormat::U => {
+            let imm = (instr >> 12) << 12;
+            RVInstrInfo::U {
+                rd: rd,
+                imm: imm as WordType,
+            }
+        }
+        InstrFormat::B => {
+            let imm = (((instr >> 31) & 1) << 12)
+                | (((instr >> 7) & 1) << 11)
+                | (((instr >> 25) & 0b111111) << 5)
+                | (((instr >> 8) & 0b1111) << 1);
+            RVInstrInfo::B {
+                rs1: rs1,
+                rs2: rs2,
+                imm: imm as WordType,
+            }
+        }
+        InstrFormat::J => {
+            let imm = (((instr >> 31) & 1) << 20)
+                | (((instr >> 12) & 0xFF) << 12)
+                | (((instr >> 20) & 1) << 11)
+                | (((instr >> 21) & 0x3FF) << 1);
+            RVInstrInfo::J {
+                rd: rd,
+                imm: imm as WordType,
+            }
+        }
     }
 }
 
@@ -301,6 +354,31 @@ mod tests {
                 rs1: 6,
                 rs2: 12,
                 imm: negative_of(112).truncate_to(13),
+            },
+        );
+
+        checker.check(
+            0x0207d793, // srli	a5,a5,0x20
+            RiscvInstr::SRLI,
+            RVInstrInfo::I {
+                rs1: 15,
+                rd: 15,
+                imm: 0x20,
+            },
+        );
+    }
+
+    #[test]
+    fn test_decoder_rv64i() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            0x4027d79b, //sraiw	a5,a5,0x2
+            RiscvInstr::SRAIW,
+            RVInstrInfo::I {
+                rs1: 15,
+                rd: 15,
+                imm: 2,
             },
         );
     }

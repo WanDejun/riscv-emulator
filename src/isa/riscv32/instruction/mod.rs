@@ -36,6 +36,9 @@ macro_rules! define_riscv_isa {
                     funct3: $funct3:literal,
                     funct7: $funct7:literal,
                     format: $fmt:expr,
+                    mask: $mask:literal,
+                    key: $key:literal,
+                    use_mask: $use_mask:literal,
                 }),* $(,)?
             }
         ),* $(,)?
@@ -50,7 +53,9 @@ macro_rules! define_riscv_isa {
             pub funct7: u8,
             pub instr: $tot_instr_name,
             pub format: InstrFormat,
-            // pub callback: fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception>,
+            pub mask: u32,
+            pub key: u32,
+            pub use_mask: bool,
         }
 
         $(
@@ -62,7 +67,9 @@ macro_rules! define_riscv_isa {
                         funct7: $funct7,
                         instr: $tot_instr_name::$name,
                         format: $fmt,
-                        // callback: $callback,
+                        mask: $mask,
+                        key: $key,
+                        use_mask: $use_mask,
                     }
                 ),*
             ];

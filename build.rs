@@ -1,3 +1,4 @@
+use core::panic;
 use serde_json::Value;
 use std::{collections::HashMap, env, fs, path::PathBuf};
 
@@ -21,6 +22,10 @@ fn get_funct3(s: &str) -> u64 {
 
 fn get_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 25, 31))
+}
+
+fn hex_to_u64(s: &str) -> u64 {
+    u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
 const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i", "rv64_m"];
@@ -93,13 +98,21 @@ fn main() {
                 );
             };
 
+            let mask = hex_to_u64(instr["mask"].as_str().unwrap());
+            let key = hex_to_u64(instr["match"].as_str().unwrap());
+
+            let use_mask = fields.contains(&"shamtd") || fields.contains(&"shamtw");
+
             let s = format!(
-                "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n}}",
+                "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",
                 name.to_uppercase(),
                 opcode,
                 funct3,
                 funct7,
-                format
+                format,
+                mask,
+                key,
+                use_mask
             );
 
             isa_dict.entry(ext).or_default().push(s);
