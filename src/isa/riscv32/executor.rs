@@ -1,5 +1,5 @@
 use crate::{
-    config::arch_config::WordType,
+    config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     device::Mem,
     isa::riscv32::{
@@ -46,12 +46,27 @@ impl RV32CPU {
         rst
     }
 
+    // TODO: Move or delete this when the debugger is implemented
+    fn get_reg_value_string(&self) -> String {
+        let mut s = String::new();
+        for i in 0..REGFILE_CNT {
+            s.push_str(&format!("{}: 0x{:x}", REG_NAME[i], self.reg_file[i]));
+            if i != REGFILE_CNT - 1 {
+                s.push_str(", ");
+            }
+        }
+        s
+    }
+
     pub fn step(&mut self) -> Result<(), Exception> {
         let instr_bytes = self.memory.read::<u32>(self.pc);
-        log::trace!("{:#x}", instr_bytes);
+        log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
         let (instr, info) = self.decoder.decode(instr_bytes)?;
-        log::trace!("Decoded instruction: {:#?}, info: {:#?}", instr, info);
-        self.execute(instr, info)
+        log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
+        self.execute(instr, info)?;
+
+        log::trace!("{}", self.get_reg_value_string());
+        Ok(())
     }
 }
 
