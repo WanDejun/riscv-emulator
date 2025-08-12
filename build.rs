@@ -23,7 +23,7 @@ fn get_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 25, 31))
 }
 
-const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i"];
+const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i", "rv64_m"];
 
 fn main() {
     let json_path = PathBuf::from("./data/instr_dict.json");
@@ -32,6 +32,7 @@ fn main() {
         m.insert("rv_i", "RV32I");
         m.insert("rv_m", "RV32M");
         m.insert("rv64_i", "RV64I");
+        m.insert("rv64_m", "RV64M");
         m
     };
 
@@ -40,7 +41,7 @@ fn main() {
 
     let mut output = String::new();
     output.push_str("define_riscv_isa!(\n");
-    output.push_str("Riscv32Instr,\n");
+    output.push_str("RiscvInstr,\n");
 
     let mut isa_dict: HashMap<&str, Vec<String>> = HashMap::new();
 
@@ -120,8 +121,8 @@ fn main() {
 
     output.push_str(");\n");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("rv32i_gen.rs");
-    fs::write(&out_path, output).expect("Failed to write rv32i_gen.rs");
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("rvinstr_gen.rs");
+    fs::write(&out_path, output).expect("Failed to write rvinstr_gen.rs");
 
     println!("cargo:rerun-if-changed={}", json_path.display());
 }

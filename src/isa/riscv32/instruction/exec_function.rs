@@ -110,6 +110,7 @@ pub fn exec_todo<T>(_info: RVInstrInfo, _cpu: &mut RV32CPU) -> Result<(), Except
 // =============================================
 //                  ExecTrait
 // =============================================
+// Arith
 pub(super) struct ExecAdd {}
 impl ExecTrait<Result<WordType, Exception>> for ExecAdd {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
@@ -184,6 +185,46 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
     }
 }
 
+pub(super) struct ExecMulw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecMulw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend((a * b).truncate_to(32), 32))
+    }
+}
+
+pub(super) struct ExecDivw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        let [sa, sb] = [a, b].map(|x| x.truncate_to(32).cast_signed());
+        Ok(sign_extend((sa / sb).cast_unsigned() as WordType, 32))
+    }
+}
+
+pub(super) struct ExecRemw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        let [sa, sb] = [a, b].map(|x| x.truncate_to(32).cast_signed());
+        Ok(sign_extend((sa % sb).cast_unsigned() as WordType, 32))
+    }
+}
+
+pub(super) struct ExecDivuw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        let [sa, sb] = [a, b].map(|x| x.truncate_to(32));
+        Ok(sign_extend((sa / sb) as WordType, 32))
+    }
+}
+
+pub(super) struct ExecRemuw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        let [sa, sb] = [a, b].map(|x| x.truncate_to(32));
+        Ok(sign_extend((sa % sb) as WordType, 32))
+    }
+}
+
+// Bit
 pub(super) struct ExecSLL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
@@ -240,6 +281,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecXor {
     }
 }
 
+// Compare
 pub(super) struct ExecSignedLess {}
 impl ExecTrait<bool> for ExecSignedLess {
     fn exec(a: WordType, b: WordType) -> bool {

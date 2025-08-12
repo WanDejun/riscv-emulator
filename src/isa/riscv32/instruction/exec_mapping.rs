@@ -24,6 +24,11 @@ pub(in crate::isa::riscv32) fn get_exec_func(
         RiscvInstr::DIVU => |info, cpu| exec_arith::<ExecDivUnsigned>(info, cpu),
         RiscvInstr::REM => |info, cpu| exec_arith::<ExecRemSigned>(info, cpu),
         RiscvInstr::REMU => |info, cpu| exec_arith::<ExecRemUnsigned>(info, cpu),
+        RiscvInstr::MULW => |info, cpu| exec_arith::<ExecMulw>(info, cpu),
+        RiscvInstr::DIVW => |info, cpu| exec_arith::<ExecDivw>(info, cpu),
+        RiscvInstr::DIVUW => |info, cpu| exec_arith::<ExecDivuw>(info, cpu),
+        RiscvInstr::REMW => |info, cpu| exec_arith::<ExecRemw>(info, cpu),
+        RiscvInstr::REMUW => |info, cpu| exec_arith::<ExecRemuw>(info, cpu),
 
         // Shift
         RiscvInstr::SLL | RiscvInstr::SLLI => |info, cpu| exec_arith::<ExecSLL>(info, cpu),

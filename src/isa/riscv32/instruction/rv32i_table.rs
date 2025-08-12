@@ -1,5 +1,8 @@
 use crate::{define_instr_enum, define_riscv_isa, isa::riscv32::instruction::InstrFormat};
 
+include!(concat!(env!("OUT_DIR"), "/rvinstr_gen.rs"));
+
+/*
 define_riscv_isa!(
     RiscvInstr,
     RV32I, TABLE_RV32I, {
@@ -412,3 +415,4 @@ define_riscv_isa!(
         },
     },
 );
+*/
