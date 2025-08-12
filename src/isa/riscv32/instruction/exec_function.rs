@@ -5,7 +5,7 @@ use crate::{
         executor::RV32CPU,
         instruction::{Exception, RVInstrInfo},
     },
-    utils::{UnsignedInteger, sign_extend},
+    utils::{TruncateTo, UnsignedInteger, sign_extend},
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
@@ -187,7 +187,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
 pub(super) struct ExecSLL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a << b)
+        Ok(a << b) // TODO: Do we need to check for shift amount and throw Invalid Instruction?
     }
 }
 
@@ -202,6 +202,20 @@ pub(super) struct ExecSRA {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRA {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         Ok((a.cast_signed() >> b.cast_signed()).cast_unsigned())
+    }
+}
+
+pub(super) struct ExecSLLW {}
+impl ExecTrait<Result<WordType, Exception>> for ExecSLLW {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend((a << b).truncate_to(32), 32))
+    }
+}
+
+pub(super) struct ExecSRLW {}
+impl ExecTrait<Result<WordType, Exception>> for ExecSRLW {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend((a >> b).truncate_to(32), 32))
     }
 }
 

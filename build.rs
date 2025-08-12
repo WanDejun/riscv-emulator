@@ -23,7 +23,7 @@ fn get_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 25, 31))
 }
 
-const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m"];
+const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i"];
 
 fn main() {
     let json_path = PathBuf::from("./data/instr_dict.json");
@@ -31,6 +31,7 @@ fn main() {
         let mut m = HashMap::new();
         m.insert("rv_i", "RV32I");
         m.insert("rv_m", "RV32M");
+        m.insert("rv64_i", "RV64I");
         m
     };
 
@@ -66,7 +67,10 @@ fn main() {
 
             let format = if fields == ["rd", "rs1", "rs2"] {
                 "R"
-            } else if fields == ["rd", "rs1", "imm12"] {
+            } else if fields == ["rd", "rs1", "imm12"]
+                || fields == ["rd", "rs1", "shamtd"]
+                || fields == ["rd", "rs1", "shamtw"]
+            {
                 "I"
             } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {
                 "S"
