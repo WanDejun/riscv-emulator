@@ -2,7 +2,13 @@ use std::collections::HashMap;
 
 use crate::{
     config::arch_config::WordType,
-    isa::{riscv32::instr::*, utils::ISABuilder},
+    isa::{
+        riscv32::instruction::{
+            rv32i_table::{RV32Desc, Riscv32Instr, TABLE_RV32I, TABLE_RV32M},
+            *,
+        },
+        utils::ISABuilder,
+    },
 };
 
 #[derive(Debug, Clone)]
