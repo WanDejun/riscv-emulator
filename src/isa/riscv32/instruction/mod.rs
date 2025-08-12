@@ -1,4 +1,5 @@
 pub(super) mod exec_function;
+pub mod exec_mapping;
 pub mod rv32i_table;
 
 use crate::config::arch_config::WordType;
@@ -35,7 +36,6 @@ macro_rules! define_riscv_isa {
                     funct3: $funct3:literal,
                     funct7: $funct7:literal,
                     format: $fmt:expr,
-                    callback: $callback: expr,
                 }),* $(,)?
             }
         ),* $(,)?
@@ -67,14 +67,6 @@ macro_rules! define_riscv_isa {
                 ),*
             ];
         )*
-
-        pub(in crate::isa::riscv32) fn get_exec_func(
-            instr: $tot_instr_name
-        ) -> fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception> {
-            match instr {
-                $($($tot_instr_name::$name => $callback),*),*
-            }
-        }
     };
 }
 

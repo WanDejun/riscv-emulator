@@ -5,8 +5,7 @@ use crate::{
     isa::riscv32::{
         decoder::Decoder,
         instruction::{
-            Exception, RVInstrInfo,
-            rv32i_table::{Riscv32Instr, get_exec_func},
+            Exception, RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr,
         },
     },
     ram_config::DEFAULT_PC_VALUE,
@@ -40,7 +39,7 @@ impl RV32CPU {
         }
     }
 
-    fn execute(&mut self, instr: Riscv32Instr, info: RVInstrInfo) -> Result<(), Exception> {
+    fn execute(&mut self, instr: RiscvInstr, info: RVInstrInfo) -> Result<(), Exception> {
         let rst = get_exec_func(instr)(info, self);
         self.reg_file[0] = 0;
 
@@ -150,7 +149,7 @@ mod tests {
         }
     }
 
-    fn run_test_exec<F, G>(instr: Riscv32Instr, info: RVInstrInfo, build: F, check: G)
+    fn run_test_exec<F, G>(instr: RiscvInstr, info: RVInstrInfo, build: F, check: G)
     where
         F: FnOnce(TestCPUBuilder) -> TestCPUBuilder,
         G: FnOnce(CPUChecker) -> CPUChecker,
@@ -213,7 +212,7 @@ mod tests {
 
         fn test_rand_r_with(
             &mut self,
-            instr: Riscv32Instr,
+            instr: RiscvInstr,
             lhs: WordType,
             rhs: WordType,
             expected: WordType,
@@ -230,7 +229,7 @@ mod tests {
             );
         }
 
-        fn test_rand_r<F>(&mut self, instr: Riscv32Instr, calc: F)
+        fn test_rand_r<F>(&mut self, instr: RiscvInstr, calc: F)
         where
             F: FnOnce(WordType, WordType) -> WordType,
         {
@@ -240,7 +239,7 @@ mod tests {
 
         fn test_rand_i_with(
             &mut self,
-            instr: Riscv32Instr,
+            instr: RiscvInstr,
             lhs: WordType,
             imm: WordType,
             expected: WordType,
@@ -256,7 +255,7 @@ mod tests {
             );
         }
 
-        fn test_rand_i<F>(&mut self, instr: Riscv32Instr, calc: F)
+        fn test_rand_i<F>(&mut self, instr: RiscvInstr, calc: F)
         where
             F: FnOnce(WordType, WordType) -> WordType,
         {
@@ -271,7 +270,7 @@ mod tests {
         let mut tester = ExecTester::new();
 
         run_test_exec(
-            Riscv32Instr::ADDI,
+            RiscvInstr::ADDI,
             RVInstrInfo::I {
                 rd: 2,
                 rs1: 3,
@@ -282,16 +281,16 @@ mod tests {
         );
 
         for _i in 1..=100 {
-            tester.test_rand_r(Riscv32Instr::ADD, |lhs, rhs| lhs.wrapping_add(rhs));
-            tester.test_rand_r(Riscv32Instr::SUB, |lhs, rhs| lhs.wrapping_sub(rhs));
-            tester.test_rand_i(Riscv32Instr::ADDI, |lhs, imm| lhs.wrapping_add(imm));
+            tester.test_rand_r(RiscvInstr::ADD, |lhs, rhs| lhs.wrapping_add(rhs));
+            tester.test_rand_r(RiscvInstr::SUB, |lhs, rhs| lhs.wrapping_sub(rhs));
+            tester.test_rand_i(RiscvInstr::ADDI, |lhs, imm| lhs.wrapping_add(imm));
 
             // TODO: Add some handmade data,
             // because tests and actual codes are actually written in similar ways.
-            tester.test_rand_i(Riscv32Instr::SLTI, |lhs, imm| {
+            tester.test_rand_i(RiscvInstr::SLTI, |lhs, imm| {
                 ((lhs.cast_signed()) < (sign_extend(imm, 12).cast_signed())) as WordType
             });
-            tester.test_rand_i(Riscv32Instr::SLTIU, |lhs, imm| {
+            tester.test_rand_i(RiscvInstr::SLTIU, |lhs, imm| {
                 ((lhs) < (sign_extend(imm, 12))) as WordType
             });
         }

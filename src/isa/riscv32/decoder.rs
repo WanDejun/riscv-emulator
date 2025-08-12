@@ -4,7 +4,7 @@ use crate::{
     config::arch_config::WordType,
     isa::{
         riscv32::instruction::{
-            rv32i_table::{RV32Desc, Riscv32Instr, TABLE_RV32I, TABLE_RV32M},
+            rv32i_table::{RV32Desc, RiscvInstr, TABLE_RV32I, TABLE_RV32M},
             *,
         },
         utils::ISABuilder,
@@ -13,15 +13,15 @@ use crate::{
 
 #[derive(Debug, Clone)]
 enum PartialDecode {
-    Complete(Riscv32Instr, InstrFormat),
+    Complete(RiscvInstr, InstrFormat),
     RequireF3,
     RequireF7,
 }
 
 pub struct Decoder {
     decode_table: HashMap<u8, PartialDecode>,
-    decode_table_f3: HashMap<(u8, u8), (Riscv32Instr, InstrFormat)>,
-    decode_table_f7: HashMap<(u8, u8, u8), (Riscv32Instr, InstrFormat)>,
+    decode_table_f3: HashMap<(u8, u8), (RiscvInstr, InstrFormat)>,
+    decode_table_f7: HashMap<(u8, u8, u8), (RiscvInstr, InstrFormat)>,
 }
 
 fn decode_info(instr: u32, fmt: InstrFormat) -> RVInstrInfo {
@@ -125,7 +125,7 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&self, instr: u32) -> Result<(Riscv32Instr, RVInstrInfo), Exception> {
+    pub fn decode(&self, instr: u32) -> Result<(RiscvInstr, RVInstrInfo), Exception> {
         let opcode = (instr & 0b1111111) as u8;
         let funct3 = ((instr >> 12) & 0b111) as u8;
         let funct7 = (instr >> 25) as u8;
@@ -233,12 +233,12 @@ mod tests {
             }
         }
 
-        fn check(&mut self, instr: u32, expected: Riscv32Instr, expected_info: RVInstrInfo) {
+        fn check(&mut self, instr: u32, expected: RiscvInstr, expected_info: RVInstrInfo) {
             let result = self.decoder.decode(instr).unwrap();
             assert_eq!(result, (expected, expected_info));
         }
 
-        fn test_instr_r(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8, funct7: u8) {
+        fn test_instr_r(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8, funct7: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let rs2 = self.rng.random_range(0..=0b11111) as u8;
@@ -255,7 +255,7 @@ mod tests {
             );
         }
 
-        fn test_instr_i(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8) {
+        fn test_instr_i(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0xFFF) as u32;
@@ -272,7 +272,7 @@ mod tests {
             );
         }
 
-        fn test_instr_s(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8) {
+        fn test_instr_s(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let rs2 = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0x7FF) as u32;
@@ -289,7 +289,7 @@ mod tests {
             );
         }
 
-        fn test_instr_b(&mut self, instr_kind: Riscv32Instr, opcode: u8, funct3: u8) {
+        fn test_instr_b(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
             let rs1 = self.rng.random_range(0..=0b11111) as u8;
             let rs2 = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0xFFF) << 1 as u32;
@@ -306,7 +306,7 @@ mod tests {
             );
         }
 
-        fn test_instr_u(&mut self, instr_kind: Riscv32Instr, opcode: u8) {
+        fn test_instr_u(&mut self, instr_kind: RiscvInstr, opcode: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0xFFFFF) << 12 as u32;
 
@@ -321,7 +321,7 @@ mod tests {
             );
         }
 
-        fn test_instr_j(&mut self, instr_kind: Riscv32Instr, opcode: u8) {
+        fn test_instr_j(&mut self, instr_kind: RiscvInstr, opcode: u8) {
             let rd = self.rng.random_range(0..=0b11111) as u8;
             let imm = self.rng.random_range(0..=0xFFFFF) << 1 as u32;
 
@@ -342,20 +342,20 @@ mod tests {
         let mut checker = Checker::new();
 
         for _ in 1..=1000 {
-            checker.test_instr_r(Riscv32Instr::ADD, 0b0110011, 0b000, 0b0000000);
-            checker.test_instr_r(Riscv32Instr::SUB, 0b0110011, 0b000, 0b0100000);
+            checker.test_instr_r(RiscvInstr::ADD, 0b0110011, 0b000, 0b0000000);
+            checker.test_instr_r(RiscvInstr::SUB, 0b0110011, 0b000, 0b0100000);
 
-            checker.test_instr_i(Riscv32Instr::ADDI, 0b0010011, 0b000);
-            checker.test_instr_i(Riscv32Instr::ORI, 0b0010011, 0b110);
+            checker.test_instr_i(RiscvInstr::ADDI, 0b0010011, 0b000);
+            checker.test_instr_i(RiscvInstr::ORI, 0b0010011, 0b110);
 
-            checker.test_instr_s(Riscv32Instr::SB, 0b0100011, 0b000);
-            checker.test_instr_s(Riscv32Instr::SW, 0b0100011, 0b010);
+            checker.test_instr_s(RiscvInstr::SB, 0b0100011, 0b000);
+            checker.test_instr_s(RiscvInstr::SW, 0b0100011, 0b010);
 
-            checker.test_instr_b(Riscv32Instr::BNE, 0b1100011, 0b001);
+            checker.test_instr_b(RiscvInstr::BNE, 0b1100011, 0b001);
 
-            checker.test_instr_u(Riscv32Instr::LUI, 0b0110111);
+            checker.test_instr_u(RiscvInstr::LUI, 0b0110111);
 
-            checker.test_instr_j(Riscv32Instr::JAL, 0b1101111);
+            checker.test_instr_j(RiscvInstr::JAL, 0b1101111);
         }
     }
 
@@ -365,7 +365,7 @@ mod tests {
 
         checker.check(
             0x123450b7,
-            Riscv32Instr::LUI,
+            RiscvInstr::LUI,
             RVInstrInfo::U {
                 rd: 1,
                 imm: 0x12345000,
@@ -374,7 +374,7 @@ mod tests {
 
         checker.check(
             0x12233097,
-            Riscv32Instr::AUIPC,
+            RiscvInstr::AUIPC,
             RVInstrInfo::U {
                 rd: 1,
                 imm: 0x12233000,
@@ -383,7 +383,7 @@ mod tests {
 
         checker.check(
             0xffb18113,
-            Riscv32Instr::ADDI,
+            RiscvInstr::ADDI,
             RVInstrInfo::I {
                 rs1: 3,
                 rd: 2,
@@ -393,7 +393,7 @@ mod tests {
 
         checker.check(
             0x00210083,
-            Riscv32Instr::LB,
+            RiscvInstr::LB,
             RVInstrInfo::I {
                 rs1: 2,
                 rd: 1,
@@ -403,7 +403,7 @@ mod tests {
 
         checker.check(
             0xf8c318e3,
-            Riscv32Instr::BNE,
+            RiscvInstr::BNE,
             RVInstrInfo::B {
                 rs1: 6,
                 rs2: 12,
