@@ -8,13 +8,16 @@ use crate::device::cli_uart::FIFOUart;
 
 use crate::{
     config::arch_config::WordType,
-    device::{cli_uart::CliUartHandle, config::Device, uart::Uart16550},
+    device::{
+        cli_uart::CliUartHandle, config::Device, power_manager::PowerManager, uart::Uart16550,
+    },
     handle_trait::HandleTrait,
     utils::UnsignedInteger,
 };
 pub mod cli_uart;
 mod config;
 pub mod mmio;
+pub mod power_manager;
 pub mod uart;
 
 pub trait Mem {
@@ -43,6 +46,8 @@ lazy_static! {
         Uart16550::new(0 as *const u8)
     )));
     pub static ref DEBUG_UART: Mutex<DebugUart> = Mutex::new(DebugUart::new(0 as *const u8));
+    pub static ref POWER_MANAGER: Arc<Mutex<Device>> =
+        Arc::new(Mutex::new(Device::PowerManager(PowerManager::new())));
 }
 
 pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {

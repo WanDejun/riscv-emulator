@@ -1,7 +1,7 @@
 use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
-    device::Mem,
+    device::{DeviceTrait, Mem},
     isa::riscv32::{
         decoder::Decoder,
         instruction::{
@@ -68,6 +68,7 @@ impl RV32CPU {
         let (instr, info) = self.decoder.decode(instr_bytes)?;
         log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
         self.execute(instr, info)?;
+        self.memory.one_shot();
 
         log::trace!("{}", self.debug_reg_string());
         Ok(())

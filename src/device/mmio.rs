@@ -6,8 +6,8 @@ use std::{
 use crate::{
     config::arch_config::WordType,
     device::{
-        DEBUG_UART, DeviceTrait, Mem, UART1,
-        config::{Device, UART_SIZE, UART1_ADDR},
+        DEBUG_UART, DeviceTrait, Mem, POWER_MANAGER, UART1,
+        config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
     },
     ram::Ram,
     ram_config,
@@ -71,6 +71,11 @@ impl MemoryMapIO {
         let ram = Arc::new(Mutex::new(Device::Ram(ram)));
 
         let map = vec![
+            MemoryMapItem::new(
+                POWER_MANAGER_ADDR,
+                POWER_MANAGER_SIZE,
+                POWER_MANAGER.clone(),
+            ),
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, UART1.clone()),
             MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram.clone()),
         ];

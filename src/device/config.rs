@@ -1,11 +1,16 @@
 use super::{DeviceTrait, Mem};
 use crate::{
-    config::arch_config::WordType, device::uart::Uart16550, ram::Ram, utils::UnsignedInteger,
+    config::arch_config::WordType, device::power_manager::PowerManager, device::uart::Uart16550,
+    ram::Ram, utils::UnsignedInteger,
 };
 
+// TODO add size() fn to DeviceTrait
 pub const UART_DEFAULT_DIV: usize = 100;
-pub const UART1_ADDR: WordType = 0x10000000;
 pub const UART_SIZE: WordType = 8;
+pub const UART1_ADDR: WordType = 0x10000000;
+
+pub const POWER_MANAGER_SIZE: WordType = 2;
+pub const POWER_MANAGER_ADDR: WordType = 0x100000;
 
 macro_rules! make_device_enum {
     ( $($name:ident),* $(,)? ) => {
@@ -43,4 +48,4 @@ macro_rules! make_device_enum {
         }
     };
 }
-make_device_enum!(Ram, Uart16550);
+make_device_enum!(Ram, Uart16550, PowerManager);

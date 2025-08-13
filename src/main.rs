@@ -19,7 +19,10 @@ pub use config::ram_config;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::{DEBUG_UART, DeviceTrait, UART1, peripheral_init},
+    device::{
+        DEBUG_UART, DeviceTrait, Mem, POWER_MANAGER, UART1, peripheral_init,
+        power_manager::POWER_OFF_CODE,
+    },
     handle_trait::HandleTrait,
     isa::riscv32,
     logging::LogLevel,
@@ -88,10 +91,16 @@ fn main() {
             eprintln!("Error executing instruction: {:?}", e);
             break;
         }
+        if POWER_MANAGER
+            .lock()
+            .unwrap()
+            .read::<u16>(0)
+            .eq(&POWER_OFF_CODE)
+        {
+            break;
+        }
 
         inst_cnt += 1;
-        UART1.lock().unwrap().one_shot();
-        DEBUG_UART.lock().unwrap().one_shot();
     }
 
     println!("Executed {} instructions.", inst_cnt);
