@@ -19,11 +19,7 @@ pub use config::ram_config;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::{DEBUG_UART, DeviceTrait, UART1, peripheral_init},
-    handle_trait::HandleTrait,
-    isa::riscv32,
-    ram::Ram,
-    vaddr::VirtAddrManager,
+    device::{peripheral_init, DeviceTrait, DEBUG_UART, UART1}, handle_trait::HandleTrait, isa::riscv32, logging::LogLevel, ram::Ram, vaddr::VirtAddrManager
 };
 
 lazy_static! {
@@ -53,10 +49,13 @@ struct Args {
     /// Enable to print more details
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
+
+    #[arg(value_enum, default_value_t = LogLevel::Info)]
+    log_level: LogLevel,
 }
 
 fn main() {
-    let _logger_handle = logging::init();
+    let _logger_handle = logging::init(cli_args.log_level);
     let _init_handle = init();
 
     println!(

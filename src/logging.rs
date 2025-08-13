@@ -1,14 +1,36 @@
+use clap::ValueEnum;
 use flexi_logger::{
     Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
     detailed_format,
 };
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn name(&self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
+}
+
 /// Initialize the logger.
 /// Must keep the [`LoggerHandle`] (returned value) alive up to the very end of your program
 /// to ensure that all buffered log lines are flushed out.
 #[must_use]
-pub fn init() -> LoggerHandle {
-    Logger::try_with_str("trace")
+pub fn init(level: LogLevel) -> LoggerHandle {
+    Logger::try_with_str(level.name())
         .unwrap()
         .log_to_file(
             FileSpec::default()
