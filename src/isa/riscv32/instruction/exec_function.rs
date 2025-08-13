@@ -185,6 +185,21 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
     }
 }
 
+// Arith word
+pub(super) struct ExecAddw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecAddw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend(a.wrapping_add(b).truncate_to(32), 32))
+    }
+}
+
+pub(super) struct ExecSubw {}
+impl ExecTrait<Result<WordType, Exception>> for ExecSubw {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend(a.wrapping_sub(b).truncate_to(32), 32))
+    }
+}
+
 pub(super) struct ExecMulw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
