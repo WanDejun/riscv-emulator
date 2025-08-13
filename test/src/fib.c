@@ -7,7 +7,7 @@
 #define UART_LSR_THRE 0x20 // Bit 5: Transmitter Holding Register Empty
 #define VIRT_POWEROFF_ADDR 0x100000
 
-const int N = 3;
+const int N = 6;
 
 void output(int x) {
     if (x) {
@@ -16,21 +16,18 @@ void output(int x) {
     }
 }
 
-int main() {
-    int a = 1, b = 1, c;
-    for (int i = 1; i <= N; i++) {
-        c = a + b;
-        a = b;
-        b = c;
+int fib(int n) {
+    if (n == 1 || n == 2) {
+        return 1;
     }
 
-    output(c);
+    return fib(n - 1) + fib(n - 2);
+}
 
-    // uart_putc('\n');
-    // volatile uint32_t *poweroff = (uint32_t *)VIRT_POWEROFF_ADDR;
-    // *poweroff = 0x5555;
-    // while (1) { /* 等待 QEMU 退出 */
-    // }
+int main() {
+    output(fib(8));
+    uart_putc('\n');
 
+    // while (1) {}
     return 0;
 }

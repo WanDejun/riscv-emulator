@@ -10,7 +10,7 @@ LD := $(ARCH)-elf-ld
 LD_FLAG := -static -g
 QEMU := qemu-system-$(ARCH)
 
-TARGET := main
+TARGET ?= main
 
 DEFAULT_TARGET: build
 

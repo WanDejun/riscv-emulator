@@ -47,9 +47,13 @@ impl RV32CPU {
     }
 
     // TODO: Move or delete this when the debugger is implemented
-    fn get_reg_value_string(&self) -> String {
+    fn debug_reg_string(&self) -> String {
         let mut s = String::new();
         for i in 0..REGFILE_CNT {
+            if self.reg_file[i] == 0 {
+                continue;
+            }
+
             s.push_str(&format!("{}: 0x{:x}", REG_NAME[i], self.reg_file[i]));
             if i != REGFILE_CNT - 1 {
                 s.push_str(", ");
@@ -65,7 +69,7 @@ impl RV32CPU {
         log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
         self.execute(instr, info)?;
 
-        log::trace!("{}", self.get_reg_value_string());
+        log::trace!("{}", self.debug_reg_string());
         Ok(())
     }
 }
@@ -373,6 +377,12 @@ mod tests {
             0xf81ff06f, // jal x0, -128
             |builder| builder.reg(0, 0).pc(0x1234),
             |checker| checker.pc(0x1234 - 128),
+        );
+
+        run_test_exec_decode(
+            0x00078067, // jr a5
+            |builder| builder.reg(15, 0x2468).pc(0x1234),
+            |checker| checker.pc(0x2468),
         );
     }
 }

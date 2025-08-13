@@ -19,7 +19,7 @@ pub use config::ram_config;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::peripheral_init, handle_trait::HandleTrait, isa::riscv32, ram::Ram,
+    device::{peripheral_init, DeviceTrait, DEBUG_UART, UART1}, handle_trait::HandleTrait, isa::riscv32, ram::Ram,
     vaddr::VirtAddrManager,
 };
 
@@ -75,7 +75,17 @@ fn main() {
 
     let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
 
+    let mut inst_cnt = 0;
     loop {
-        cpu.step().unwrap();
+        if let Err(e) = cpu.step() {
+            eprintln!("Error executing instruction: {:?}", e);
+            break;
+        }
+        
+        inst_cnt += 1;
+        UART1.lock().unwrap().one_shot();
+        DEBUG_UART.lock().unwrap().one_shot();
     }
+
+    println!("Executed {} instructions.", inst_cnt);
 }
