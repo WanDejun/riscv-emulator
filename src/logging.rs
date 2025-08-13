@@ -1,7 +1,6 @@
 use clap::ValueEnum;
 use flexi_logger::{
-    Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode,
-    detailed_format,
+    Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode, opt_format,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -45,7 +44,7 @@ pub fn init(level: LogLevel) -> LoggerHandle {
         )
         .write_mode(WriteMode::BufferAndFlush)
         .duplicate_to_stderr(Duplicate::Warn)
-        .format_for_files(detailed_format)
+        .format_for_files(opt_format)
         .start()
         .unwrap()
 }

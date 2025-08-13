@@ -28,6 +28,8 @@ int main() {
     output(fib(8));
     uart_putc('\n');
 
+    printf("%d\n", 1);
+
     // while (1) {}
     return 0;
 }
