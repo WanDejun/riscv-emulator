@@ -73,10 +73,13 @@ where
 {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         let val = cpu.reg_file.read(rs1, 0).0;
-        let addr = val.wrapping_add(sign_extend(imm, 12));
+        let addr = val
+            .cast_signed()
+            .wrapping_add(sign_extend(imm, 12).cast_signed())
+            .cast_unsigned();
         let mut data: WordType = cpu.memory.read::<T>(addr).into();
         if EXTEND {
-            data = sign_extend(data, 12);
+            data = sign_extend(data, (size_of::<T>() as u32) * 8);
         }
         cpu.reg_file.write(rd, data);
     } else {
@@ -93,7 +96,10 @@ where
 {
     if let RVInstrInfo::S { rs1, rs2, imm } = info {
         let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-        let addr = val1.wrapping_add(sign_extend(imm, 12));
+        let addr = val1
+            .cast_signed()
+            .wrapping_add(sign_extend(imm, 12).cast_signed())
+            .cast_unsigned();
         cpu.memory.write(addr, T::truncate_from(val2));
     } else {
         std::unreachable!();

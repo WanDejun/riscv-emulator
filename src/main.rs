@@ -19,7 +19,10 @@ pub use config::ram_config;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::{peripheral_init, DeviceTrait, DEBUG_UART, UART1}, handle_trait::HandleTrait, isa::riscv32, ram::Ram,
+    device::{DEBUG_UART, DeviceTrait, UART1, peripheral_init},
+    handle_trait::HandleTrait,
+    isa::riscv32,
+    ram::Ram,
     vaddr::VirtAddrManager,
 };
 
@@ -81,7 +84,7 @@ fn main() {
             eprintln!("Error executing instruction: {:?}", e);
             break;
         }
-        
+
         inst_cnt += 1;
         UART1.lock().unwrap().one_shot();
         DEBUG_UART.lock().unwrap().one_shot();

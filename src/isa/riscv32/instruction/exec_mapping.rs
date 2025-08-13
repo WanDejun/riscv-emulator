@@ -15,7 +15,7 @@ pub(in crate::isa::riscv32) fn get_exec_func(
         RiscvInstr::ADD | RiscvInstr::ADDI => |info, cpu| exec_arith::<ExecAdd>(info, cpu),
         RiscvInstr::ADDW | RiscvInstr::ADDIW => |info, cpu| exec_arith::<ExecAddw>(info, cpu),
         RiscvInstr::SUB => |info, cpu| exec_arith::<ExecSub>(info, cpu),
-         RiscvInstr::SUBW => |info, cpu | exec_arith::<ExecSubw>(info, cpu),
+        RiscvInstr::SUBW => |info, cpu| exec_arith::<ExecSubw>(info, cpu),
         RiscvInstr::MUL => |info, cpu| exec_arith::<ExecMulLow>(info, cpu),
         RiscvInstr::MULH => |info, cpu| exec_arith::<ExecMulHighSighed>(info, cpu),
         RiscvInstr::MULHU => |info, cpu| exec_arith::<ExecMulHighUnsigned>(info, cpu),

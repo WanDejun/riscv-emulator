@@ -329,14 +329,31 @@ mod tests {
     fn test_load_store_decode() {
         run_test_exec_decode(
             0x00812183, // lw x3, 8(x2)
-            |builder| builder.reg(2, BASE_ADDR).mem_base::<u64>(8, 123).pc(0x1000),
+            |builder| builder.reg(2, BASE_ADDR).mem_base::<u32>(8, 123).pc(0x1000),
             |checker| checker.reg(3, 123).pc(0x1004),
+        );
+
+        run_test_exec_decode(
+            0xfec42783, // lw a5,-20(s0)
+            |builder| {
+                builder
+                    .reg(8, BASE_ADDR + 36)
+                    .mem_base(16, 123 as u32)
+                    .pc(0x1000)
+            },
+            |checker| checker.reg(15, 123).pc(0x1004),
         );
 
         run_test_exec_decode(
             0xfe112c23, // sw x1, -8(x2)
             |builder| builder.reg(2, BASE_ADDR + 16).reg(1, 123),
             |checker| checker.mem_base::<u32>(8, 123),
+        );
+
+        run_test_exec_decode(
+            0xfcf42e23, //          	sw	a5,-36(s0)
+            |builder| builder.reg(15, 123).reg(8, BASE_ADDR + 72),
+            |checker| checker.mem_base::<u32>(36, 123),
         );
     }
 
