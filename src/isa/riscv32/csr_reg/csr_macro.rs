@@ -1,0 +1,101 @@
+use super::CsrReg;
+use crate::config::arch_config::{SignedWordType, WordType};
+
+macro_rules! gen_csr_reg {
+    (
+        $name:ident, $addr:expr, $default:expr,
+        [ $( $bit:expr, $len:expr, $fname:ident ),*  $(,)? ]
+    ) => {
+        pub struct $name {
+            data: *mut WordType,
+        }
+
+        impl From<*mut WordType> for $name {
+            fn from(value: *mut WordType) -> Self {
+                Self { data: value }
+            }
+        }
+
+        impl CsrReg for $name {
+            fn get_index() -> usize {
+                $addr
+            }
+        }
+
+        impl $name {
+            $(
+                pub fn ${concat(get_, $fname)}(&self) -> WordType {
+                    const LOW_BIT: WordType = if ($bit >= 0) {
+                        ($bit as SignedWordType).abs() as WordType
+                    }
+                    else {
+                        ((size_of::<WordType>() as SignedWordType) + $bit) as WordType
+                    };
+
+                    ((unsafe { self.data.read_volatile() })
+                    & ((WordType::from(1u8) << $len) - 1) << LOW_BIT) >> LOW_BIT
+                }
+
+                pub fn ${concat(set_, $fname)}(&mut self, val: WordType) {
+                    assert!(val < (1 << $len));
+                    const LOW_BIT: WordType = if ($bit >= 0) {
+                        ($bit as SignedWordType).abs() as WordType
+                    }
+                    else {
+                        ((size_of::<WordType>() as SignedWordType) + $bit) as WordType
+                    };
+
+                    let mut data = unsafe { self.data.read_volatile() };
+                    data &= !((((WordType::from(1u8) << $len) - 1) as WordType) << LOW_BIT);
+                    unsafe { self.data.write_volatile(data | (val << LOW_BIT)) };
+                }
+            )*
+        }
+    };
+}
+
+macro_rules! gen_csr_regfile {
+    (
+        $( $name:ident, $addr:expr, $default:expr, [ $( $bit:expr, $len:expr, $fname:ident ),* $(,)? ] );* $(;)?
+    ) => {
+        $(
+            gen_csr_reg!($name, $addr, $default, [ $( $bit, $len, $fname ),* ]);
+        )*
+    };
+}
+
+gen_csr_regfile! {
+    Mstatus, 0x300, 0x00, [
+        1,  1, sie,
+        3,  1, mie,
+        5,  1, spie,
+        6,  1, ube,
+        7,  1, mpie,
+        8,  1, spp,
+        9,  2, vs,
+        11, 2, mpp,
+        13, 2, fs,
+        15, 2, xs,
+        17, 1, mprv,
+        18, 1, sum,
+        19, 1, mxr,
+        20, 1, tvm,
+        21, 1, tw,
+        22, 1, tsr,
+        23, 1, spelp,
+        24, 1, sdt,
+        32, 2, xul,
+        34, 2, sxl,
+        36, 1, sbe,
+        37, 1, mbe,
+        38, 1, gva,
+        39, 1, mpv,
+        40, 1, wpri,
+        41, 1, mpelp,
+        42, 1, mdt,
+        -1, 1, sd,
+    ];
+    Mtvec, 0x305, 0x00, [
+        0, 2, mode,
+    ]
+}

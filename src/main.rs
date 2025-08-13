@@ -1,6 +1,7 @@
 #![cfg_attr(debug_assertions, allow(dead_code))]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
+#![feature(macro_metavar_expr_concat)]
 
 mod config;
 mod cpu;
@@ -20,10 +21,7 @@ use crossterm::terminal::disable_raw_mode;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::{
-        Mem, POWER_MANAGER, peripheral_init,
-        power_manager::POWER_OFF_CODE,
-    },
+    device::{Mem, POWER_MANAGER, peripheral_init, power_manager::POWER_OFF_CODE},
     handle_trait::HandleTrait,
     isa::riscv32,
     logging::LogLevel,
@@ -69,19 +67,19 @@ fn main() {
         "path = {:?}, debug = {}, verbose = {}.",
         cli_args.path, cli_args.debug, cli_args.verbose
     );
-    
+
     let mut ram = Ram::new();
-    
+
     if cli_args.path.extension() == Some("elf".as_ref()) {
         println!("ELF file detected");
-        
+
         let bytes = std::fs::read(&cli_args.path).unwrap();
         load::load_elf(&mut ram, &bytes);
     } else {
         println!("Non-ELF file detected");
         todo!();
     }
-    
+
     let _init_handle = init();
     let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
 
