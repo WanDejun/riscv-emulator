@@ -16,11 +16,12 @@ mod utils;
 
 use clap::Parser;
 pub use config::ram_config;
+use crossterm::terminal::disable_raw_mode;
 use lazy_static::lazy_static;
 
 use crate::{
     device::{
-        DEBUG_UART, DeviceTrait, Mem, POWER_MANAGER, UART1, peripheral_init,
+        Mem, POWER_MANAGER, peripheral_init,
         power_manager::POWER_OFF_CODE,
     },
     handle_trait::HandleTrait,
@@ -58,31 +59,30 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
-    #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Info)]
+    #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Trace)]
     log_level: LogLevel,
 }
 
 fn main() {
     let _logger_handle = logging::init(cli_args.log_level);
-    let _init_handle = init();
-
     println!(
         "path = {:?}, debug = {}, verbose = {}.",
         cli_args.path, cli_args.debug, cli_args.verbose
     );
-
+    
     let mut ram = Ram::new();
-
+    
     if cli_args.path.extension() == Some("elf".as_ref()) {
         println!("ELF file detected");
-
+        
         let bytes = std::fs::read(&cli_args.path).unwrap();
         load::load_elf(&mut ram, &bytes);
     } else {
         println!("Non-ELF file detected");
         todo!();
     }
-
+    
+    let _init_handle = init();
     let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
 
     let mut inst_cnt = 0;
@@ -97,6 +97,7 @@ fn main() {
             .read::<u16>(0)
             .eq(&POWER_OFF_CODE)
         {
+            disable_raw_mode().unwrap();
             break;
         }
 

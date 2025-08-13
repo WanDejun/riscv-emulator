@@ -5,7 +5,7 @@ use crate::{
 };
 
 // TODO add size() fn to DeviceTrait
-pub const UART_DEFAULT_DIV: usize = 100;
+pub const UART_DEFAULT_DIV: usize = 1;
 pub const UART_SIZE: WordType = 8;
 pub const UART1_ADDR: WordType = 0x10000000;
 

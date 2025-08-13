@@ -37,9 +37,11 @@ void Log(LogLevelType level, const char *fmt, ...) {
   va_list args;
   va_copy(args, ap);
 
-  printf("\x1b[%dm[%s] ", color, tag);
+  // printf("\x1b[%dm[%s] ", color, tag);
+  printf("[%s] ", tag);
   vprintf(fmt, args);
-  printf("\x1b[0m\n");
+  printf("\n");
+  // printf("\x1b[0m\n");
 
   va_end(args);
   va_end(ap);

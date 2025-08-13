@@ -1,5 +1,5 @@
 use crate::{
-    config::arch_config::WordType,
+    config::arch_config::{SignedWordType, WordType},
     device::Mem,
     isa::riscv32::{
         executor::RV32CPU,
@@ -141,25 +141,70 @@ impl ExecTrait<Result<WordType, Exception>> for ExecMulLow {
 pub(super) struct ExecMulHighSighed {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSighed {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((((a as u64)
-            .cast_signed()
-            .wrapping_mul((b as u64).cast_signed()))
-            >> 32) as WordType)
+        const XLEN: WordType = (size_of::<WordType>() << 3) as WordType;
+        const HALF_XLEN: WordType = XLEN >> 1;
+        const HALF_XLEN_MAX: WordType = WordType::MAX >> (XLEN >> 1);
+
+        let lhs_hi = a >> HALF_XLEN;
+        let lhs_lo = a & HALF_XLEN_MAX;
+        let rhs_hi = b >> HALF_XLEN;
+        let rhs_lo = b & HALF_XLEN_MAX;
+
+        // 4个部分
+        let p1 = lhs_hi * rhs_hi; // 高高
+        let p2 = lhs_hi * rhs_lo; // 高低
+        let p3 = lhs_lo * rhs_hi; // 低高
+        let p4 = lhs_lo * rhs_lo; // 低低
+
+        // 合并高位
+        let mid = (p2 & HALF_XLEN_MAX) + (p3 & HALF_XLEN_MAX) + (p4 >> HALF_XLEN);
+        let high = p1 + (p2 >> HALF_XLEN) + (p3 >> HALF_XLEN) + (mid >> HALF_XLEN);
+
+        Ok(high)
     }
 }
 
 pub(super) struct ExecMulHighUnsigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulHighUnsigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((u64::from(a).wrapping_mul(b as u64)) >> 32)
+        let a = a as SignedWordType;
+        let b = b as SignedWordType;
+
+        let neg = (a < 0) ^ (b < 0); // 异号
+        let lhs_abs = a.abs();
+        let rhs_abs = b.abs();
+
+        let high = ExecMulHighSighed::exec(lhs_abs as WordType, rhs_abs as WordType)?;
+
+        if neg {
+            // 异号，高位取负
+            let tmp = (lhs_abs as WordType).wrapping_mul(rhs_abs as WordType);
+            let result = (!high).wrapping_add((tmp != 0) as WordType);
+            Ok(result)
+        } else {
+            Ok(high)
+        }
     }
 }
 
 pub(super) struct ExecMulHighSignedUnsigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSignedUnsigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(((a as isize >> (size_of::<WordType>() >> 1))
-            * ((b >> (size_of::<WordType>() >> 1)) as isize)) as WordType)
+        let a = a as SignedWordType;
+        let lhs_neg = a < 0;
+        let lhs_abs = a.abs();
+
+        let high = ExecMulHighSighed::exec(lhs_abs as WordType, b)?;
+
+        if lhs_neg {
+            // 修正符号：高位 = ~(高位) + carry ？ 对应RISC-V mulh_su规则
+            // RISC-V mulh_su: 高位 = -(abs(lhs)*rhs)>>64
+            let tmp = b.wrapping_mul(lhs_abs as WordType);
+            let result = (!high).wrapping_add((tmp != 0) as WordType);
+            Ok(result)
+        } else {
+            Ok(high)
+        }
     }
 }
 

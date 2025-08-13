@@ -9,6 +9,17 @@
 
 const int N = 6;
 
+#define VIRT_POWEROFF_ADDR 0x100000
+
+void PowerOff() {
+    uart_putc('\n');
+    volatile uint32_t *poweroff = (uint32_t *)VIRT_POWEROFF_ADDR;
+    *poweroff = 0x5555;
+    while (1) { /* 等待 QEMU 退出 */
+
+    }
+}
+
 void output(int x) {
     if (x) {
         output(x / 10);
@@ -30,6 +41,6 @@ int main() {
 
     printf("%d\n", 1);
 
-    // while (1) {}
+    PowerOff();
     return 0;
 }
