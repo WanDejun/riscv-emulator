@@ -14,6 +14,7 @@ mod handle_trait;
 mod isa;
 mod logging;
 mod utils;
+mod welcome;
 
 use clap::Parser;
 pub use config::ram_config;
@@ -26,6 +27,7 @@ use crate::{
     logging::LogLevel,
     ram::Ram,
     vaddr::VirtAddrManager,
+    welcome::display_welcome_message,
 };
 
 lazy_static! {
@@ -33,6 +35,7 @@ lazy_static! {
 }
 
 fn init() -> Vec<Box<dyn HandleTrait>> {
+    display_welcome_message();
     let mut handles = vec![];
     let peripheral_handle = peripheral_init();
     for handle in peripheral_handle {
