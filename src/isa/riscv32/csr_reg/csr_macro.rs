@@ -1,6 +1,7 @@
 use super::CsrReg;
 use crate::config::arch_config::{SignedWordType, WordType};
 
+/// Generator a single csr register.
 macro_rules! gen_csr_reg {
     (
         $name:ident, $addr:expr, $default:expr,
@@ -17,7 +18,7 @@ macro_rules! gen_csr_reg {
         }
 
         impl CsrReg for $name {
-            fn get_index() -> usize {
+            fn get_index() -> WordType {
                 $addr
             }
         }
@@ -36,7 +37,7 @@ macro_rules! gen_csr_reg {
                     & ((WordType::from(1u8) << $len) - 1) << LOW_BIT) >> LOW_BIT
                 }
 
-                pub fn ${concat(set_, $fname)}(&mut self, val: WordType) {
+                pub fn ${concat(set_, $fname)}(&self, val: WordType) {
                     assert!(val < (1 << $len));
                     const LOW_BIT: WordType = if ($bit >= 0) {
                         ($bit as SignedWordType).abs() as WordType
@@ -54,6 +55,7 @@ macro_rules! gen_csr_reg {
     };
 }
 
+/// Generator csr RegFile.
 macro_rules! gen_csr_regfile {
     (
         $( $name:ident, $addr:expr, $default:expr, [ $( $bit:expr, $len:expr, $fname:ident ),* $(,)? ] );* $(;)?
@@ -61,6 +63,12 @@ macro_rules! gen_csr_regfile {
         $(
             gen_csr_reg!($name, $addr, $default, [ $( $bit, $len, $fname ),* ]);
         )*
+
+        pub const CSR_REG_TABLE: &[(WordType, WordType)] = &[
+            $(
+                ($addr, $default)
+            ),*
+        ];
     };
 }
 
@@ -95,7 +103,39 @@ gen_csr_regfile! {
         42, 1, mdt,
         -1, 1, sd,
     ];
+
+    Misa, 0x301, 0x00, [
+        0, 25, extension,
+        -2, 2, mxl,
+    ];
+
+    Mie, 0x304, 0x00, [
+        0, size_of::<WordType>(), interrupts
+    ];
+
     Mtvec, 0x305, 0x00, [
         0, 2, mode,
-    ]
+        2, size_of::<WordType>() - 2, base,
+    ];
+
+    Mcratch, 0x340, 0x00, [
+        0, size_of::<WordType>(), mscratch,
+    ];
+
+    Mepc, 0x341, 0x00, [
+        0, size_of::<WordType>(), mepc,
+    ];
+
+    Mcause, 0x342, 0x00, [
+        0, size_of::<WordType>() - 1, exception_code,
+        -1, 1, interrupt,
+    ];
+
+    Mtval, 0x343, 0x00, [
+        0, size_of::<WordType>(), mtval,
+    ];
+
+    Mip, 0x344, 0x00, [
+        0, size_of::<WordType>(), mip,
+    ];
 }

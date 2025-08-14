@@ -17,7 +17,6 @@ mod utils;
 
 use clap::Parser;
 pub use config::ram_config;
-use crossterm::terminal::disable_raw_mode;
 use lazy_static::lazy_static;
 
 use crate::{
@@ -57,30 +56,31 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
-    #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Trace)]
+    #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Info)]
     log_level: LogLevel,
 }
 
 fn main() {
     let _logger_handle = logging::init(cli_args.log_level);
+    let _init_handle = init();
+
     println!(
-        "path = {:?}, debug = {}, verbose = {}.",
+        "path = {:?}, debug = {}, verbose = {}.\r",
         cli_args.path, cli_args.debug, cli_args.verbose
     );
 
     let mut ram = Ram::new();
 
     if cli_args.path.extension() == Some("elf".as_ref()) {
-        println!("ELF file detected");
+        println!("ELF file detected\r");
 
         let bytes = std::fs::read(&cli_args.path).unwrap();
         load::load_elf(&mut ram, &bytes);
     } else {
-        println!("Non-ELF file detected");
+        println!("Non-ELF file detected\r");
         todo!();
     }
 
-    let _init_handle = init();
     let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
 
     let mut inst_cnt = 0;
@@ -95,12 +95,12 @@ fn main() {
             .read::<u16>(0)
             .eq(&POWER_OFF_CODE)
         {
-            disable_raw_mode().unwrap();
+            // disable_raw_mode().unwrap();
             break;
         }
 
         inst_cnt += 1;
     }
 
-    println!("Executed {} instructions.", inst_cnt);
+    println!("Executed {} instructions.\r", inst_cnt);
 }
