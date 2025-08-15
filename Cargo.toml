@@ -23,6 +23,9 @@ rand_chacha = "0.9.0"
 [build-dependencies]
 serde_json = "1.0.142"
 
+[lib]
+doctest = false
+
 [profile.release]
 
 [dev-dependencies.cargo-husky]

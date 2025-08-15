@@ -53,10 +53,10 @@ impl MemoryMapItem {
 /// make sure the address was aligned.
 /// ```
 /// let mut mmio = MemoryMapIO::new();
-/// let a = mmio.read::<WordType>(mem_config::BASE_ADDR + 0x08);
+/// let a = mmio.read::<WordType>(ram_config::BASE_ADDR + 0x08);
 /// let b = mmio.read::<u8>(UART1_ADDR + 0x00);
 /// mmio.write::<u8>(UART1_ADDR + 0x06);
-/// mmio.write::<u32>(mem_config::BASE_ADDR + 0x03); // ILLIGAL! unaligned accesses
+/// mmio.write::<u32>(ram_config::BASE_ADDR + 0x03); // ILLIGAL! unaligned accesses
 /// ```
 pub struct MemoryMapIO {
     map: Vec<MemoryMapItem>,
@@ -216,7 +216,6 @@ mod test {
     }
 
     #[test]
-    /// just for debug, not an test.
     fn mmio_stdio_test() {
         let _handles = peripheral_init();
         let mut mmio = MemoryMapIO::new();

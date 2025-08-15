@@ -60,7 +60,8 @@ impl Drop for CliUartHandle {
 /// - for test, easy to set input and get output from raw test code.
 /// DO NOT input/output to terminal. BUT to inner fifo.
 /// ```no_run
-/// # let rx_wiring: *const u8;
+/// # use riscv_emulator::device::cli_uart::FIFOUart;
+/// # let rx_wiring: *const u8 = std::ptr::null();
 /// let mut debug_uart = FIFOUart::new(rx_wiring);
 /// // Equal type into terminal
 /// debug_uart.send('a' as u8);
