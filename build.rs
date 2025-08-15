@@ -28,7 +28,7 @@ fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
-const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i", "rv64_m"];
+const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i", "rv64_m", "rv_zicsr"];
 
 fn main() {
     let json_path = PathBuf::from("./data/instr_dict.json");
@@ -38,6 +38,7 @@ fn main() {
         m.insert("rv_m", "RV32M");
         m.insert("rv64_i", "RV64I");
         m.insert("rv64_m", "RV64M");
+        m.insert("rv_zicsr", "RVZicsr");
         m
     };
 
@@ -76,6 +77,8 @@ fn main() {
             } else if fields == ["rd", "rs1", "imm12"]
                 || fields == ["rd", "rs1", "shamtd"]
                 || fields == ["rd", "rs1", "shamtw"]
+                || fields == ["rd", "csr", "zimm5"]
+                || fields == ["rd", "rs1", "csr"]
             {
                 "I"
             } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {
@@ -124,7 +127,7 @@ fn main() {
         output.push_str(&format!(
             "{}, {}, {{\n",
             name,
-            String::from("TABLE_") + *name
+            String::from("TABLE_") + &(*name).to_uppercase()
         ));
         for instr in arr {
             output.push_str(&format!("{},\n", instr));

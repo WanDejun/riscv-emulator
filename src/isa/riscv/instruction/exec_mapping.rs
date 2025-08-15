@@ -124,5 +124,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         // We are executing in order, so don't need to do anything.
         RiscvInstr::FENCE => |_info, _cpu| Ok(()),
+
+        _ => todo!(),
     }
 }
