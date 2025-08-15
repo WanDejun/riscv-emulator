@@ -1,7 +1,7 @@
 use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
-    isa::riscv32::{
+    isa::riscv::{
         executor::RV32CPU,
         instruction::{Exception, RVInstrInfo},
     },

@@ -40,9 +40,9 @@ macro_rules! make_device_enum {
         }
 
         impl DeviceTrait for Device {
-            fn one_shot(&mut self) {
+            fn step(&mut self) {
                 match self {
-                    $( Device::$name(dev) => dev.one_shot(), )*
+                    $( Device::$name(dev) => dev.step(), )*
                 }
             }
         }

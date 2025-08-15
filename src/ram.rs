@@ -97,7 +97,7 @@ impl Mem for Ram {
 }
 
 impl DeviceTrait for Ram {
-    fn one_shot(&mut self) {}
+    fn step(&mut self) {}
 }
 
 #[cfg(test)]

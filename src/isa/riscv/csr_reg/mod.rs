@@ -3,7 +3,7 @@ pub mod machine_mode;
 
 use std::collections::HashMap;
 
-use crate::{config::arch_config::WordType, isa::riscv32::csr_reg::csr_macro::CSR_REG_TABLE};
+use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
 
 const CSR_SIZE: usize = 8;
 
@@ -66,7 +66,7 @@ impl CsrRegFile {
 
 #[cfg(test)]
 mod test {
-    use crate::isa::riscv32::csr_reg::{CsrRegFile, csr_index, csr_macro::*};
+    use crate::isa::riscv::csr_reg::{CsrRegFile, csr_index, csr_macro::*};
 
     #[test]
     fn test_rw_by_addr() {

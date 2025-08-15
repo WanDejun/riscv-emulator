@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::isa::riscv32::{
+use crate::isa::riscv::{
     decoder::{DecoderTrait, decode_info},
     instruction::{
         rv32i_table::{RV32Desc, RiscvInstr},

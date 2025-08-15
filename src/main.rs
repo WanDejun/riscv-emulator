@@ -7,7 +7,6 @@ mod config;
 mod cpu;
 mod load;
 mod ram;
-mod vaddr;
 
 mod device;
 mod handle_trait;
@@ -23,10 +22,9 @@ use lazy_static::lazy_static;
 use crate::{
     device::{Mem, POWER_MANAGER, peripheral_init, power_manager::POWER_OFF_CODE},
     handle_trait::HandleTrait,
-    isa::riscv32,
+    isa::riscv::{self, vaddr::VirtAddrManager},
     logging::LogLevel,
     ram::Ram,
-    vaddr::VirtAddrManager,
     welcome::display_welcome_message,
 };
 
@@ -84,7 +82,7 @@ fn main() {
         todo!();
     }
 
-    let mut cpu = riscv32::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
+    let mut cpu = riscv::executor::RV32CPU::from_memory(VirtAddrManager::from_ram(ram));
 
     let mut inst_cnt = 0;
     loop {

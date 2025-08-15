@@ -1,2 +1,2 @@
-pub mod riscv32;
+pub mod riscv;
 mod utils;

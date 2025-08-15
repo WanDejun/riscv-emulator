@@ -30,7 +30,7 @@ impl Mem for PowerManager {
 }
 
 impl DeviceTrait for PowerManager {
-    fn one_shot(&mut self) {}
+    fn step(&mut self) {}
 }
 
 impl PowerManager {

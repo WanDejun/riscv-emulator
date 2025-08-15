@@ -19,8 +19,8 @@ impl CliUart {
             uart: Uart16550::new(rx_wiring),
         }
     }
-    pub fn one_shot(&mut self) {
-        self.uart.one_shot();
+    pub fn step(&mut self) {
+        self.uart.step();
 
         // Output
         if (self.uart.read::<u8>(5) & 0b1) != 0 {
@@ -81,8 +81,8 @@ impl FIFOUart {
             output_fifo: VecDeque::new(),
         }
     }
-    pub fn one_shot(&mut self) {
-        self.uart.one_shot();
+    pub fn step(&mut self) {
+        self.uart.step();
 
         // Output
         if (self.uart.read::<u8>(5) & 0b1) != 0 {
@@ -125,8 +125,8 @@ mod test {
         uart.write(0, 'a' as u8);
         for _ in 0..20 {
             for _ in 0..UART_DEFAULT_DIV * 16 {
-                cli.one_shot();
-                uart.one_shot();
+                cli.step();
+                uart.step();
             }
         }
         disable_raw_mode().unwrap();
@@ -142,8 +142,8 @@ mod test {
         let mut uart = Uart16550::new(cli.uart.get_tx_wiring());
         let _tx_wriing = cli.uart.get_tx_wiring();
         loop {
-            cli.one_shot();
-            uart.one_shot();
+            cli.step();
+            uart.step();
             if (uart.read::<u8>(5) & 0x01) != 0 {
                 let v = uart.read::<u8>(0);
                 println!("{}", v);

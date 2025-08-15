@@ -38,7 +38,7 @@ impl Mem for VirtAddrManager {
 }
 
 impl DeviceTrait for VirtAddrManager {
-    fn one_shot(&mut self) {
-        self.mmio.one_shot();
+    fn step(&mut self) {
+        self.mmio.step();
     }
 }

@@ -1,13 +1,13 @@
 use crate::{
     config::arch_config::WordType,
-    isa::riscv32::{
+    isa::riscv::{
         executor::RV32CPU,
         instruction::{Exception, RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
     },
     utils::sign_extend,
 };
 
-pub(in crate::isa::riscv32) fn get_exec_func(
+pub(in crate::isa::riscv) fn get_exec_func(
     instr: RiscvInstr,
 ) -> fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception> {
     match instr {

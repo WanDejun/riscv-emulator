@@ -2,14 +2,14 @@ use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     device::{DeviceTrait, Mem},
-    isa::riscv32::{
+    isa::riscv::{
         decoder::Decoder,
         instruction::{
             Exception, RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr,
         },
+        vaddr::VirtAddrManager,
     },
     ram_config::DEFAULT_PC_VALUE,
-    vaddr::VirtAddrManager,
 };
 
 pub struct RV32CPU {
@@ -68,7 +68,7 @@ impl RV32CPU {
         let (instr, info) = self.decoder.decode(instr_bytes)?;
         log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
         self.execute(instr, info)?;
-        self.memory.one_shot();
+        self.memory.step();
 
         log::trace!("{}", self.debug_reg_string());
         Ok(())

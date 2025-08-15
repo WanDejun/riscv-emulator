@@ -1,5 +1,5 @@
 use crate::isa::{
-    riscv32::{
+    riscv::{
         decoder::{DecoderTrait, decode_info},
         instruction::{
             InstrFormat, RVInstrInfo,

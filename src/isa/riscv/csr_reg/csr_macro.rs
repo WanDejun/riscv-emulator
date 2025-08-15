@@ -110,7 +110,16 @@ gen_csr_regfile! {
     ];
 
     Mie, 0x304, 0x00, [
-        0, size_of::<WordType>(), interrupts
+        0,  1, usie,
+        1,  1, ssie,
+        2,  1, msie,
+        4,  1, utie,
+        5,  1, stie,
+        6,  1, mtie,
+        8,  1, ueie,
+        9,  1, seie,
+        10, 1, meie,
+        0, size_of::<WordType>(), mip
     ];
 
     Mtvec, 0x305, 0x00, [
@@ -136,6 +145,15 @@ gen_csr_regfile! {
     ];
 
     Mip, 0x344, 0x00, [
+        0,  1, usip,
+        1,  1, ssip,
+        2,  1, msip,
+        4,  1, utip,
+        5,  1, stip,
+        6,  1, mtip,
+        8,  1, ueip,
+        9,  1, seip,
+        10, 1, meip,
         0, size_of::<WordType>(), mip,
     ];
 }

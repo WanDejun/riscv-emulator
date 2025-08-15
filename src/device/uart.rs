@@ -170,7 +170,7 @@ impl Uart16550TX {
         }
     }
 
-    fn one_shot(&mut self) {
+    fn step(&mut self) {
         if self.status == Uart16550Status::IDLE {
             self.tx_data = self.read_tx_data();
             if self.tx_data.is_some() {
@@ -286,7 +286,7 @@ impl Uart16550RX {
         }
     }
 
-    fn one_shot(&mut self) {
+    fn step(&mut self) {
         let divisor = self.uart_reg.borrow().get_divisor(); // DLL + (DLM << 8)
 
         self.div_counter += 1;
@@ -453,9 +453,9 @@ impl Mem for Uart16550 {
     }
 }
 impl DeviceTrait for Uart16550 {
-    fn one_shot(&mut self) {
-        self.tx.one_shot();
-        self.rx.one_shot();
+    fn step(&mut self) {
+        self.tx.step();
+        self.rx.step();
     }
 }
 
@@ -488,7 +488,7 @@ mod test {
         uart_reg.borrow_mut().DLM = 0x03;
 
         for _ in 0..10000 {
-            rx.one_shot();
+            rx.step();
         }
 
         assert!(uart_reg.borrow_mut().DLL == 0xe8);
@@ -499,7 +499,7 @@ mod test {
         for data_bit in data {
             for _ in 0..1000 * 16 {
                 rx_wiring = data_bit;
-                rx.one_shot();
+                rx.step();
             }
         }
         assert!(uart_reg.borrow_mut().LSR & 0x01 != 0);
@@ -522,7 +522,7 @@ mod test {
 
         for i in 0..12 {
             for j in 0..1000 * 16 {
-                tx.one_shot();
+                tx.step();
                 if (j == 8000) {
                     data |= ((unsafe { tx_wire.read_volatile() } as u16) << i);
                 }
@@ -548,8 +548,8 @@ mod test {
         let mut data: u16 = 0;
         for i in 0..12 {
             for j in 0..1000 * 16 {
-                rx.one_shot();
-                tx.one_shot();
+                rx.step();
+                tx.step();
             }
         }
         assert!((uart_reg.borrow_mut().LSR & (1 << 5)) != 0);
@@ -572,7 +572,7 @@ mod test {
 
         for i in 0..12 {
             for j in 0..UART_DEFAULT_DIV * 16 {
-                uart.one_shot();
+                uart.step();
             }
         }
         assert!((uart.read::<u8>(offset::LSR) & (1 << 5)) != 0);

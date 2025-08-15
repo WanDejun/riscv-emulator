@@ -1,7 +1,7 @@
 use crate::{
     config::arch_config::WordType,
     isa::{
-        riscv32::instruction::{Exception, InstrFormat, RVInstrInfo, rv32i_table::*},
+        riscv::instruction::{Exception, InstrFormat, RVInstrInfo, rv32i_table::*},
         utils::ISABuilder,
     },
 };
@@ -116,7 +116,7 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
 mod tests {
     use crate::{
         config::arch_config::WordType,
-        isa::riscv32::instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+        isa::riscv::instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
         utils::{TruncateTo, negative_of},
     };
 

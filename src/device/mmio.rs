@@ -173,11 +173,11 @@ impl Mem for MemoryMapIO {
 }
 
 impl DeviceTrait for MemoryMapIO {
-    fn one_shot(&mut self) {
+    fn step(&mut self) {
         for item in self.map.iter() {
-            item.device.lock().unwrap().one_shot();
+            item.device.lock().unwrap().step();
         }
-        DEBUG_UART.lock().unwrap().one_shot();
+        DEBUG_UART.lock().unwrap().step();
     }
 }
 
@@ -208,7 +208,7 @@ mod test {
         let mut mmio = MemoryMapIO::new();
         mmio.write(UART1_ADDR + 0x00, 'a' as u8);
         for _ in 0..UART_DEFAULT_DIV * 16 * 20 {
-            mmio.one_shot();
+            mmio.step();
         }
         assert_ne!((mmio.read::<u8>(UART1_ADDR + 5) & 0x20), 0);
         assert_eq!((DEBUG_UART.lock().unwrap().uart.read::<u8>(5) & 0x01), 0);
@@ -222,7 +222,7 @@ mod test {
         let mut mmio = MemoryMapIO::new();
         DEBUG_UART.lock().unwrap().send('x' as u8);
         loop {
-            mmio.one_shot();
+            mmio.step();
             if (mmio.read::<u8>(UART1_ADDR + 5) & 0x01) != 0 {
                 assert_eq!(mmio.read::<u8>(UART1_ADDR + 0), 'x' as u8);
                 break;
