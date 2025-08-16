@@ -12,67 +12,65 @@ pub(in crate::isa::riscv) fn get_exec_func(
 ) -> fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception> {
     match instr {
         // Arith
-        RiscvInstr::ADD | RiscvInstr::ADDI => |info, cpu| exec_arith::<ExecAdd>(info, cpu),
-        RiscvInstr::ADDW | RiscvInstr::ADDIW => |info, cpu| exec_arith::<ExecAddw>(info, cpu),
-        RiscvInstr::SUB => |info, cpu| exec_arith::<ExecSub>(info, cpu),
-        RiscvInstr::SUBW => |info, cpu| exec_arith::<ExecSubw>(info, cpu),
-        RiscvInstr::MUL => |info, cpu| exec_arith::<ExecMulLow>(info, cpu),
-        RiscvInstr::MULH => |info, cpu| exec_arith::<ExecMulHighSighed>(info, cpu),
-        RiscvInstr::MULHU => |info, cpu| exec_arith::<ExecMulHighUnsigned>(info, cpu),
-        RiscvInstr::MULHSU => |info, cpu| exec_arith::<ExecMulHighSignedUnsigned>(info, cpu),
-        RiscvInstr::DIV => |info, cpu| exec_arith::<ExecDivSigned>(info, cpu),
-        RiscvInstr::DIVU => |info, cpu| exec_arith::<ExecDivUnsigned>(info, cpu),
-        RiscvInstr::REM => |info, cpu| exec_arith::<ExecRemSigned>(info, cpu),
-        RiscvInstr::REMU => |info, cpu| exec_arith::<ExecRemUnsigned>(info, cpu),
-        RiscvInstr::MULW => |info, cpu| exec_arith::<ExecMulw>(info, cpu),
-        RiscvInstr::DIVW => |info, cpu| exec_arith::<ExecDivw>(info, cpu),
-        RiscvInstr::DIVUW => |info, cpu| exec_arith::<ExecDivuw>(info, cpu),
-        RiscvInstr::REMW => |info, cpu| exec_arith::<ExecRemw>(info, cpu),
-        RiscvInstr::REMUW => |info, cpu| exec_arith::<ExecRemuw>(info, cpu),
+        RiscvInstr::ADD | RiscvInstr::ADDI => exec_arith::<ExecAdd>,
+        RiscvInstr::ADDW | RiscvInstr::ADDIW => exec_arith::<ExecAddw>,
+        RiscvInstr::SUB => exec_arith::<ExecSub>,
+        RiscvInstr::SUBW => exec_arith::<ExecSubw>,
+        RiscvInstr::MUL => exec_arith::<ExecMulLow>,
+        RiscvInstr::MULH => exec_arith::<ExecMulHighSighed>,
+        RiscvInstr::MULHU => exec_arith::<ExecMulHighUnsigned>,
+        RiscvInstr::MULHSU => exec_arith::<ExecMulHighSignedUnsigned>,
+        RiscvInstr::DIV => exec_arith::<ExecDivSigned>,
+        RiscvInstr::DIVU => exec_arith::<ExecDivUnsigned>,
+        RiscvInstr::REM => exec_arith::<ExecRemSigned>,
+        RiscvInstr::REMU => exec_arith::<ExecRemUnsigned>,
+        RiscvInstr::MULW => exec_arith::<ExecMulw>,
+        RiscvInstr::DIVW => exec_arith::<ExecDivw>,
+        RiscvInstr::DIVUW => exec_arith::<ExecDivuw>,
+        RiscvInstr::REMW => exec_arith::<ExecRemw>,
+        RiscvInstr::REMUW => exec_arith::<ExecRemuw>,
 
         // Shift
-        RiscvInstr::SLL | RiscvInstr::SLLI => |info, cpu| exec_arith::<ExecSLL>(info, cpu),
-        RiscvInstr::SRL | RiscvInstr::SRLI => |info, cpu| exec_arith::<ExecSRL>(info, cpu),
+        RiscvInstr::SLL | RiscvInstr::SLLI => exec_arith::<ExecSLL>,
+        RiscvInstr::SRL | RiscvInstr::SRLI => exec_arith::<ExecSRL>,
         RiscvInstr::SRA | RiscvInstr::SRAI | RiscvInstr::SRAW | RiscvInstr::SRAIW => {
-            |info, cpu| exec_arith::<ExecSRA>(info, cpu)
+            exec_arith::<ExecSRA>
         }
 
-        RiscvInstr::SLLW | RiscvInstr::SLLIW => |info, cpu| exec_arith::<ExecSLLW>(info, cpu),
-        RiscvInstr::SRLW | RiscvInstr::SRLIW => |info, cpu| exec_arith::<ExecSRLW>(info, cpu),
+        RiscvInstr::SLLW | RiscvInstr::SLLIW => exec_arith::<ExecSLLW>,
+        RiscvInstr::SRLW | RiscvInstr::SRLIW => exec_arith::<ExecSRLW>,
 
         // Cond set
-        RiscvInstr::SLT | RiscvInstr::SLTI => |info, cpu| exec_arith::<ExecSignedLess>(info, cpu),
-        RiscvInstr::SLTU | RiscvInstr::SLTIU => {
-            |info, cpu| exec_arith::<ExecUnsignedLess>(info, cpu)
-        }
+        RiscvInstr::SLT | RiscvInstr::SLTI => exec_arith::<ExecSignedLess>,
+        RiscvInstr::SLTU | RiscvInstr::SLTIU => exec_arith::<ExecUnsignedLess>,
 
         // Bit
-        RiscvInstr::AND | RiscvInstr::ANDI => |info, cpu| exec_arith::<ExecAnd>(info, cpu),
-        RiscvInstr::OR | RiscvInstr::ORI => |info, cpu| exec_arith::<ExecOr>(info, cpu),
-        RiscvInstr::XOR | RiscvInstr::XORI => |info, cpu| exec_arith::<ExecXor>(info, cpu),
+        RiscvInstr::AND | RiscvInstr::ANDI => exec_arith::<ExecAnd>,
+        RiscvInstr::OR | RiscvInstr::ORI => exec_arith::<ExecOr>,
+        RiscvInstr::XOR | RiscvInstr::XORI => exec_arith::<ExecXor>,
 
         // Branch
-        RiscvInstr::BEQ => |info, cpu| exec_branch::<ExecEqual>(info, cpu),
-        RiscvInstr::BNE => |info, cpu| exec_branch::<ExecNotEqual>(info, cpu),
-        RiscvInstr::BLT => |info, cpu| exec_branch::<ExecSignedLess>(info, cpu),
-        RiscvInstr::BGE => |info, cpu| exec_branch::<ExecSignedGreatEqual>(info, cpu),
-        RiscvInstr::BLTU => |info, cpu| exec_branch::<ExecUnsignedLess>(info, cpu),
-        RiscvInstr::BGEU => |info, cpu| exec_branch::<ExecUnsignedGreatEqual>(info, cpu),
+        RiscvInstr::BEQ => exec_branch::<ExecEqual>,
+        RiscvInstr::BNE => exec_branch::<ExecNotEqual>,
+        RiscvInstr::BLT => exec_branch::<ExecSignedLess>,
+        RiscvInstr::BGE => exec_branch::<ExecSignedGreatEqual>,
+        RiscvInstr::BLTU => exec_branch::<ExecUnsignedLess>,
+        RiscvInstr::BGEU => exec_branch::<ExecUnsignedGreatEqual>,
 
         // Load
-        RiscvInstr::LB => |info, cpu| exec_load::<u8, true>(info, cpu),
-        RiscvInstr::LBU => |info, cpu| exec_load::<u8, false>(info, cpu),
-        RiscvInstr::LH => |info, cpu| exec_load::<u16, true>(info, cpu),
-        RiscvInstr::LHU => |info, cpu| exec_load::<u16, false>(info, cpu),
-        RiscvInstr::LW => |info, cpu| exec_load::<u32, true>(info, cpu),
-        RiscvInstr::LWU => |info, cpu| exec_load::<u32, false>(info, cpu),
-        RiscvInstr::LD => |info, cpu| exec_load::<u64, false>(info, cpu),
+        RiscvInstr::LB => exec_load::<u8, true>,
+        RiscvInstr::LBU => exec_load::<u8, false>,
+        RiscvInstr::LH => exec_load::<u16, true>,
+        RiscvInstr::LHU => exec_load::<u16, false>,
+        RiscvInstr::LW => exec_load::<u32, true>,
+        RiscvInstr::LWU => exec_load::<u32, false>,
+        RiscvInstr::LD => exec_load::<u64, false>,
 
         // Store
-        RiscvInstr::SB => |info, cpu| exec_store::<u8>(info, cpu),
-        RiscvInstr::SH => |info, cpu| exec_store::<u16>(info, cpu),
-        RiscvInstr::SW => |info, cpu| exec_store::<u32>(info, cpu),
-        RiscvInstr::SD => |info, cpu| exec_store::<u64>(info, cpu),
+        RiscvInstr::SB => exec_store::<u8>,
+        RiscvInstr::SH => exec_store::<u16>,
+        RiscvInstr::SW => exec_store::<u32>,
+        RiscvInstr::SD => exec_store::<u64>,
 
         // Jump and link
         RiscvInstr::JAL => |inst_info: RVInstrInfo, cpu: &mut RV32CPU| {
@@ -125,6 +123,11 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // We are executing in order, so don't need to do anything.
         RiscvInstr::FENCE => |_info, _cpu| Ok(()),
 
-        _ => todo!(),
+        RiscvInstr::CSRRW => exec_todo::<()>,
+        RiscvInstr::CSRRC => exec_todo::<()>,
+        RiscvInstr::CSRRS => exec_todo::<()>,
+        RiscvInstr::CSRRWI => exec_todo::<()>,
+        RiscvInstr::CSRRCI => exec_todo::<()>,
+        RiscvInstr::CSRRSI => exec_todo::<()>,
     }
 }
