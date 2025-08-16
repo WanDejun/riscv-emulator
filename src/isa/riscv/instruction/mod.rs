@@ -80,7 +80,7 @@ macro_rules! define_riscv_isa {
 #[derive(Debug, Clone)]
 pub enum Exception {
     InvalidInstruction,
-    ECall,
+    EBreak,
 }
 
 // call [`define_riscv_isa!`] to generate instructions

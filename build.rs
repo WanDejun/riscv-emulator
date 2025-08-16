@@ -104,7 +104,10 @@ fn main() {
             let mask = hex_to_u64(instr["mask"].as_str().unwrap());
             let key = hex_to_u64(instr["match"].as_str().unwrap());
 
-            let use_mask = fields.contains(&"shamtd") || fields.contains(&"shamtw");
+            let use_mask = fields.contains(&"shamtd")
+                || fields.contains(&"shamtw")
+                || name == "ecall"
+                || name == "ebreak";
 
             let s = format!(
                 "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",

@@ -3,15 +3,15 @@
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
-mod config;
 mod cpu;
 mod load;
 mod ram;
+mod utils;
 
+pub mod config;
 pub mod device;
 pub mod handle_trait;
-mod isa;
-mod utils;
+pub mod isa;
 
 pub use config::ram_config;
 
@@ -56,5 +56,15 @@ impl Emulator {
         }
         self.cpu.power_off()?;
         Ok(instr_cnt)
+    }
+
+    pub fn cpu_mut(&mut self) -> &mut RV32CPU {
+        &mut self.cpu
+    }
+}
+
+impl Into<RV32CPU> for Emulator {
+    fn into(self) -> RV32CPU {
+        self.cpu
     }
 }

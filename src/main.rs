@@ -3,6 +3,7 @@
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
+mod dbg_repl;
 mod logging;
 mod welcome;
 
@@ -10,7 +11,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{Emulator, device::peripheral_init};
 
-use crate::{logging::LogLevel, welcome::display_welcome_message};
+use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
 
 lazy_static! {
     static ref cli_args: Args = Args::parse();
@@ -22,7 +23,7 @@ struct Args {
     /// Path of the target executable file(.elf/.bin)
     path: std::path::PathBuf,
 
-    /// enable debug
+    /// Enable debugger REPL
     #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
 
@@ -52,12 +53,16 @@ fn main() {
         todo!();
     };
 
-    match emulator.run() {
-        Ok(cnt) => {
-            println!("Executed {} instructions.\r", cnt);
-        }
-        Err(e) => {
-            eprintln!("Error occurred while running emulator: {:?}\r", e);
+    if cli_args.debug {
+        DebugREPL::new(emulator.into()).run();
+    } else {
+        match emulator.run() {
+            Ok(cnt) => {
+                println!("Executed {} instructions.\r", cnt);
+            }
+            Err(e) => {
+                eprintln!("Error occurred while running emulator: {:?}\r", e);
+            }
         }
     }
 }

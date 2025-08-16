@@ -375,6 +375,26 @@ mod tests {
                 imm: 0x20,
             },
         );
+
+        checker.check(
+            0x100073,
+            RiscvInstr::EBREAK,
+            RVInstrInfo::I {
+                rs1: 0,
+                rd: 0,
+                imm: 1,
+            },
+        );
+
+        checker.check(
+            0x000073,
+            RiscvInstr::ECALL,
+            RVInstrInfo::I {
+                rs1: 0,
+                rd: 0,
+                imm: 0,
+            },
+        );
     }
 
     #[test]
