@@ -3,6 +3,7 @@
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
+mod dbg_repl;
 mod logging;
 mod welcome;
 
@@ -10,7 +11,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{Emulator, device::peripheral_init};
 
-use crate::{logging::LogLevel, welcome::display_welcome_message};
+use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
 
 lazy_static! {
     static ref cli_args: Args = Args::parse();
@@ -53,7 +54,7 @@ fn main() {
     };
 
     if cli_args.debug {
-        todo!()
+        DebugREPL::new(emulator.into()).run();
     } else {
         match emulator.run() {
             Ok(cnt) => {
