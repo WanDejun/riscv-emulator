@@ -9,10 +9,8 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum DebugEvent {
-    Reset { pc: WordType },
     StepCompleted { pc: WordType },
     BreakpointHit { pc: WordType },
-    Halted { pc: WordType },
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -75,6 +73,7 @@ impl Breakpoint {
     }
 }
 
+// TODO: Refactor to contain a RV32CPU instead of passing &mut every time.
 pub struct Debugger<T: DebugTarget> {
     breakpoints: BTreeMap<Breakpoint, u32>,
     _marker: PhantomData<T>,
@@ -154,23 +153,21 @@ impl<T: DebugTarget> Debugger<T> {
         target: &mut T,
         max_steps: u64,
     ) -> Result<DebugEvent, DebugError> {
-        if self
-            .breakpoints
-            .contains_key(&Breakpoint::new(target.read_pc()))
-        {
+        let mut rest = max_steps;
+        if self.on_breakpoint(target) {
             self.step_over_breakpoint(target)?;
+            rest -= 1;
         }
 
-        let mut steps = 0u64;
         loop {
-            if steps >= max_steps {
-                return Ok(DebugEvent::Halted {
+            if rest == 0 {
+                return Ok(DebugEvent::StepCompleted {
                     pc: target.read_pc(),
                 });
             }
             match target.step() {
                 Ok(()) => {
-                    steps += 1;
+                    rest -= 1;
                 }
                 Err(Exception::EBreak) => {
                     return Ok(DebugEvent::BreakpointHit {
@@ -184,7 +181,7 @@ impl<T: DebugTarget> Debugger<T> {
         }
     }
 
-    pub fn r#continue(&mut self, target: &mut T) -> Result<DebugEvent, DebugError> {
+    pub fn continue_run(&mut self, target: &mut T) -> Result<DebugEvent, DebugError> {
         self.continue_until(target, u64::MAX)
     }
 
