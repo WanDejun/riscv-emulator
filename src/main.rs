@@ -22,7 +22,7 @@ struct Args {
     /// Path of the target executable file(.elf/.bin)
     path: std::path::PathBuf,
 
-    /// enable debug
+    /// Enable debugger REPL
     #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
 
@@ -52,12 +52,16 @@ fn main() {
         todo!();
     };
 
-    match emulator.run() {
-        Ok(cnt) => {
-            println!("Executed {} instructions.\r", cnt);
-        }
-        Err(e) => {
-            eprintln!("Error occurred while running emulator: {:?}\r", e);
+    if cli_args.debug {
+        todo!()
+    } else {
+        match emulator.run() {
+            Ok(cnt) => {
+                println!("Executed {} instructions.\r", cnt);
+            }
+            Err(e) => {
+                eprintln!("Error occurred while running emulator: {:?}\r", e);
+            }
         }
     }
 }
