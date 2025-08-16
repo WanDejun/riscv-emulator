@@ -3,7 +3,10 @@ pub mod machine_mode;
 
 use std::collections::HashMap;
 
-use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, UniversalCsr},
+};
 
 const CSR_SIZE: usize = 8;
 
@@ -26,6 +29,8 @@ mod csr_index {
 
 pub trait CsrReg: From<*mut WordType> {
     fn get_index() -> WordType;
+    fn clear_by_mask(&mut self, mask: WordType);
+    fn set_by_mask(&mut self, mask: WordType);
 }
 
 pub struct CsrRegFile {
@@ -61,6 +66,11 @@ impl CsrRegFile {
     {
         let val = self.table.get_mut(&T::get_index()).unwrap();
         T::from(val as *mut u64)
+    }
+
+    pub fn get<'a>(&'a mut self, addr: WordType) -> UniversalCsr {
+        let val = self.table.get_mut(&addr).unwrap();
+        UniversalCsr::from(val as *mut u64)
     }
 }
 

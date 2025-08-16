@@ -123,11 +123,11 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // We are executing in order, so don't need to do anything.
         RiscvInstr::FENCE => |_info, _cpu| Ok(()),
 
-        RiscvInstr::CSRRW => exec_todo::<()>,
-        RiscvInstr::CSRRC => exec_todo::<()>,
-        RiscvInstr::CSRRS => exec_todo::<()>,
-        RiscvInstr::CSRRWI => exec_todo::<()>,
-        RiscvInstr::CSRRCI => exec_todo::<()>,
-        RiscvInstr::CSRRSI => exec_todo::<()>,
+        RiscvInstr::CSRRW => exec_csrw::<false>,
+        RiscvInstr::CSRRC => exec_csr_bit::<false, false>,
+        RiscvInstr::CSRRS => exec_csr_bit::<true, false>,
+        RiscvInstr::CSRRWI => exec_csrw::<true>,
+        RiscvInstr::CSRRCI => exec_csr_bit::<false, true>,
+        RiscvInstr::CSRRSI => exec_csr_bit::<true, true>,
     }
 }

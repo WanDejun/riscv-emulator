@@ -3,6 +3,7 @@ use crate::{
     cpu::RegFile,
     device::{DeviceTrait, Mem},
     isa::riscv::{
+        csr_reg::CsrRegFile,
         decoder::Decoder,
         instruction::{
             Exception, RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr,
@@ -17,16 +18,12 @@ pub struct RV32CPU {
     pub(super) memory: VirtAddrManager,
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
+    pub(super) csr: CsrRegFile,
 }
 
 impl RV32CPU {
     pub fn new() -> Self {
-        Self {
-            reg_file: RegFile::new(),
-            memory: VirtAddrManager::new(),
-            pc: DEFAULT_PC_VALUE,
-            decoder: Decoder::new(),
-        }
+        Self::from_memory(VirtAddrManager::new())
     }
 
     // TODO: A builder struct may be useful for future use.
@@ -36,6 +33,7 @@ impl RV32CPU {
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
+            csr: CsrRegFile::new(),
         }
     }
 

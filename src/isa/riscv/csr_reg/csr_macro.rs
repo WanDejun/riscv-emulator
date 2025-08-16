@@ -4,7 +4,7 @@ use crate::config::arch_config::{SignedWordType, WordType};
 /// Generator a single csr register.
 macro_rules! gen_csr_reg {
     (
-        $name:ident, $addr:expr, $default:expr,
+        $name:ident, $addr:expr,
         [ $( $bit:expr, $len:expr, $fname:ident ),*  $(,)? ]
     ) => {
         pub struct $name {
@@ -20,6 +20,12 @@ macro_rules! gen_csr_reg {
         impl CsrReg for $name {
             fn get_index() -> WordType {
                 $addr
+            }
+            fn clear_by_mask(&mut self, mask: WordType) {
+                unsafe {*self.data &= !(mask)}
+            }
+            fn set_by_mask(&mut self, mask: WordType) {
+                unsafe {*self.data |= mask}
             }
         }
 
@@ -61,7 +67,7 @@ macro_rules! gen_csr_regfile {
         $( $name:ident, $addr:expr, $default:expr, [ $( $bit:expr, $len:expr, $fname:ident ),* $(,)? ] );* $(;)?
     ) => {
         $(
-            gen_csr_reg!($name, $addr, $default, [ $( $bit, $len, $fname ),* ]);
+            gen_csr_reg!($name, $addr, [ $( $bit, $len, $fname ),* ]);
         )*
 
         pub const CSR_REG_TABLE: &[(WordType, WordType)] = &[
@@ -156,4 +162,8 @@ gen_csr_regfile! {
         10, 1, meip,
         0, size_of::<WordType>(), mip,
     ];
+}
+
+gen_csr_reg! {
+    UniversalCsr, 0x114514, []
 }

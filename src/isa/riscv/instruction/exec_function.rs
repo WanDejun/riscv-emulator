@@ -2,6 +2,7 @@ use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
     isa::riscv::{
+        csr_reg::CsrReg,
         executor::RV32CPU,
         instruction::{Exception, RVInstrInfo},
     },
@@ -106,6 +107,53 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    Ok(())
+}
+
+pub(super) fn exec_csrw<const UIMM: bool>(
+    info: RVInstrInfo,
+    cpu: &mut RV32CPU,
+) -> Result<(), Exception> {
+    if let RVInstrInfo::I { rs1, rd, imm } = info {
+        if rd != 0 {
+            let value = cpu.csr.read(imm).unwrap();
+            cpu.reg_file.write(rd, value);
+        }
+
+        if UIMM {
+            cpu.csr.write(imm, rs1 as WordType);
+        } else {
+            let new_value = cpu.reg_file.read(rs1, rs1).0;
+            cpu.csr.write(imm, new_value);
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
+    info: RVInstrInfo,
+    cpu: &mut RV32CPU,
+) -> Result<(), Exception> {
+    if let RVInstrInfo::I { rs1, rd, imm } = info {
+        if rd != 0 || UIMM {
+            let value = cpu.csr.read(imm).unwrap();
+            cpu.reg_file.write(rd, value);
+        }
+
+        let rhs = if UIMM {
+            rd as WordType
+        } else {
+            cpu.reg_file.read(rs1, rs1).0
+        };
+
+        if SET {
+            cpu.csr.get(imm).set_by_mask(rhs);
+        } else {
+            cpu.csr.get(imm).clear_by_mask(rhs);
+        }
+    }
+
     Ok(())
 }
 
