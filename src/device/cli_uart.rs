@@ -1,9 +1,11 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
+    thread,
     time::Duration,
 };
 
+use crossbeam::channel::{self, Receiver, Sender};
 use crossterm::event::{self, Event, KeyCode};
 #[cfg(not(test))]
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -15,16 +17,22 @@ use crate::{
 
 pub struct CliUart {
     pub uart: Uart16550,
-    input_buffer: VecDeque<u8>,
-    // output_buffer: VecDeque<u8>,
+    pub(super) input_tx: Sender<u8>,
+    input_rx: Receiver<u8>,
+    output_tx: Sender<u8>,
+    pub(super) output_rx: Receiver<u8>,
 }
 
 impl CliUart {
     pub fn new(rx_wiring: *const u8) -> Self {
+        let (input_tx, input_rx) = channel::unbounded();
+        let (output_tx, output_rx) = channel::unbounded();
         Self {
             uart: Uart16550::new(rx_wiring),
-            input_buffer: VecDeque::new(),
-            // output_buffer: VecDeque::new(),
+            input_tx,
+            input_rx,
+            output_tx,
+            output_rx,
         }
     }
     pub fn step(&mut self) {
@@ -32,58 +40,62 @@ impl CliUart {
 
         // Output
         if (self.uart.read::<u8>(5) & 0b1) != 0 {
-            print!("{}", self.uart.read::<u8>(0) as char);
-            io::stdout().flush().unwrap();
+            self.output_tx.send(self.uart.read::<u8>(0)).unwrap();
         }
 
         // Input
-        if event::poll(Duration::from_millis(0)).unwrap() {
-            if let Event::Key(k) = event::read().unwrap() {
-                match k.code {
-                    KeyCode::Char(c) => {
-                        self.input_buffer.push_back(c as u8);
-                    }
-                    KeyCode::Tab => {
-                        self.input_buffer.push_back('\t' as u8);
-                    }
-                    KeyCode::Backspace => {
-                        self.input_buffer.push_back('\x08' as u8); // '\b'
-                    }
-                    KeyCode::Enter => {
-                        self.input_buffer.push_back('\r' as u8);
-                    }
-                    KeyCode::Up => {
-                        self.input_buffer.push_back(0x1B);
-                        self.input_buffer.push_back(0x5B);
-                        self.input_buffer.push_back(0x41);
-                    }
-                    KeyCode::Down => {
-                        self.input_buffer.push_back(0x1B);
-                        self.input_buffer.push_back(0x5B);
-                        self.input_buffer.push_back(0x42);
-                    }
-                    KeyCode::Left => {
-                        self.input_buffer.push_back(0x1B);
-                        self.input_buffer.push_back(0x5B);
-                        self.input_buffer.push_back(0x44);
-                    }
-                    KeyCode::Right => {
-                        self.input_buffer.push_back(0x1B);
-                        self.input_buffer.push_back(0x5B);
-                        self.input_buffer.push_back(0x43);
-                    }
-                    _ => {
-                        todo!();
-                    }
-                }
-            }
-        }
         if !self.uart.tx_is_busy() {
-            if let Some(v) = self.input_buffer.pop_front() {
+            if let Ok(v) = self.input_rx.try_recv() {
                 self.uart.write(0x00, v);
             }
         }
     }
+}
+
+pub fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>) {
+    thread::spawn(move || {
+        loop {
+            // output epoll
+            while let Ok(v) = output_rx.try_recv() {
+                print!("{}", v as char);
+            }
+            io::stdout().flush().unwrap();
+
+            // input epoll
+            if event::poll(Duration::from_millis(100)).unwrap() {
+                if let Event::Key(k) = event::read().unwrap() {
+                    match k.code {
+                        KeyCode::Char(c) => input_tx.send(c as u8).unwrap(),
+                        KeyCode::Tab => input_tx.send(b'\t').unwrap(),
+                        KeyCode::Backspace => input_tx.send(0x08).unwrap(),
+                        KeyCode::Enter => input_tx.send(b'\r').unwrap(),
+                        KeyCode::Up => {
+                            for v in [0x1B, 0x5B, 0x41] {
+                                input_tx.send(v).unwrap();
+                            }
+                        }
+                        KeyCode::Down => {
+                            for v in [0x1B, 0x5B, 0x42] {
+                                input_tx.send(v).unwrap();
+                            }
+                        }
+                        KeyCode::Left => {
+                            for v in [0x1B, 0x5B, 0x43] {
+                                input_tx.send(v).unwrap();
+                            }
+                        }
+                        KeyCode::Right => {
+                            for v in [0x1B, 0x5B, 0x44] {
+                                input_tx.send(v).unwrap();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // std::thread::sleep(Duration::from_millis(1));
+        }
+    });
 }
 
 /// Set terminal to raw mode. RAII to unset terminal raw mode.

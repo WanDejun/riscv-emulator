@@ -36,8 +36,8 @@ int fib(int n) {
 
 int main() {
     int n;
-    scanf("%d", &n);
-    output(fib(n));
+    // scanf("%d", &n);
+    output(fib(25));
     uart_putc('\n');
 
     printf("%d\n", 1);

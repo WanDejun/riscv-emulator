@@ -7,7 +7,9 @@ use crate::{
     config::arch_config::WordType,
     device::{
         DEBUG_UART, DeviceTrait, Mem, POWER_MANAGER, UART1,
-        config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
+        config::{
+            Device, MMIO_FREQ_DIV, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR,
+        },
     },
     ram::Ram,
     ram_config,
@@ -59,6 +61,7 @@ impl MemoryMapItem {
 /// mmio.write::<u32>(ram_config::BASE_ADDR + 0x03); // ILLIGAL! unaligned accesses
 /// ```
 pub struct MemoryMapIO {
+    dev_counter: usize,
     map: Vec<MemoryMapItem>,
 }
 
@@ -79,7 +82,10 @@ impl MemoryMapIO {
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, UART1.clone()),
             MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram.clone()),
         ];
-        Self { map }
+        Self {
+            dev_counter: 0,
+            map,
+        }
     }
 
     fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> T
@@ -174,16 +180,22 @@ impl Mem for MemoryMapIO {
 
 impl DeviceTrait for MemoryMapIO {
     fn step(&mut self) {
-        for item in self.map.iter() {
-            item.device.lock().unwrap().step();
+        if self.dev_counter == MMIO_FREQ_DIV {
+            self.dev_counter = 0;
+
+            for item in self.map.iter() {
+                item.device.lock().unwrap().step();
+            }
+            DEBUG_UART.lock().unwrap().step();
         }
-        DEBUG_UART.lock().unwrap().step();
+
+        self.dev_counter += 1;
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::device::{config::UART_DEFAULT_DIV, peripheral_init};
+    use crate::device::{DEBUG_UART, config::UART_DEFAULT_DIV, peripheral_init};
 
     use super::*;
 
@@ -207,7 +219,7 @@ mod test {
         let _handles = peripheral_init();
         let mut mmio = MemoryMapIO::new();
         mmio.write(UART1_ADDR + 0x00, 'a' as u8);
-        for _ in 0..UART_DEFAULT_DIV * 16 * 20 {
+        for _ in 0..MMIO_FREQ_DIV * UART_DEFAULT_DIV * 16 * 20 {
             mmio.step();
         }
         assert_ne!((mmio.read::<u8>(UART1_ADDR + 5) & 0x20), 0);

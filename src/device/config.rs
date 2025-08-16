@@ -5,12 +5,14 @@ use crate::{
 };
 
 // TODO add size() fn to DeviceTrait
-pub const UART_DEFAULT_DIV: usize = 2;
+pub const UART_DEFAULT_DIV: usize = 1;
 pub const UART_SIZE: WordType = 8;
 pub const UART1_ADDR: WordType = 0x10000000;
 
 pub const POWER_MANAGER_SIZE: WordType = 2;
 pub const POWER_MANAGER_ADDR: WordType = 0x100000;
+
+pub const MMIO_FREQ_DIV: usize = 32;
 
 macro_rules! make_device_enum {
     ( $($name:ident),* $(,)? ) => {

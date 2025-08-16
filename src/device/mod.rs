@@ -1,10 +1,10 @@
 use lazy_static::lazy_static;
 use std::sync::{Arc, Mutex};
 
-#[cfg(not(test))]
-use crate::device::cli_uart::CliUart;
 #[cfg(test)]
 use crate::device::cli_uart::FIFOUart;
+#[cfg(not(test))]
+use crate::device::cli_uart::{CliUart, spawn_io_thread};
 
 use crate::{
     config::arch_config::WordType,
@@ -58,6 +58,10 @@ pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
             uart.change_rx_wiring(cli_inner_uart.get_tx_wiring());
             cli_inner_uart.change_rx_wiring(uart.get_tx_wiring());
         }
+    }
+    #[cfg(not(test))]
+    if let Ok(guard) = DEBUG_UART.lock() {
+        spawn_io_thread(guard.input_tx.clone(), guard.output_rx.clone());
     }
 
     return vec![Box::new(CliUartHandle::new())];
