@@ -4,7 +4,7 @@
 // 定义 UART 内存映射地址 (QEMU virt 平台)
 #define UART_ADDR 0x10000000
 #define UART_LSR_ADDR (UART_ADDR + 0x05)
-#define UART_LSR_THRE 0x20 // Bit 5: Transmitter Holding Register Empty
+#define UART_LSR_THRE 0x20  // Bit 5: Transmitter Holding Register Empty
 #define VIRT_POWEROFF_ADDR 0x100000
 
 const int N = 6;
@@ -13,10 +13,9 @@ const int N = 6;
 
 void PowerOff() {
     uart_putc('\n');
-    volatile uint32_t *poweroff = (uint32_t *)VIRT_POWEROFF_ADDR;
+    volatile uint32_t* poweroff = (uint32_t*)VIRT_POWEROFF_ADDR;
     *poweroff = 0x5555;
     while (1) { /* 等待 QEMU 退出 */
-
     }
 }
 
@@ -36,7 +35,9 @@ int fib(int n) {
 }
 
 int main() {
-    output(fib(8));
+    int n;
+    scanf("%d", &n);
+    output(fib(n));
     uart_putc('\n');
 
     printf("%d\n", 1);
