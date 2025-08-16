@@ -74,7 +74,7 @@ uint8_t uart_getc() {
         linebuf[buf_len++] = data;
 
         // 行结束 → 完成一行
-        if (data == '\n' || buf_len >= INPUT_LINEBUF_SIZE - 1) {
+        if (data == '\n' || data == '\r' || buf_len >= INPUT_LINEBUF_SIZE - 1) {
             break;
         }
     }

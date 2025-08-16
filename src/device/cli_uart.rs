@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{
+    collections::VecDeque,
+    io::{self, Write},
+    time::Duration,
+};
 
 use crossterm::event::{self, Event, KeyCode};
 #[cfg(not(test))]
@@ -11,12 +15,16 @@ use crate::{
 
 pub struct CliUart {
     pub uart: Uart16550,
+    input_buffer: VecDeque<u8>,
+    // output_buffer: VecDeque<u8>,
 }
 
 impl CliUart {
     pub fn new(rx_wiring: *const u8) -> Self {
         Self {
             uart: Uart16550::new(rx_wiring),
+            input_buffer: VecDeque::new(),
+            // output_buffer: VecDeque::new(),
         }
     }
     pub fn step(&mut self) {
@@ -25,14 +33,54 @@ impl CliUart {
         // Output
         if (self.uart.read::<u8>(5) & 0b1) != 0 {
             print!("{}", self.uart.read::<u8>(0) as char);
+            io::stdout().flush().unwrap();
         }
 
         // Input
         if event::poll(Duration::from_millis(0)).unwrap() {
             if let Event::Key(k) = event::read().unwrap() {
-                if let KeyCode::Char(c) = k.code {
-                    self.uart.write(0x00, c as u8);
+                match k.code {
+                    KeyCode::Char(c) => {
+                        self.input_buffer.push_back(c as u8);
+                    }
+                    KeyCode::Tab => {
+                        self.input_buffer.push_back('\t' as u8);
+                    }
+                    KeyCode::Backspace => {
+                        self.input_buffer.push_back('\x08' as u8); // '\b'
+                    }
+                    KeyCode::Enter => {
+                        self.input_buffer.push_back('\r' as u8);
+                    }
+                    KeyCode::Up => {
+                        self.input_buffer.push_back(0x1B);
+                        self.input_buffer.push_back(0x5B);
+                        self.input_buffer.push_back(0x41);
+                    }
+                    KeyCode::Down => {
+                        self.input_buffer.push_back(0x1B);
+                        self.input_buffer.push_back(0x5B);
+                        self.input_buffer.push_back(0x42);
+                    }
+                    KeyCode::Left => {
+                        self.input_buffer.push_back(0x1B);
+                        self.input_buffer.push_back(0x5B);
+                        self.input_buffer.push_back(0x44);
+                    }
+                    KeyCode::Right => {
+                        self.input_buffer.push_back(0x1B);
+                        self.input_buffer.push_back(0x5B);
+                        self.input_buffer.push_back(0x43);
+                    }
+                    _ => {
+                        todo!();
+                    }
                 }
+            }
+        }
+        if !self.uart.tx_is_busy() {
+            if let Some(v) = self.input_buffer.pop_front() {
+                self.uart.write(0x00, v);
             }
         }
     }

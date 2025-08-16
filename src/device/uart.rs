@@ -390,6 +390,10 @@ impl Uart16550 {
     pub fn get_tx_wiring(&self) -> *const u8 {
         self.tx.get_wire()
     }
+
+    pub fn tx_is_busy(&self) -> bool {
+        (self.reg.borrow().LSR & (1 << 5)) == 0
+    }
 }
 
 impl Mem for Uart16550 {
