@@ -63,6 +63,8 @@ pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
     #[cfg(not(test))]
     if let Ok(guard) = DEBUG_UART.lock() {
         spawn_io_thread(guard.input_tx.clone(), guard.output_rx.clone());
+    } else {
+        panic!("Failed to get DEBUG_UART");
     }
 
     return vec![Box::new(CliUartHandle::new())];

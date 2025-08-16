@@ -2,8 +2,8 @@ use std::io::Write;
 
 use clap::{Parser, Subcommand};
 
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use riscv_emulator::{
+    cli_coordinator::CliCoordinator,
     config::arch_config::{REG_NAME, WordType},
     isa::riscv::{
         debugger::{DebugEvent, Debugger},
@@ -60,7 +60,8 @@ pub struct DebugREPL {
 
 impl DebugREPL {
     pub fn new(cpu: RV32CPU) -> Self {
-        disable_raw_mode().expect("Failed to disable raw mode");
+        CliCoordinator::global().pause_uart();
+
         DebugREPL {
             dbg: Debugger::<RV32CPU>::new(),
             cpu,
@@ -92,9 +93,9 @@ impl DebugREPL {
     }
 
     fn handle_continue(&mut self, steps: u64) -> Result<(), String> {
-        enable_raw_mode().map_err(|e| e.to_string())?;
+        CliCoordinator::global().resume_uart();
         let rst = self.dbg.continue_until(&mut self.cpu, steps);
-        disable_raw_mode().map_err(|e| e.to_string())?;
+        CliCoordinator::global().pause_uart();
 
         match rst {
             Ok(DebugEvent::StepCompleted { pc }) => {
@@ -112,8 +113,6 @@ impl DebugREPL {
     fn respond(&mut self, line: &str) -> Result<bool, String> {
         let argv = line.split_whitespace().map(|s| s.to_string());
         let cli = Cli::try_parse_from(argv).map_err(|e| e.to_string())?;
-
-        disable_raw_mode().map_err(|e| e.to_string())?;
 
         match cli {
             Cli::Print(PrintCmd::Pc) => {

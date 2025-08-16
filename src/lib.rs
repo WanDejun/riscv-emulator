@@ -8,6 +8,7 @@ mod load;
 mod ram;
 mod utils;
 
+pub mod cli_coordinator;
 pub mod config;
 pub mod device;
 pub mod handle_trait;

@@ -16,6 +16,8 @@ use crate::{
     utils::read_bit,
 };
 
+use crate::cli_coordinator::CliCoordinator;
+
 pub struct CliUart {
     pub uart: Uart16550,
     pub(super) input_tx: Sender<u8>,
@@ -62,6 +64,8 @@ impl CliUart {
 pub fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>) {
     thread::spawn(move || {
         loop {
+            CliCoordinator::global().confirm_pause_and_wait();
+
             // output epoll
             while let Ok(v) = output_rx.try_recv() {
                 print!("{}", v as char);
