@@ -73,6 +73,11 @@ impl RV32CPU {
         log::trace!("{}", self.debug_reg_string());
         Ok(())
     }
+
+    pub fn power_off(&mut self) -> Result<(), Exception> {
+        self.memory.sync();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

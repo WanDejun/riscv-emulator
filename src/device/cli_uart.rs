@@ -13,6 +13,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crate::{
     device::{DeviceTrait, Mem, uart::Uart16550},
     handle_trait::HandleTrait,
+    utils::read_bit,
 };
 
 pub struct CliUart {
@@ -44,10 +45,16 @@ impl CliUart {
         }
 
         // Input
-        if !self.uart.tx_is_busy() {
+        if self.uart.transmit_holding_empty() {
             if let Ok(v) = self.input_rx.try_recv() {
                 self.uart.write(0x00, v);
             }
+        }
+    }
+
+    pub fn sync(&mut self) {
+        while !read_bit(&self.uart.read::<u8>(5), 6) || !self.output_rx.is_empty() {
+            self.step();
         }
     }
 }
@@ -156,6 +163,12 @@ impl FIFOUart {
             if let Some(val) = self.input_fifo.pop_front() {
                 self.uart.write(0x00, val);
             }
+        }
+    }
+
+    pub fn sync(&mut self) {
+        while !read_bit(&self.uart.read::<u8>(5), 6) || !self.output_fifo.is_empty() {
+            self.step();
         }
     }
 

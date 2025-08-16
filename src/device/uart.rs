@@ -85,19 +85,19 @@ impl Uart16550Reg {
     }
 
     fn get_tx_data(&mut self) -> Option<u8> {
-        if read_bit(&self.LSR, 6) {
+        if read_bit(&self.LSR, 5) {
             None
         } else {
-            set_bit(&mut self.LSR, 6);
+            set_bit(&mut self.LSR, 5);
             Some(self.THR)
         }
     }
 
-    fn write_transmit_holding_empty<const BIT: bool>(&mut self) {
+    fn write_transmit_empty<const BIT: bool>(&mut self) {
         if BIT {
-            set_bit(&mut self.LSR, 5);
+            set_bit(&mut self.LSR, 6);
         } else {
-            clear_bit(&mut self.LSR, 5);
+            clear_bit(&mut self.LSR, 6);
         }
     }
 
@@ -176,13 +176,9 @@ impl Uart16550TX {
             if self.tx_data.is_some() {
                 self.status = Uart16550Status::START;
                 *self.tx_reg = 0;
-                self.uart_reg
-                    .borrow_mut()
-                    .write_transmit_holding_empty::<false>();
+                self.uart_reg.borrow_mut().write_transmit_empty::<false>();
             } else {
-                self.uart_reg
-                    .borrow_mut()
-                    .write_transmit_holding_empty::<true>();
+                self.uart_reg.borrow_mut().write_transmit_empty::<true>();
             }
         }
 
@@ -379,7 +375,7 @@ impl Uart16550 {
 
     #[allow(non_snake_case)]
     fn write_THR(&mut self, tx_data: u8) {
-        clear_bit(&mut self.reg.borrow_mut().LSR, 6); // transmit empty
+        clear_bit(&mut self.reg.borrow_mut().LSR, 5); // transmit empty
         self.reg.borrow_mut().THR = tx_data;
     }
 
@@ -391,7 +387,7 @@ impl Uart16550 {
         self.tx.get_wire()
     }
 
-    pub fn tx_is_busy(&self) -> bool {
+    pub fn transmit_holding_empty(&self) -> bool {
         (self.reg.borrow().LSR & (1 << 5)) == 0
     }
 }
@@ -461,6 +457,11 @@ impl DeviceTrait for Uart16550 {
         self.tx.step();
         self.rx.step();
     }
+    fn sync(&mut self) {
+        while !(read_bit(&self.reg.borrow().LSR, 6)) {
+            self.step();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -520,7 +521,7 @@ mod test {
         uart_reg.borrow_mut().DLM = 0x03;
 
         uart_reg.borrow_mut().THR = 0xaa;
-        clear_bit(&mut uart_reg.borrow_mut().LSR, 6);
+        clear_bit(&mut uart_reg.borrow_mut().LSR, 5);
 
         let mut data: u16 = 0;
 
@@ -532,9 +533,11 @@ mod test {
                 }
             }
             if i == 2 {
-                assert!((uart_reg.borrow_mut().LSR & (1 << 5)) == 0);
+                assert!((uart_reg.borrow_mut().LSR & (1 << 5)) != 0);
+                assert!((uart_reg.borrow_mut().LSR & (1 << 6)) == 0);
             }
         }
+        assert!((uart_reg.borrow_mut().LSR & (1 << 6)) != 0);
         assert!(((data >> 1) & 0xff) == 0xaa);
     }
 
@@ -547,7 +550,7 @@ mod test {
         uart_reg.borrow_mut().DLL = 0xe8;
         uart_reg.borrow_mut().DLM = 0x03;
         uart_reg.borrow_mut().THR = 0xaa;
-        clear_bit(&mut uart_reg.borrow_mut().LSR, 6);
+        clear_bit(&mut uart_reg.borrow_mut().LSR, 5);
 
         let mut data: u16 = 0;
         for i in 0..12 {
@@ -556,7 +559,7 @@ mod test {
                 tx.step();
             }
         }
-        assert!((uart_reg.borrow_mut().LSR & (1 << 5)) != 0);
+        assert!((uart_reg.borrow_mut().LSR & (1 << 6)) != 0);
         assert!(uart_reg.borrow_mut().LSR & 0x01 != 0);
         assert!(uart_reg.borrow_mut().RBR == 0xaa);
     }
@@ -580,6 +583,7 @@ mod test {
             }
         }
         assert!((uart.read::<u8>(offset::LSR) & (1 << 5)) != 0);
+        assert!((uart.read::<u8>(offset::LSR) & (1 << 6)) != 0);
         assert!((uart.read::<u8>(offset::LSR) & 0x01) != 0);
         assert!(uart.read::<u8>(offset::RBR) == 0xaa);
         assert!((uart.read::<u8>(offset::LSR) & 0x01) == 0);

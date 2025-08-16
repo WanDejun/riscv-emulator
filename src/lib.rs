@@ -54,7 +54,7 @@ impl Emulator {
 
             instr_cnt += 1;
         }
-
+        self.cpu.power_off()?;
         Ok(instr_cnt)
     }
 }

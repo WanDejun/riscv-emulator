@@ -33,6 +33,7 @@ pub trait Mem {
 // Check align requirement before device.read/write. Most of align requirement was checked in mmio.
 pub trait DeviceTrait: Mem {
     fn step(&mut self);
+    fn sync(&mut self);
 }
 
 #[cfg(test)]

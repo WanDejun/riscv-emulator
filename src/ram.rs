@@ -96,8 +96,10 @@ impl Mem for Ram {
     }
 }
 
+// there is nothing todo.
 impl DeviceTrait for Ram {
     fn step(&mut self) {}
+    fn sync(&mut self) {}
 }
 
 #[cfg(test)]

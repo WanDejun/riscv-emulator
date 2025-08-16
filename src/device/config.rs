@@ -47,6 +47,11 @@ macro_rules! make_device_enum {
                     $( Device::$name(dev) => dev.step(), )*
                 }
             }
+            fn sync(&mut self) {
+                match self {
+                    $( Device::$name(dev) => dev.sync(), )*
+                }
+            }
         }
     };
 }

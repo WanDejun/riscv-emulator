@@ -191,6 +191,12 @@ impl DeviceTrait for MemoryMapIO {
 
         self.dev_counter += 1;
     }
+    fn sync(&mut self) {
+        for item in self.map.iter() {
+            item.device.lock().unwrap().sync();
+        }
+        DEBUG_UART.lock().unwrap().sync();
+    }
 }
 
 #[cfg(test)]
