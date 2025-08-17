@@ -22,7 +22,7 @@ impl<Desc: Clone> ISABuilder<Desc> {
 #[macro_export]
 macro_rules! define_instr_enum {
     ($isa_name:ident, $($name:ident),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum $isa_name {
             $($name),*
         }

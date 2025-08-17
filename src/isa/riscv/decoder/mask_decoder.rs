@@ -1,8 +1,8 @@
 use crate::isa::{
     riscv::{
-        decoder::{DecoderTrait, decode_info},
+        decoder::{DecodeInstr, DecoderTrait, decode_info},
         instruction::{
-            InstrFormat, RVInstrInfo,
+            InstrFormat,
             rv32i_table::{RV32Desc, RiscvInstr},
         },
     },
@@ -14,10 +14,10 @@ pub(super) struct MaskDecoder {
 }
 
 impl DecoderTrait for MaskDecoder {
-    fn decode(&self, raw_instr: u32) -> Option<(RiscvInstr, RVInstrInfo)> {
+    fn decode(&self, raw_instr: u32) -> Option<DecodeInstr> {
         for (mask, instr, fmt) in self.masks.iter() {
             if mask.matches(raw_instr) {
-                return Some((*instr, decode_info(raw_instr, *instr, *fmt)));
+                return Some(DecodeInstr(*instr, decode_info(raw_instr, *instr, *fmt)));
             }
         }
 

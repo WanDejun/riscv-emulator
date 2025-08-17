@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::isa::riscv::{
-    decoder::{DecoderTrait, decode_info},
+    decoder::{DecodeInstr, DecoderTrait, decode_info},
     instruction::{
         rv32i_table::{RV32Desc, RiscvInstr},
         *,
@@ -65,7 +65,7 @@ impl DecoderTrait for Decoder {
         }
     }
 
-    fn decode(&self, instr: u32) -> Option<(RiscvInstr, RVInstrInfo)> {
+    fn decode(&self, instr: u32) -> Option<DecodeInstr> {
         let opcode = (instr & 0b1111111) as u8;
         let funct3 = ((instr >> 12) & 0b111) as u8;
         let funct7 = (instr >> 25) as u8;
@@ -74,17 +74,17 @@ impl DecoderTrait for Decoder {
 
         match partial {
             PartialDecode::Complete(instr_kind, fmt) => {
-                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
+                return Some(DecodeInstr(instr_kind, decode_info(instr, instr_kind, fmt)));
             }
             PartialDecode::RequireF3 => {
                 let (instr_kind, fmt) = self.decode_table_f3.get(&(opcode, funct3))?.clone();
-                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
+                return Some(DecodeInstr(instr_kind, decode_info(instr, instr_kind, fmt)));
             }
             PartialDecode::RequireF7 => {
                 let (instr_kind, fmt) =
                     self.decode_table_f7.get(&(opcode, funct3, funct7))?.clone();
 
-                return Some((instr_kind, decode_info(instr, instr_kind, fmt)));
+                return Some(DecodeInstr(instr_kind, decode_info(instr, instr_kind, fmt)));
             }
         }
     }

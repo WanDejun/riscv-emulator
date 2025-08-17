@@ -30,6 +30,8 @@ pub trait DebugTarget {
     fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T);
 
     fn step(&mut self) -> Result<(), Exception>;
+
+    fn decoded_info(&mut self, addr: WordType) -> Result<String, Exception>;
 }
 
 impl DebugTarget for RV32CPU {
@@ -59,6 +61,11 @@ impl DebugTarget for RV32CPU {
 
     fn step(&mut self) -> Result<(), Exception> {
         RV32CPU::step(self)
+    }
+
+    fn decoded_info(&mut self, addr: WordType) -> Result<String, Exception> {
+        let instr = self.read_mem::<u32>(addr);
+        Ok(self.decoder.decode(instr)?.to_string())
     }
 }
 
@@ -211,5 +218,9 @@ impl<T: DebugTarget> Debugger<T> {
 
     pub fn write_mem<V: UnsignedInteger>(&self, target: &mut T, addr: WordType, data: V) {
         target.write_mem::<V>(addr, data)
+    }
+
+    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> Result<String, Exception> {
+        target.decoded_info(addr)
     }
 }

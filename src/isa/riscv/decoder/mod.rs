@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{
     config::arch_config::WordType,
     isa::{
@@ -9,10 +11,19 @@ use crate::{
 mod funct_decoder;
 mod mask_decoder;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodeInstr(pub RiscvInstr, pub RVInstrInfo);
+
+impl Display for DecodeInstr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}, {:?}", self.0, self.1)
+    }
+}
+
 trait DecoderTrait {
     fn from_isa(instrs: &[RV32Desc]) -> Self;
 
-    fn decode(&self, instr: u32) -> Option<(RiscvInstr, RVInstrInfo)>;
+    fn decode(&self, instr: u32) -> Option<DecodeInstr>;
 }
 
 pub struct Decoder {
@@ -42,7 +53,7 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&self, instr: u32) -> Result<(RiscvInstr, RVInstrInfo), Exception> {
+    pub fn decode(&self, instr: u32) -> Result<DecodeInstr, Exception> {
         // TODO: Should we call `decode_info` here instead of in `mask_decoder` and `funct3_decoder`?
         None.or_else(|| self.mask_decoder.decode(instr))
             .or_else(|| self.funct3_decoder.decode(instr))
@@ -190,7 +201,7 @@ mod tests {
 
         fn check(&mut self, instr: u32, expected: RiscvInstr, expected_info: RVInstrInfo) {
             let result = self.decoder.decode(instr).unwrap();
-            assert_eq!(result, (expected, expected_info));
+            assert_eq!(result, DecodeInstr(expected, expected_info));
         }
 
         fn test_instr_r(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8, funct7: u8) {

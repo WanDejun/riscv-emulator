@@ -5,7 +5,7 @@ pub mod rv32i_table;
 use crate::config::arch_config::WordType;
 
 /// `imm` values saved should be shifted, like B, U and J type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RVInstrInfo {
     R { rs1: u8, rs2: u8, rd: u8 },
     I { rs1: u8, rd: u8, imm: WordType },

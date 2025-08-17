@@ -4,7 +4,7 @@ use crate::{
     device::{DeviceTrait, Mem},
     isa::riscv::{
         csr_reg::CsrRegFile,
-        decoder::Decoder,
+        decoder::{DecodeInstr, Decoder},
         instruction::{
             Exception, RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr,
         },
@@ -63,7 +63,7 @@ impl RV32CPU {
     pub fn step(&mut self) -> Result<(), Exception> {
         let instr_bytes = self.memory.read::<u32>(self.pc);
         log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
-        let (instr, info) = self.decoder.decode(instr_bytes)?;
+        let DecodeInstr(instr, info) = self.decoder.decode(instr_bytes)?;
         log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
         self.execute(instr, info)?;
         self.memory.step();
@@ -188,7 +188,7 @@ mod tests {
         G: FnOnce(CPUChecker) -> CPUChecker,
     {
         let mut cpu = build(TestCPUBuilder::new()).build();
-        let (instr, info) = cpu.decoder.decode(raw_instr).unwrap();
+        let DecodeInstr(instr, info) = cpu.decoder.decode(raw_instr).unwrap();
         cpu.execute(instr, info).unwrap();
         check(CPUChecker::new(&mut cpu));
     }
