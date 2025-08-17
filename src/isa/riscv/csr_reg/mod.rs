@@ -139,5 +139,9 @@ mod test {
 
         mstatus.set_mpp(0b10);
         assert_eq!(mstatus.get_mpp(), 0b10);
+
+        let mtvec = reg.get_by_type::<Mtvec>();
+        reg.write(csr_index::mtvec, 0x114514);
+        assert_eq!(mtvec.get_base(), 0x114514 >> 2);
     }
 }
