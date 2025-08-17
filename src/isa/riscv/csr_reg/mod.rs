@@ -1,5 +1,4 @@
 pub mod csr_macro;
-pub mod machine_mode;
 
 use std::collections::HashMap;
 
@@ -8,11 +7,9 @@ use crate::{
     isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, UniversalCsr},
 };
 
-const CSR_SIZE: usize = 8;
-
 #[rustfmt::skip]
 #[allow(non_upper_case_globals)]
-mod csr_index {
+pub(crate) mod csr_index {
     use crate::config::arch_config::WordType;
 
     pub const mstatus   : WordType  = 0x300;    // CPU 状态寄存器，控制中断使能、特权级别
@@ -27,14 +24,39 @@ mod csr_index {
     // pub const mhartid   : WordType  = 0xF14;    // CPU hart ID（多核情况下）
 }
 
-pub trait CsrReg: From<*mut WordType> {
+#[repr(u8)]
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+/// Only support machine_mode now.
+pub(crate) enum PrivilegeLevel {
+    // U = 0,
+    // S = 1,
+    // V = 2,
+    M = 3,
+}
+
+impl From<u8> for PrivilegeLevel {
+    fn from(value: u8) -> PrivilegeLevel {
+        match value {
+            // 0 => PrivilegeLevel::U,
+            // 1 => PrivilegeLevel::S,
+            // 2 => PrivilegeLevel::V,
+            3 => PrivilegeLevel::M,
+            _ => unreachable!("Invalid privilege level: {}", value),
+        }
+    }
+}
+
+const DEFAULT_PRIVILEGE_LEVEL: PrivilegeLevel = PrivilegeLevel::M;
+
+pub(crate) trait CsrReg: From<*mut WordType> {
     fn get_index() -> WordType;
     fn clear_by_mask(&mut self, mask: WordType);
     fn set_by_mask(&mut self, mask: WordType);
 }
 
-pub struct CsrRegFile {
+pub(crate) struct CsrRegFile {
     table: HashMap<WordType, WordType>,
+    cpl: PrivilegeLevel, // current privileged level
 }
 
 impl CsrRegFile {
@@ -47,7 +69,10 @@ impl CsrRegFile {
         for (addr, default_value) in csr_table.iter() {
             table.insert(*addr, *default_value);
         }
-        Self { table }
+        Self {
+            table,
+            cpl: DEFAULT_PRIVILEGE_LEVEL,
+        }
     }
 
     pub fn read(&self, addr: WordType) -> Option<WordType> {
@@ -71,6 +96,14 @@ impl CsrRegFile {
     pub fn get<'a>(&'a mut self, addr: WordType) -> UniversalCsr {
         let val = self.table.get_mut(&addr).unwrap();
         UniversalCsr::from(val as *mut u64)
+    }
+
+    pub fn get_current_privileged(&self) -> PrivilegeLevel {
+        self.cpl
+    }
+
+    pub fn set_current_privileged(&mut self, new_level: PrivilegeLevel) {
+        self.cpl = new_level
     }
 }
 

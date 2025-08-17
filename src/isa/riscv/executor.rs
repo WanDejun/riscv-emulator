@@ -6,7 +6,7 @@ use crate::{
         csr_reg::CsrRegFile,
         decoder::Decoder,
         instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
-        trap::Exception,
+        trap::{Exception, Trap, trap_controller::TrapController},
         vaddr::VirtAddrManager,
     },
     ram_config::DEFAULT_PC_VALUE,
@@ -60,20 +60,43 @@ impl RV32CPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
+        // IF
         let instr_bytes = self.memory.read::<u32>(self.pc);
-        match instr_bytes {
-            Ok(instr_bytes) => {
-                log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
-                let (instr, info) = self.decoder.decode(instr_bytes)?;
-                log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
-                self.execute(instr, info)?;
-                self.memory.step();
+        if let Err(err) = instr_bytes {
+            TrapController::send_trap_signal(
+                self,
+                Trap::Exception(Exception::from_instr_fetch_err(err)),
+                self.pc,
+                self.pc,
+            );
+            return Ok(());
+        }
+        let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
+        log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
 
-                log::trace!("{}", self.debug_reg_string());
+        // ID
+        let decoder_result = self.decoder.decode(instr_bytes);
+        if let Err(nr) = decoder_result {
+            TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
+            return Ok(());
+        }
+        let (instr, info) = unsafe { decoder_result.unwrap_unchecked() };
+        log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
+
+        // EX && MEM && WB
+        let excute_result = self.execute(instr, info);
+        match excute_result {
+            Err(Exception::Breakpoint) => return excute_result,
+            Err(nr) => {
+                TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
                 return Ok(());
             }
-            Err(err) => return Err(Exception::from_memory_err(err)),
+            Ok(()) => {} //there is nothing todo.
         }
+
+        self.memory.step();
+        log::trace!("{}", self.debug_reg_string());
+        return Ok(());
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
@@ -465,4 +488,12 @@ mod tests {
             |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8),
         );
     }
+}
+
+#[cfg(test)]
+mod exception_test {
+    use crate::*;
+
+    #[test]
+    fn test_illgal_instr() {}
 }

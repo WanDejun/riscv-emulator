@@ -31,6 +31,7 @@ macro_rules! gen_csr_reg {
 
         impl $name {
             $(
+                #[inline]
                 pub fn ${concat(get_, $fname)}(&self) -> WordType {
                     const LOW_BIT: WordType = if ($bit >= 0) {
                         ($bit as SignedWordType).abs() as WordType
@@ -43,6 +44,7 @@ macro_rules! gen_csr_reg {
                     & ((WordType::from(1u8) << $len) - 1) << LOW_BIT) >> LOW_BIT
                 }
 
+                #[inline]
                 pub fn ${concat(set_, $fname)}(&self, val: WordType) {
                     assert!(val < (1 << $len));
                     const LOW_BIT: WordType = if ($bit >= 0) {
