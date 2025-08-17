@@ -1,7 +1,9 @@
 use super::{DeviceTrait, Mem};
 use crate::{
-    config::arch_config::WordType, device::power_manager::PowerManager, device::uart::Uart16550,
-    ram::Ram, utils::UnsignedInteger,
+    config::arch_config::WordType,
+    device::{MemError, power_manager::PowerManager, uart::Uart16550},
+    ram::Ram,
+    utils::UnsignedInteger,
 };
 
 // TODO add size() fn to DeviceTrait
@@ -22,7 +24,7 @@ macro_rules! make_device_enum {
         }
 
         impl Mem for Device {
-            fn read<T>(&mut self, addr: WordType) -> T
+            fn read<T>(&mut self, addr: WordType) -> Result<T, MemError>
             where
                 T: UnsignedInteger,
             {
@@ -31,7 +33,7 @@ macro_rules! make_device_enum {
                 }
             }
 
-            fn write<T>(&mut self, addr: WordType, data: T)
+            fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError>
             where
                 T: UnsignedInteger,
             {

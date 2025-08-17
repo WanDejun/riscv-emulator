@@ -6,7 +6,7 @@ use std::{
 use crate::{
     config::arch_config::WordType,
     device::{
-        DEBUG_UART, DeviceTrait, Mem, POWER_MANAGER, UART1,
+        DEBUG_UART, DeviceTrait, Mem, MemError, POWER_MANAGER, UART1,
         config::{
             Device, MMIO_FREQ_DIV, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR,
         },
@@ -88,7 +88,7 @@ impl MemoryMapIO {
         }
     }
 
-    fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> T
+    fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> Result<T, MemError>
     where
         T: UnsignedInteger,
     {
@@ -108,7 +108,12 @@ impl MemoryMapIO {
     }
 
     // write data to specific device.
-    fn write_to_device<T>(&mut self, device_index: usize, p_addr: WordType, data: T)
+    fn write_to_device<T>(
+        &mut self,
+        device_index: usize,
+        p_addr: WordType,
+        data: T,
+    ) -> Result<(), MemError>
     where
         T: UnsignedInteger,
     {
@@ -129,7 +134,7 @@ impl MemoryMapIO {
 }
 
 impl Mem for MemoryMapIO {
-    fn read<T>(&mut self, p_addr: WordType) -> T
+    fn read<T>(&mut self, p_addr: WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -153,7 +158,7 @@ impl Mem for MemoryMapIO {
         }
     }
 
-    fn write<T>(&mut self, p_addr: WordType, data: T)
+    fn write<T>(&mut self, p_addr: WordType, data: T) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -169,9 +174,10 @@ impl Mem for MemoryMapIO {
             Ok(i) => self.write_to_device(i, p_addr, data),
             Err(i) => {
                 if i == 0 {
-                    panic!("physical address: {} is not mapped to the device", p_addr);
+                    // panic!("physical address: {} is not mapped to the device", p_addr);
+                    Err(MemError::StoreFault)
                 } else {
-                    self.write_to_device(i - 1, p_addr, data);
+                    self.write_to_device(i - 1, p_addr, data)
                 }
             }
         }
@@ -209,13 +215,15 @@ mod test {
     fn mmio_mem_test() {
         let mut mmio = MemoryMapIO::new();
         for i in 0 as WordType..100 {
-            mmio.write(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()), i);
+            mmio.write(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()), i)
+                .unwrap();
         }
 
         for i in 0 as WordType..100 {
             assert_eq!(
                 i,
                 mmio.read(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()))
+                    .unwrap()
             );
         }
     }
@@ -224,12 +232,15 @@ mod test {
     fn mmio_stdout_test() {
         let _handles = peripheral_init();
         let mut mmio = MemoryMapIO::new();
-        mmio.write(UART1_ADDR + 0x00, 'a' as u8);
+        mmio.write(UART1_ADDR + 0x00, 'a' as u8).unwrap();
         for _ in 0..MMIO_FREQ_DIV * UART_DEFAULT_DIV * 16 * 20 {
             mmio.step();
         }
-        assert_ne!((mmio.read::<u8>(UART1_ADDR + 5) & 0x20), 0);
-        assert_eq!((DEBUG_UART.lock().unwrap().uart.read::<u8>(5) & 0x01), 0);
+        assert_ne!((mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x20), 0);
+        assert_eq!(
+            (DEBUG_UART.lock().unwrap().uart.read::<u8>(5).unwrap() & 0x01),
+            0
+        );
         assert_eq!(DEBUG_UART.lock().unwrap().receive(), Some('a' as u8));
     }
 
@@ -240,8 +251,8 @@ mod test {
         DEBUG_UART.lock().unwrap().send('x' as u8);
         loop {
             mmio.step();
-            if (mmio.read::<u8>(UART1_ADDR + 5) & 0x01) != 0 {
-                assert_eq!(mmio.read::<u8>(UART1_ADDR + 0), 'x' as u8);
+            if (mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x01) != 0 {
+                assert_eq!(mmio.read::<u8>(UART1_ADDR + 0).unwrap(), 'x' as u8);
                 break;
             }
         }

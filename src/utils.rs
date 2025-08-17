@@ -77,29 +77,25 @@ const ALIGN_ILST: [WordType; 9] = [
     0x07,
 ];
 
-pub unsafe fn read_raw_ptr<T>(addr: *const u8) -> T {
+pub unsafe fn read_raw_ptr<T>(addr: *const u8) -> Option<T> {
     let size_of_t: usize = size_of::<T>();
-    assert!(
-        (addr as WordType) & ALIGN_ILST[size_of_t] == 0,
-        "read_word -> addr: {}, is not aligned!",
-        addr as usize
-    );
+    if (addr as WordType) & ALIGN_ILST[size_of_t] != 0 {
+        return None;
+    }
 
     let ptr = addr as *const T;
-
-    unsafe { ptr.read_volatile() }
+    Some(unsafe { ptr.read_volatile() })
 }
 
-pub unsafe fn write_raw_ptr<T>(addr: *mut u8, data: T) {
+pub unsafe fn write_raw_ptr<T>(addr: *mut u8, data: T) -> Option<()> {
     let size_of_t: usize = size_of::<T>();
-    assert!(
-        (addr as WordType) & ALIGN_ILST[size_of_t] == 0,
-        "read_word -> addr: {}, is not aligned!",
-        addr as usize
-    );
+    if (addr as WordType) & ALIGN_ILST[size_of_t] != 0 {
+        return None;
+    }
 
     let ptr = addr as *mut T;
     unsafe { ptr.write_volatile(data) }
+    Some(())
 }
 
 pub fn check_align<T>(addr: WordType) -> bool {

@@ -18,7 +18,7 @@ pub use config::ram_config;
 
 use crate::{
     device::{Mem, POWER_MANAGER, power_manager::POWER_OFF_CODE},
-    isa::riscv::{executor::RV32CPU, instruction::Exception, vaddr::VirtAddrManager},
+    isa::riscv::{executor::RV32CPU, trap::Exception, vaddr::VirtAddrManager},
     ram::Ram,
 };
 
@@ -48,6 +48,7 @@ impl Emulator {
                 .lock()
                 .unwrap()
                 .read::<u16>(0)
+                .unwrap()
                 .eq(&POWER_OFF_CODE)
             {
                 break;

@@ -3,7 +3,10 @@ use std::fmt::Display;
 use crate::{
     config::arch_config::WordType,
     isa::{
-        riscv::instruction::{Exception, InstrFormat, RVInstrInfo, rv32i_table::*},
+        riscv::{
+            instruction::{InstrFormat, RVInstrInfo, rv32i_table::*},
+            trap::Exception,
+        },
         utils::ISABuilder,
     },
 };
@@ -57,7 +60,7 @@ impl Decoder {
         // TODO: Should we call `decode_info` here instead of in `mask_decoder` and `funct3_decoder`?
         None.or_else(|| self.mask_decoder.decode(instr))
             .or_else(|| self.funct3_decoder.decode(instr))
-            .ok_or(Exception::InvalidInstruction)
+            .ok_or(Exception::IllegalInstruction)
     }
 }
 

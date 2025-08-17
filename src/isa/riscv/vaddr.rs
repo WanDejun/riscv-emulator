@@ -1,5 +1,5 @@
 use crate::{
-    device::{DeviceTrait, Mem, mmio::MemoryMapIO},
+    device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
     ram::Ram,
 };
 
@@ -22,18 +22,22 @@ impl VirtAddrManager {
 }
 
 impl Mem for VirtAddrManager {
-    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> T
+    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
         self.mmio.read(addr)
     }
 
-    fn write<T>(&mut self, addr: crate::config::arch_config::WordType, data: T)
+    fn write<T>(
+        &mut self,
+        addr: crate::config::arch_config::WordType,
+        data: T,
+    ) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
-        self.mmio.write(addr, data);
+        self.mmio.write(addr, data)
     }
 }
 

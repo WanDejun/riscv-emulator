@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, u64};
 
 use crate::{
     config::arch_config::WordType,
-    device::Mem,
-    isa::riscv::{executor::RV32CPU, instruction::Exception},
+    device::{Mem, MemError},
+    isa::riscv::{executor::RV32CPU, trap::Exception},
     utils::UnsignedInteger,
 };
 
@@ -26,8 +26,8 @@ pub trait DebugTarget {
     fn read_reg(&self, idx: u8) -> WordType;
     fn write_reg(&mut self, idx: u8, value: WordType);
 
-    fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> T;
-    fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T);
+    fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError>;
+    fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError>;
 
     fn step(&mut self) -> Result<(), Exception>;
 
@@ -51,11 +51,11 @@ impl DebugTarget for RV32CPU {
         self.reg_file.write(idx, value)
     }
 
-    fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> T {
+    fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError> {
         self.memory.read::<T>(addr)
     }
 
-    fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) {
+    fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
         self.memory.write::<T>(addr, data)
     }
 
@@ -64,7 +64,7 @@ impl DebugTarget for RV32CPU {
     }
 
     fn decoded_info(&mut self, addr: WordType) -> Result<String, Exception> {
-        let instr = self.read_mem::<u32>(addr);
+        let instr = self.read_mem::<u32>(addr).unwrap();
         Ok(self.decoder.decode(instr)?.to_string())
     }
 }
@@ -105,9 +105,9 @@ impl<T: DebugTarget> Debugger<T> {
         if self.breakpoints.contains_key(&breakpoint) {
             return;
         }
-        let orig: u32 = target.read_mem(pc);
+        let orig: u32 = target.read_mem(pc).unwrap();
         if orig != EBREAK {
-            target.write_mem(pc, EBREAK);
+            target.write_mem(pc, EBREAK).unwrap();
         }
 
         self.breakpoints.insert(breakpoint, orig);
@@ -115,7 +115,7 @@ impl<T: DebugTarget> Debugger<T> {
 
     pub fn clear_breakpoint(&mut self, target: &mut T, pc: WordType) {
         if let Some(orig) = self.breakpoints.remove(&Breakpoint { pc }) {
-            target.write_mem(pc, orig);
+            target.write_mem(pc, orig).unwrap();
         }
     }
 
@@ -127,10 +127,10 @@ impl<T: DebugTarget> Debugger<T> {
     fn step_over_breakpoint(&mut self, target: &mut T) -> Result<(), DebugError> {
         let pc = target.read_pc();
         if let Some(instr) = self.breakpoints.get(&Breakpoint { pc }).copied() {
-            target.write_mem::<u32>(pc, instr);
+            target.write_mem::<u32>(pc, instr).unwrap();
             match target.step() {
                 Ok(()) => {
-                    target.write_mem::<u32>(pc, EBREAK);
+                    target.write_mem::<u32>(pc, EBREAK).unwrap();
                     Ok(())
                 }
                 Err(e) => Err(DebugError::TargetException(e)),
@@ -151,7 +151,7 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => Ok(DebugEvent::StepCompleted {
                     pc: target.read_pc(),
                 }),
-                Err(Exception::EBreak) => Ok(DebugEvent::BreakpointHit {
+                Err(Exception::Breakpoint) => Ok(DebugEvent::BreakpointHit {
                     pc: target.read_pc(),
                 }),
                 Err(e) => Err(DebugError::TargetException(e)),
@@ -180,7 +180,7 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => {
                     rest -= 1;
                 }
-                Err(Exception::EBreak) => {
+                Err(Exception::Breakpoint) => {
                     return Ok(DebugEvent::BreakpointHit {
                         pc: target.read_pc(),
                     });
@@ -213,11 +213,11 @@ impl<T: DebugTarget> Debugger<T> {
     }
 
     pub fn read_mem<V: UnsignedInteger>(&self, target: &mut T, addr: WordType) -> V {
-        target.read_mem::<V>(addr)
+        target.read_mem::<V>(addr).unwrap()
     }
 
     pub fn write_mem<V: UnsignedInteger>(&self, target: &mut T, addr: WordType, data: V) {
-        target.write_mem::<V>(addr, data)
+        target.write_mem::<V>(addr, data).unwrap()
     }
 
     pub fn decoded_info(&self, target: &mut T, addr: WordType) -> Result<String, Exception> {
