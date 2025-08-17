@@ -75,7 +75,7 @@ pub fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>) {
             io::stdout().flush().unwrap();
 
             // input epoll
-            if event::poll(Duration::from_millis(100)).unwrap() {
+            if event::poll(Duration::from_millis(20)).unwrap() {
                 if let Event::Key(k) = event::read().unwrap() {
                     match k.code {
                         KeyCode::Char(c) => input_tx.send(c as u8).unwrap(),

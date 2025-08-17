@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, u64};
+use std::{collections::BTreeMap, fmt::Debug, u64};
 
 use crate::{
     config::arch_config::WordType,
@@ -87,19 +87,18 @@ impl Breakpoint {
     }
 }
 
-// TODO: Refactor to contain a RV32CPU instead of passing &mut every time.
 pub struct Debugger<T: DebugTarget> {
     breakpoints: BTreeMap<Breakpoint, u32>,
-    _marker: PhantomData<T>,
+    target: T,
 }
 
 const EBREAK: u32 = 0x0010_0073;
 
 impl<T: DebugTarget> Debugger<T> {
-    pub fn new() -> Self {
+    pub fn new(target: T) -> Self {
         Self {
             breakpoints: BTreeMap::new(),
-            _marker: PhantomData,
+            target: target,
         }
     }
 
@@ -107,32 +106,32 @@ impl<T: DebugTarget> Debugger<T> {
         &self.breakpoints
     }
 
-    pub fn set_breakpoint(&mut self, target: &mut T, pc: WordType) {
+    pub fn set_breakpoint(&mut self, pc: WordType) {
         let breakpoint = Breakpoint::new(pc);
         if self.breakpoints.contains_key(&breakpoint) {
             return;
         }
-        let orig: u32 = target.read_mem(pc).unwrap();
+        let orig: u32 = self.read_mem(pc).unwrap();
         if orig != EBREAK {
-            target.write_mem(pc, EBREAK).unwrap();
+            self.write_mem(pc, EBREAK).unwrap();
         }
 
         self.breakpoints.insert(breakpoint, orig);
     }
 
-    pub fn clear_breakpoint(&mut self, target: &mut T, pc: WordType) {
+    pub fn clear_breakpoint(&mut self, pc: WordType) {
         if let Some(orig) = self.breakpoints.remove(&Breakpoint { pc }) {
-            target.write_mem(pc, orig).unwrap();
+            self.write_mem(pc, orig).unwrap();
         }
     }
 
-    fn on_breakpoint(&mut self, target: &mut T) -> bool {
+    fn on_breakpoint(&mut self) -> bool {
         self.breakpoints
-            .contains_key(&Breakpoint::new(target.read_pc()))
+            .contains_key(&Breakpoint::new(self.read_pc()))
     }
 
-    fn place_origin_on_break(&mut self, target: &mut T) {
-        let pc = target.read_pc();
+    fn place_origin_on_break(&mut self) {
+        let pc = self.read_pc();
         log::debug!("Placing origin instruction on breakpoint at {:08x}", pc);
 
         let instr = self
@@ -140,68 +139,54 @@ impl<T: DebugTarget> Debugger<T> {
             .get(&Breakpoint::new(pc))
             .expect("Breakpoint should exist");
 
-        target.write_mem::<u32>(pc, *instr).unwrap();
+        self.write_mem::<u32>(pc, *instr).unwrap();
     }
 
-    fn step_over_breakpoint(&mut self, target: &mut T) -> Result<(), DebugError> {
-        let pc = target.read_pc();
-        match target.step() {
+    fn step_over_breakpoint(&mut self) -> Result<(), DebugError> {
+        let pc = self.read_pc();
+        match self.target.step() {
             Ok(()) => {
-                target.write_mem::<u32>(pc, EBREAK).unwrap();
+                self.write_mem::<u32>(pc, EBREAK).unwrap();
                 Ok(())
             }
             Err(e) => Err(DebugError::TargetException(e)),
         }
     }
 
-    pub fn step(&mut self, target: &mut T) -> Result<DebugEvent, DebugError> {
-        if self.on_breakpoint(target) {
-            self.step_over_breakpoint(target)?;
-            Ok(DebugEvent::StepCompleted {
-                pc: target.read_pc(),
-            })
+    pub fn step(&mut self) -> Result<DebugEvent, DebugError> {
+        if self.on_breakpoint() {
+            self.step_over_breakpoint()?;
+            Ok(DebugEvent::StepCompleted { pc: self.read_pc() })
         } else {
-            match target.step() {
-                Ok(()) => Ok(DebugEvent::StepCompleted {
-                    pc: target.read_pc(),
-                }),
+            match self.target.step() {
+                Ok(()) => Ok(DebugEvent::StepCompleted { pc: self.read_pc() }),
                 Err(Exception::Breakpoint) => {
-                    self.place_origin_on_break(target);
-                    Ok(DebugEvent::BreakpointHit {
-                        pc: target.read_pc(),
-                    })
+                    self.place_origin_on_break();
+                    Ok(DebugEvent::BreakpointHit { pc: self.read_pc() })
                 }
                 Err(e) => Err(DebugError::TargetException(e)),
             }
         }
     }
 
-    pub fn continue_until(
-        &mut self,
-        target: &mut T,
-        max_steps: u64,
-    ) -> Result<DebugEvent, DebugError> {
+    pub fn continue_until(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError> {
         let mut rest = max_steps;
-        if self.on_breakpoint(target) {
-            self.step_over_breakpoint(target)?;
+        if self.on_breakpoint() {
+            self.step_over_breakpoint()?;
             rest -= 1;
         }
 
         loop {
             if rest == 0 {
-                return Ok(DebugEvent::StepCompleted {
-                    pc: target.read_pc(),
-                });
+                return Ok(DebugEvent::StepCompleted { pc: self.read_pc() });
             }
-            match target.step() {
+            match self.target.step() {
                 Ok(()) => {
                     rest -= 1;
                 }
                 Err(Exception::Breakpoint) => {
-                    self.place_origin_on_break(target);
-                    return Ok(DebugEvent::BreakpointHit {
-                        pc: target.read_pc(),
-                    });
+                    self.place_origin_on_break();
+                    return Ok(DebugEvent::BreakpointHit { pc: self.read_pc() });
                 }
                 Err(e) => {
                     return Err(DebugError::TargetException(e));
@@ -210,44 +195,39 @@ impl<T: DebugTarget> Debugger<T> {
         }
     }
 
-    pub fn continue_run(&mut self, target: &mut T) -> Result<DebugEvent, DebugError> {
-        self.continue_until(target, u64::MAX)
+    pub fn continue_run(&mut self) -> Result<DebugEvent, DebugError> {
+        self.continue_until(u64::MAX)
     }
 
-    pub fn read_reg(&self, target: &T, idx: u8) -> WordType {
-        target.read_reg(idx)
+    pub fn read_reg(&self, idx: u8) -> WordType {
+        self.target.read_reg(idx)
     }
 
-    pub fn write_reg(&self, target: &mut T, idx: u8, val: WordType) {
-        target.write_reg(idx, val)
+    pub fn write_reg(&mut self, idx: u8, val: WordType) {
+        self.target.write_reg(idx, val)
     }
 
-    pub fn read_pc(&self, target: &T) -> WordType {
-        target.read_pc()
+    pub fn read_pc(&self) -> WordType {
+        self.target.read_pc()
     }
 
-    pub fn write_pc(&self, target: &mut T, val: WordType) {
-        target.write_pc(val)
+    pub fn write_pc(&mut self, val: WordType) {
+        self.target.write_pc(val)
     }
 
-    pub fn read_mem<V: UnsignedInteger>(
-        &self,
-        target: &mut T,
-        addr: WordType,
-    ) -> Result<V, MemError> {
-        target.read_mem::<V>(addr)
+    pub fn read_mem<V: UnsignedInteger>(&mut self, addr: WordType) -> Result<V, MemError> {
+        self.target.read_mem::<V>(addr)
     }
 
     pub fn write_mem<V: UnsignedInteger>(
-        &self,
-        target: &mut T,
+        &mut self,
         addr: WordType,
         data: V,
     ) -> Result<(), MemError> {
-        target.write_mem::<V>(addr, data)
+        self.target.write_mem::<V>(addr, data)
     }
 
-    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> Option<T::DecodeInstr> {
-        target.decoded_info(addr)
+    pub fn decoded_info(&mut self, addr: WordType) -> Option<T::DecodeInstr> {
+        self.target.decoded_info(addr)
     }
 }

@@ -88,7 +88,6 @@ enum PrintObject {
 
 pub struct DebugREPL {
     dbg: Debugger<RV32CPU>,
-    cpu: RV32CPU,
     watch_list: Vec<PrintObject>,
 }
 
@@ -97,8 +96,7 @@ impl DebugREPL {
         CliCoordinator::global().pause_uart();
 
         DebugREPL {
-            dbg: Debugger::<RV32CPU>::new(),
-            cpu,
+            dbg: Debugger::<RV32CPU>::new(cpu),
             watch_list: Vec::new(),
         }
     }
@@ -129,7 +127,7 @@ impl DebugREPL {
 
     fn handle_continue(&mut self, steps: u64) -> Result<(), String> {
         CliCoordinator::global().resume_uart();
-        let rst = self.dbg.continue_until(&mut self.cpu, steps);
+        let rst = self.dbg.continue_until(steps);
         CliCoordinator::global().pause_uart();
 
         match rst {
@@ -187,11 +185,11 @@ impl DebugREPL {
 
             Cli::List => {
                 const LIST_INSTR: WordType = 10;
-                let base_addr = self.dbg.read_pc(&mut self.cpu) - LIST_INSTR * 4 / 2;
+                let base_addr = self.dbg.read_pc() - LIST_INSTR * 4 / 2;
 
                 for i in 0..LIST_INSTR {
                     let curr_addr = base_addr + (i * 4);
-                    let is_curr_line = curr_addr == self.dbg.read_pc(&mut self.cpu);
+                    let is_curr_line = curr_addr == self.dbg.read_pc();
 
                     if is_curr_line {
                         print!("{} ", ">".cyan());
@@ -222,10 +220,10 @@ impl DebugREPL {
             Cli::Breakpoint { delete, addr } => {
                 let pc = parse_word(&addr)?;
                 if delete {
-                    self.dbg.clear_breakpoint(&mut self.cpu, pc);
+                    self.dbg.clear_breakpoint(pc);
                     println!("cleared breakpoint at {}", format_addr(pc));
                 } else {
-                    self.dbg.set_breakpoint(&mut self.cpu, pc);
+                    self.dbg.set_breakpoint(pc);
                     println!("set breakpoint at {}", format_addr(pc));
                 }
             }
@@ -245,12 +243,12 @@ impl DebugREPL {
     }
 
     fn print_pc(&self) {
-        let pc = self.dbg.read_pc(&self.cpu);
+        let pc = self.dbg.read_pc();
         println!("pc = {}", format_addr(pc));
     }
 
     fn print_reg(&self, idx: u8) -> Result<(), String> {
-        let val = self.dbg.read_reg(&self.cpu, idx);
+        let val = self.dbg.read_reg(idx);
         println!(
             "{} = {}",
             palette.reg(REG_NAME[idx as usize]),
@@ -283,14 +281,14 @@ impl DebugREPL {
 
     fn read_mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
         self.dbg
-            .read_mem::<u8>(&mut self.cpu, addr)
+            .read_mem::<u8>(addr)
             .map(|v| format!("{:02x}", v))
             .unwrap_or("**".into())
     }
 
     fn read_mem_word_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
         self.dbg
-            .read_mem::<u32>(&mut self.cpu, addr)
+            .read_mem::<u32>(addr)
             .map(|v| format!("0x{:08x}", v))
             .unwrap_or("<invalid>".into())
     }
@@ -299,7 +297,7 @@ impl DebugREPL {
         &mut self,
         addr: WordType,
     ) -> (impl std::fmt::Display, impl std::fmt::Display) {
-        let decode_instr = self.dbg.decoded_info(&mut self.cpu, addr);
+        let decode_instr = self.dbg.decoded_info(addr);
         (self.read_mem_word_formatted(addr), format_asm(decode_instr))
     }
 }
