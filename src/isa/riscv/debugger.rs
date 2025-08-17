@@ -33,7 +33,7 @@ pub trait DebugTarget {
 
     fn step(&mut self) -> Result<(), Exception>;
 
-    fn decoded_info(&mut self, addr: WordType) -> Option<Self::DecodeInstr>;
+    fn decoded_info(&mut self, addr: u32) -> Option<Self::DecodeInstr>;
 }
 
 impl DebugTarget for RV32CPU {
@@ -67,12 +67,8 @@ impl DebugTarget for RV32CPU {
         RV32CPU::step(self)
     }
 
-    fn decoded_info(&mut self, addr: WordType) -> Option<Self::DecodeInstr> {
-        if let Ok(instr) = self.read_mem::<u32>(addr) {
-            self.decoder.decode(instr).ok()
-        } else {
-            None
-        }
+    fn decoded_info(&mut self, instr: u32) -> Option<Self::DecodeInstr> {
+        self.decoder.decode(instr).ok()
     }
 }
 
@@ -218,6 +214,14 @@ impl<T: DebugTarget> Debugger<T> {
         self.target.read_mem::<V>(addr)
     }
 
+    pub fn read_origin_instr(&mut self, addr: WordType) -> Result<u32, MemError> {
+        if let Some(instr) = self.breakpoints.get(&Breakpoint::new(addr)) {
+            Ok(*instr)
+        } else {
+            self.read_mem(addr)
+        }
+    }
+
     pub fn write_mem<V: UnsignedInteger>(
         &mut self,
         addr: WordType,
@@ -227,6 +231,7 @@ impl<T: DebugTarget> Debugger<T> {
     }
 
     pub fn decoded_info(&mut self, addr: WordType) -> Option<T::DecodeInstr> {
-        self.target.decoded_info(addr)
+        let instr = self.read_origin_instr(addr).ok()?;
+        self.target.decoded_info(instr)
     }
 }
