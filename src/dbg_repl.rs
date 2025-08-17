@@ -18,6 +18,14 @@ enum Cli {
     #[command(alias = "p", subcommand)]
     Print(PrintCmd),
 
+    /// Display given item each time the program stops.
+    #[command(alias = "d", subcommand)]
+    Display(PrintCmd),
+
+    /// Cancel display request.
+    #[command(subcommand)]
+    Undisplay(PrintCmd),
+
     /// Step instruction
     #[command(alias = "s")]
     Si,
@@ -28,12 +36,17 @@ enum Cli {
 
     /// Set or delete breakpoint
     #[command(name = "break", alias = "b")]
-    Break {
+    Breakpoint {
         #[arg(short = 'd', long = "delete")]
         delete: bool,
         addr: String,
     },
 
+    /// show debug infos such as breakpoints.
+    #[command(aliases = ["l", "ls"], subcommand)]
+    Info(InfoCmd),
+
+    /// Quit debugger
     #[command(name = "quit", aliases = ["q", "exit"]) ]
     Quit,
 }
@@ -51,11 +64,25 @@ enum PrintCmd {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum InfoCmd {
+    #[command(aliases = ["b", "bp", "break"])]
+    Breakpoints,
+}
+
 const PROMPT: &str = "(rvdb) ";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrintObject {
+    Pc,
+    Reg(u8),
+    Mem(WordType, u32),
+}
 
 pub struct DebugREPL {
     dbg: Debugger<RV32CPU>,
     cpu: RV32CPU,
+    watch_list: Vec<PrintObject>,
 }
 
 impl DebugREPL {
@@ -65,6 +92,7 @@ impl DebugREPL {
         DebugREPL {
             dbg: Debugger::<RV32CPU>::new(),
             cpu,
+            watch_list: Vec::new(),
         }
     }
 
@@ -116,17 +144,45 @@ impl DebugREPL {
 
         match cli {
             Cli::Print(PrintCmd::Pc) => {
-                let pc = self.dbg.read_pc(&self.cpu);
-                println!("pc = {}", fmt_word(pc));
+                self.print_pc();
             }
             Cli::Print(PrintCmd::Reg { reg }) => {
-                let idx = parse_reg(&reg).ok_or_else(|| format!("invalid register: {}", reg))?;
-                let val = self.dbg.read_reg(&self.cpu, idx);
-                println!("x{} = {}", idx, fmt_word(val));
+                self.print_reg(parse_reg(&reg)?)?;
             }
             Cli::Print(PrintCmd::Mem { addr, len }) => {
-                let addr = parse_u64(&addr)?;
-                self.print_mem(addr, len);
+                self.print_mem(parse_u64(&addr)?, len);
+            }
+
+            Cli::Display(PrintCmd::Pc) => {
+                self.watch_list.push(PrintObject::Pc);
+            }
+            Cli::Display(PrintCmd::Reg { reg }) => {
+                self.watch_list.push(PrintObject::Reg(parse_reg(&reg)?));
+            }
+            Cli::Display(PrintCmd::Mem { addr, len }) => {
+                self.watch_list
+                    .push(PrintObject::Mem(parse_word(&addr)?, len));
+            }
+
+            Cli::Undisplay(PrintCmd::Pc) => {
+                self.watch_list.retain(|&item| item != PrintObject::Pc);
+            }
+            Cli::Undisplay(PrintCmd::Reg { reg }) => {
+                let reg_idx = parse_reg(&reg)?;
+                self.watch_list
+                    .retain(|&item| item != PrintObject::Reg(reg_idx));
+            }
+            Cli::Undisplay(PrintCmd::Mem { addr, len }) => {
+                let addr = parse_word(&addr)?;
+                self.watch_list
+                    .retain(|&item| item != PrintObject::Mem(addr, len));
+            }
+
+            Cli::Info(InfoCmd::Breakpoints) => {
+                println!("Breakpoints:");
+                for (idx, bp) in self.dbg.breakpoints().keys().enumerate() {
+                    println!("{}: {}", idx, fmt_word(bp.pc));
+                }
             }
 
             Cli::Si => {
@@ -137,7 +193,7 @@ impl DebugREPL {
                 self.handle_continue(u64::MAX)?;
             }
 
-            Cli::Break { delete, addr } => {
+            Cli::Breakpoint { delete, addr } => {
                 let pc = parse_word(&addr)?;
                 if delete {
                     self.dbg.clear_breakpoint(&mut self.cpu, pc);
@@ -149,7 +205,28 @@ impl DebugREPL {
             }
             Cli::Quit => return Ok(true),
         }
+
+        for idx in 0..self.watch_list.len() {
+            let item = self.watch_list[idx]; // bypass borrow check by index and copy
+            match item {
+                PrintObject::Pc => self.print_pc(),
+                PrintObject::Reg(idx) => self.print_reg(idx)?,
+                PrintObject::Mem(addr, len) => self.print_mem(addr, len),
+            }
+        }
+
         Ok(false)
+    }
+
+    fn print_pc(&self) {
+        let pc = self.dbg.read_pc(&self.cpu);
+        println!("pc = {}", fmt_word(pc));
+    }
+
+    fn print_reg(&self, idx: u8) -> Result<(), String> {
+        let val = self.dbg.read_reg(&self.cpu, idx);
+        println!("{} = {}", REG_NAME[idx as usize], fmt_word(val));
+        Ok(())
     }
 
     fn print_mem(&mut self, addr: WordType, len: u32) {
@@ -209,19 +286,19 @@ where
     format!("0x{:x}", v.into())
 }
 
-fn parse_reg(s: &str) -> Option<u8> {
+fn parse_reg(s: &str) -> Result<u8, String> {
     let t = s.trim();
     if let Some(index) = REG_NAME.iter().position(|&r| r == t) {
-        return Some(index as u8);
+        return Ok(index as u8);
     }
 
     if let Some(rest) = t.strip_prefix('x') {
         if let Ok(n) = rest.parse::<u8>() {
             if n < 32 {
-                return Some(n);
+                return Ok(n);
             }
         }
     }
 
-    None
+    Err(format!("invalid register: {}", s))
 }

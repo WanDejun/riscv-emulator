@@ -89,6 +89,10 @@ impl<T: DebugTarget> Debugger<T> {
         }
     }
 
+    pub fn breakpoints(&self) -> &BTreeMap<Breakpoint, u32> {
+        &self.breakpoints
+    }
+
     pub fn set_breakpoint(&mut self, target: &mut T, pc: WordType) {
         let breakpoint = Breakpoint::new(pc);
         if self.breakpoints.contains_key(&breakpoint) {
