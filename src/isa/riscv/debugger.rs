@@ -31,7 +31,7 @@ pub trait DebugTarget {
 
     fn step(&mut self) -> Result<(), Exception>;
 
-    fn decoded_info(&mut self, addr: WordType) -> Result<String, Exception>;
+    fn decoded_info(&mut self, addr: WordType) -> String;
 }
 
 impl DebugTarget for RV32CPU {
@@ -63,9 +63,15 @@ impl DebugTarget for RV32CPU {
         RV32CPU::step(self)
     }
 
-    fn decoded_info(&mut self, addr: WordType) -> Result<String, Exception> {
-        let instr = self.read_mem::<u32>(addr).unwrap();
-        Ok(self.decoder.decode(instr)?.to_string())
+    fn decoded_info(&mut self, addr: WordType) -> String {
+        if let Ok(instr) = self.read_mem::<u32>(addr) {
+            self.decoder
+                .decode(instr)
+                .map(|info| info.to_string())
+                .unwrap_or("<invalid instruction>".into())
+        } else {
+            "<invalid instruction>".into()
+        }
     }
 }
 
@@ -212,15 +218,24 @@ impl<T: DebugTarget> Debugger<T> {
         target.write_pc(val)
     }
 
-    pub fn read_mem<V: UnsignedInteger>(&self, target: &mut T, addr: WordType) -> V {
-        target.read_mem::<V>(addr).unwrap()
+    pub fn read_mem<V: UnsignedInteger>(
+        &self,
+        target: &mut T,
+        addr: WordType,
+    ) -> Result<V, MemError> {
+        target.read_mem::<V>(addr)
     }
 
-    pub fn write_mem<V: UnsignedInteger>(&self, target: &mut T, addr: WordType, data: V) {
-        target.write_mem::<V>(addr, data).unwrap()
+    pub fn write_mem<V: UnsignedInteger>(
+        &self,
+        target: &mut T,
+        addr: WordType,
+        data: V,
+    ) -> Result<(), MemError> {
+        target.write_mem::<V>(addr, data)
     }
 
-    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> Result<String, Exception> {
+    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> String {
         target.decoded_info(addr)
     }
 }

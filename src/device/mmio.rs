@@ -96,10 +96,11 @@ impl MemoryMapIO {
         let start = self.map[device_index].start;
         if p_addr >= start + self.map[device_index].size {
             // out of range
-            panic!(
-                "read_from_device(index: {}, p_addr: {}): physical address overflow",
-                device_index, p_addr
-            )
+            Err(MemError::LoadFault)
+            // panic!(
+            //     "read_from_device(index: {}, p_addr: {}): physical address overflow",
+            //     device_index, p_addr
+            // )
         } else {
             // in range
             let mut device = self.map[device_index].device.lock().unwrap();

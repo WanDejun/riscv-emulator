@@ -2,6 +2,7 @@ use std::io::Write;
 
 use clap::{Parser, Subcommand};
 
+use crossterm::style::Stylize;
 use riscv_emulator::{
     cli_coordinator::CliCoordinator,
     config::arch_config::{REG_NAME, WordType},
@@ -26,6 +27,9 @@ enum Cli {
     #[command(subcommand)]
     Undisplay(PrintCmd),
 
+    #[command(alias = "l")]
+    List,
+
     /// Step instruction
     #[command(alias = "s")]
     Si,
@@ -43,7 +47,7 @@ enum Cli {
     },
 
     /// show debug infos such as breakpoints.
-    #[command(aliases = ["l", "ls"], subcommand)]
+    #[command(subcommand)]
     Info(InfoCmd),
 
     /// Quit debugger
@@ -178,6 +182,30 @@ impl DebugREPL {
                     .retain(|&item| item != PrintObject::Mem(addr, len));
             }
 
+            Cli::List => {
+                const LIST_INSTR: WordType = 10;
+                let base_addr = self.dbg.read_pc(&mut self.cpu) - LIST_INSTR * 4 / 2;
+
+                for i in 0..LIST_INSTR {
+                    let curr_addr = base_addr + (i * 4);
+                    let is_curr_line = curr_addr == self.dbg.read_pc(&mut self.cpu);
+
+                    if is_curr_line {
+                        print!("{} ", ">".cyan());
+                    } else {
+                        print!("  ");
+                    }
+
+                    let instr = self.dbg.decoded_info(&mut self.cpu, curr_addr);
+                    println!(
+                        "0x{:08x}: {} {}",
+                        curr_addr,
+                        self.mem_word_formatted(curr_addr),
+                        instr
+                    );
+                }
+            }
+
             Cli::Info(InfoCmd::Breakpoints) => {
                 println!("Breakpoints:");
                 for (idx, bp) in self.dbg.breakpoints().keys().enumerate() {
@@ -242,13 +270,31 @@ impl DebugREPL {
                 print!("{}: ", fmt_word(curr_addr));
             }
             curr_addr = curr_addr + (i as WordType);
-            print!("{:02x} ", self.dbg.read_mem::<u8>(&mut self.cpu, curr_addr));
+            print!("{} ", self.mem_byte_formatted(curr_addr));
             i += 1;
         }
 
         if len > 0 {
             println!();
         }
+    }
+
+    fn mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
+        self.dbg
+            .read_mem::<u8>(&mut self.cpu, addr)
+            .map(|v| format!("{:02x}", v))
+            .unwrap_or("**".into())
+    }
+
+    fn mem_addr_formatted(addr: WordType) -> impl std::fmt::Display {
+        format!("0x{:08x}", addr).blue()
+    }
+
+    fn mem_word_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
+        self.dbg
+            .read_mem::<u32>(&mut self.cpu, addr)
+            .map(|v| format!("0x{:08x}", v))
+            .unwrap_or("<invalid>".into())
     }
 }
 

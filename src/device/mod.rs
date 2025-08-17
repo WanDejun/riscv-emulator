@@ -20,6 +20,7 @@ pub mod mmio;
 pub mod power_manager;
 pub mod uart;
 
+// TODO: Improve error info
 #[derive(Debug, PartialEq, Eq)]
 pub enum MemError {
     LoadMisaligned,
