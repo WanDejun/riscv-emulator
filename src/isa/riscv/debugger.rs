@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, u64};
 use crate::{
     config::arch_config::WordType,
     device::{Mem, MemError},
-    isa::riscv::{executor::RV32CPU, trap::Exception},
+    isa::riscv::{self, executor::RV32CPU, trap::Exception},
     utils::UnsignedInteger,
 };
 
@@ -20,6 +20,8 @@ pub enum DebugError {
 }
 
 pub trait DebugTarget {
+    type DecodeInstr;
+
     fn read_pc(&self) -> WordType;
     fn write_pc(&mut self, new_pc: WordType);
 
@@ -31,10 +33,12 @@ pub trait DebugTarget {
 
     fn step(&mut self) -> Result<(), Exception>;
 
-    fn decoded_info(&mut self, addr: WordType) -> String;
+    fn decoded_info(&mut self, addr: WordType) -> Option<Self::DecodeInstr>;
 }
 
 impl DebugTarget for RV32CPU {
+    type DecodeInstr = riscv::decoder::DecodeInstr;
+
     fn read_pc(&self) -> WordType {
         self.pc
     }
@@ -63,14 +67,11 @@ impl DebugTarget for RV32CPU {
         RV32CPU::step(self)
     }
 
-    fn decoded_info(&mut self, addr: WordType) -> String {
+    fn decoded_info(&mut self, addr: WordType) -> Option<Self::DecodeInstr> {
         if let Ok(instr) = self.read_mem::<u32>(addr) {
-            self.decoder
-                .decode(instr)
-                .map(|info| info.to_string())
-                .unwrap_or("<invalid instruction>".into())
+            self.decoder.decode(instr).ok()
         } else {
-            "<invalid instruction>".into()
+            None
         }
     }
 }
@@ -235,7 +236,7 @@ impl<T: DebugTarget> Debugger<T> {
         target.write_mem::<V>(addr, data)
     }
 
-    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> String {
+    pub fn decoded_info(&self, target: &mut T, addr: WordType) -> Option<T::DecodeInstr> {
         target.decoded_info(addr)
     }
 }

@@ -3,12 +3,15 @@ use std::io::Write;
 use clap::{Parser, Subcommand};
 
 use crossterm::style::Stylize;
+use lazy_static::lazy_static;
 use riscv_emulator::{
     cli_coordinator::CliCoordinator,
-    config::arch_config::{REG_NAME, WordType},
+    config::arch_config::{REG_NAME, SignedWordType, WordType},
     isa::riscv::{
         debugger::{DebugEvent, Debugger},
+        decoder::DecodeInstr,
         executor::RV32CPU,
+        instruction::RVInstrInfo,
     },
 };
 
@@ -131,10 +134,10 @@ impl DebugREPL {
 
         match rst {
             Ok(DebugEvent::StepCompleted { pc }) => {
-                println!("stepped, pc = {}", fmt_word(pc));
+                println!("stepped, pc = {}", format_addr(pc));
             }
             Ok(DebugEvent::BreakpointHit { pc }) => {
-                println!("breakpoint hit at pc = {}", fmt_word(pc));
+                println!("breakpoint hit at pc = {}", format_addr(pc));
             }
             Err(e) => return Err(format!("step failed: {}", e)),
         }
@@ -196,20 +199,15 @@ impl DebugREPL {
                         print!("  ");
                     }
 
-                    let instr = self.dbg.decoded_info(&mut self.cpu, curr_addr);
-                    println!(
-                        "0x{:08x}: {} {}",
-                        curr_addr,
-                        self.mem_word_formatted(curr_addr),
-                        instr
-                    );
+                    let (raw, asm) = self.read_raw_and_asm_formatted(curr_addr);
+                    println!("{}: {} {}", format_addr(curr_addr), raw, asm);
                 }
             }
 
             Cli::Info(InfoCmd::Breakpoints) => {
                 println!("Breakpoints:");
                 for (idx, bp) in self.dbg.breakpoints().keys().enumerate() {
-                    println!("{}: {}", idx, fmt_word(bp.pc));
+                    println!("{}: {}", idx, format_addr(bp.pc));
                 }
             }
 
@@ -225,10 +223,10 @@ impl DebugREPL {
                 let pc = parse_word(&addr)?;
                 if delete {
                     self.dbg.clear_breakpoint(&mut self.cpu, pc);
-                    println!("cleared breakpoint at {}", fmt_word(pc));
+                    println!("cleared breakpoint at {}", format_addr(pc));
                 } else {
                     self.dbg.set_breakpoint(&mut self.cpu, pc);
-                    println!("set breakpoint at {}", fmt_word(pc));
+                    println!("set breakpoint at {}", format_addr(pc));
                 }
             }
             Cli::Quit => return Ok(true),
@@ -248,12 +246,16 @@ impl DebugREPL {
 
     fn print_pc(&self) {
         let pc = self.dbg.read_pc(&self.cpu);
-        println!("pc = {}", fmt_word(pc));
+        println!("pc = {}", format_addr(pc));
     }
 
     fn print_reg(&self, idx: u8) -> Result<(), String> {
         let val = self.dbg.read_reg(&self.cpu, idx);
-        println!("{} = {}", REG_NAME[idx as usize], fmt_word(val));
+        println!(
+            "{} = {}",
+            palette.reg(REG_NAME[idx as usize]),
+            format_data(val)
+        );
         Ok(())
     }
 
@@ -267,10 +269,10 @@ impl DebugREPL {
                 if i != 0 {
                     println!();
                 }
-                print!("{}: ", fmt_word(curr_addr));
+                print!("{}: ", format_addr(curr_addr));
             }
             curr_addr = curr_addr + (i as WordType);
-            print!("{} ", self.mem_byte_formatted(curr_addr));
+            print!("{} ", self.read_mem_byte_formatted(curr_addr));
             i += 1;
         }
 
@@ -279,22 +281,58 @@ impl DebugREPL {
         }
     }
 
-    fn mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
+    fn read_mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
         self.dbg
             .read_mem::<u8>(&mut self.cpu, addr)
             .map(|v| format!("{:02x}", v))
             .unwrap_or("**".into())
     }
 
-    fn mem_addr_formatted(addr: WordType) -> impl std::fmt::Display {
-        format!("0x{:08x}", addr).blue()
-    }
-
-    fn mem_word_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
+    fn read_mem_word_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
         self.dbg
             .read_mem::<u32>(&mut self.cpu, addr)
             .map(|v| format!("0x{:08x}", v))
             .unwrap_or("<invalid>".into())
+    }
+
+    fn read_raw_and_asm_formatted(
+        &mut self,
+        addr: WordType,
+    ) -> (impl std::fmt::Display, impl std::fmt::Display) {
+        let decode_instr = self.dbg.decoded_info(&mut self.cpu, addr);
+        (self.read_mem_word_formatted(addr), format_asm(decode_instr))
+    }
+}
+
+lazy_static! {
+    static ref palette: OutputPalette = OutputPalette {};
+}
+
+struct OutputPalette;
+
+impl OutputPalette {
+    fn index(&self, index: &str) -> impl std::fmt::Display {
+        index.yellow()
+    }
+
+    fn addr(&self, addr: &str) -> impl std::fmt::Display {
+        addr.blue()
+    }
+
+    fn reg(&self, reg: &str) -> impl std::fmt::Display {
+        reg.magenta()
+    }
+
+    fn instr(&self, instr: &str) -> impl std::fmt::Display {
+        instr.green()
+    }
+
+    fn arrow(&self, ch: &str) -> impl std::fmt::Display {
+        ch.cyan()
+    }
+
+    fn data(&self, value: &str) -> impl std::fmt::Display {
+        value.yellow()
     }
 }
 
@@ -325,13 +363,6 @@ fn parse_word(s: &str) -> Result<WordType, String> {
     parse_u64(s).map(|v| v as WordType)
 }
 
-fn fmt_word<T>(v: T) -> String
-where
-    T: Into<u128>,
-{
-    format!("0x{:x}", v.into())
-}
-
 fn parse_reg(s: &str) -> Result<u8, String> {
     let t = s.trim();
     if let Some(index) = REG_NAME.iter().position(|&r| r == t) {
@@ -347,4 +378,78 @@ fn parse_reg(s: &str) -> Result<u8, String> {
     }
 
     Err(format!("invalid register: {}", s))
+}
+
+fn format_addr(word: WordType) -> impl std::fmt::Display {
+    palette.addr(&format!("0x{:08x}", word)).to_string()
+}
+
+fn format_data(data: WordType) -> impl std::fmt::Display {
+    palette.data(&format!("0x{:08x}", data)).to_string()
+}
+
+fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
+    if decode_instr.is_none() {
+        return format!("{}", String::from("<invalid instruction>").red());
+    } else {
+        let DecodeInstr(instr, info) = decode_instr.unwrap();
+        match info {
+            RVInstrInfo::I { rd, rs1, imm } => {
+                format!(
+                    "{} {},{},{} - type I",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.data(imm.to_string().as_str()),
+                )
+            }
+
+            RVInstrInfo::R { rs1, rs2, rd } => {
+                format!(
+                    "{} {},{},{} - type R",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize])
+                )
+            }
+
+            RVInstrInfo::B { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{} - type B",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.data((imm >> 1).to_string().as_str())
+                )
+            }
+
+            RVInstrInfo::J { rd, imm } => {
+                format!(
+                    "{} {},{} - type J",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.data((imm >> 12).to_string().as_str())
+                )
+            }
+
+            RVInstrInfo::S { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{} - type S",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.data((imm).to_string().as_str())
+                )
+            }
+            RVInstrInfo::U { rd, imm } => {
+                format!(
+                    "{} {},{} - type U",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.data((imm >> 12).to_string().as_str())
+                )
+            }
+        }
+    }
 }
