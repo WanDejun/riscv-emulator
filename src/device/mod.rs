@@ -20,12 +20,20 @@ pub mod mmio;
 pub mod power_manager;
 pub mod uart;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum MemError {
+    LoadMisaligned,
+    LoadFault,
+    StoreMisaligned,
+    StoreFault,
+}
+
 pub trait Mem {
-    fn read<T>(&mut self, addr: WordType) -> T
+    fn read<T>(&mut self, addr: WordType) -> Result<T, MemError>
     where
         T: UnsignedInteger;
 
-    fn write<T>(&mut self, addr: WordType, data: T)
+    fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError>
     where
         T: UnsignedInteger;
 }

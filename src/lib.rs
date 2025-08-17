@@ -47,6 +47,7 @@ impl Emulator {
                 .lock()
                 .unwrap()
                 .read::<u16>(0)
+                .unwrap()
                 .eq(&POWER_OFF_CODE)
             {
                 break;

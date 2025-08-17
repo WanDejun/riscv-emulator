@@ -1,4 +1,4 @@
-use crate::device::{DeviceTrait, Mem};
+use crate::device::{DeviceTrait, Mem, MemError};
 
 pub(crate) const POWER_OFF_CODE: u16 = 0x5555;
 
@@ -7,7 +7,7 @@ pub struct PowerManager {
 }
 
 impl Mem for PowerManager {
-    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> T
+    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -16,16 +16,21 @@ impl Mem for PowerManager {
         let mut ret: T = ((self.reg >> 8) as u8).into();
         ret <<= 8;
         ret |= (self.reg as u8).into();
-        ret
+        Ok(ret)
     }
 
-    fn write<T>(&mut self, addr: crate::config::arch_config::WordType, data: T)
+    fn write<T>(
+        &mut self,
+        addr: crate::config::arch_config::WordType,
+        data: T,
+    ) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
         assert!(addr == 0x00);
         let data: u64 = data.into();
         self.reg = data as u16;
+        Ok(())
     }
 }
 

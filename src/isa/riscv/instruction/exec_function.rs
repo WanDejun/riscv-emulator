@@ -74,11 +74,19 @@ where
             .cast_signed()
             .wrapping_add(sign_extend(imm, 12).cast_signed())
             .cast_unsigned();
-        let mut data: WordType = cpu.memory.read::<T>(addr).into();
-        if EXTEND {
-            data = sign_extend(data, (size_of::<T>() as u32) * 8);
+        let ret = cpu.memory.read::<T>(addr);
+
+        match ret {
+            Ok(data) => {
+                let data_64: u64 = data.into();
+                let mut data = data_64 as WordType;
+                if EXTEND {
+                    data = sign_extend(data, (size_of::<T>() as u32) * 8);
+                }
+                cpu.reg_file.write(rd, data);
+            }
+            Err(err) => return Err(Exception::from_memory_err(err)),
         }
-        cpu.reg_file.write(rd, data);
     } else {
         std::unreachable!();
     }
@@ -97,7 +105,11 @@ where
             .cast_signed()
             .wrapping_add(sign_extend(imm, 12).cast_signed())
             .cast_unsigned();
-        cpu.memory.write(addr, T::truncate_from(val2));
+
+        let ret = cpu.memory.write(addr, T::truncate_from(val2));
+        if let Err(err) = ret {
+            return Err(Exception::from_memory_err(err));
+        }
     } else {
         std::unreachable!();
     }

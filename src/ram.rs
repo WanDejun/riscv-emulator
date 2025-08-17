@@ -1,9 +1,8 @@
 use core::panic;
-use std::ops::{Index, IndexMut};
 
 use crate::{
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem},
+    device::{DeviceTrait, Mem, MemError},
     ram_config,
     utils::{read_raw_ptr, write_raw_ptr},
 };
@@ -13,18 +12,18 @@ pub struct Ram {
     data: Box<[u8]>,
 }
 
-impl Index<usize> for Ram {
-    type Output = u8;
-    fn index(&self, index: usize) -> &Self::Output {
-        &(self.data[index])
-    }
-}
+// impl Index<usize> for Ram {
+//     type Output = u8;
+//     fn index(&self, index: usize) -> &Self::Output {
+//         &(self.data[index])
+//     }
+// }
 
-impl IndexMut<usize> for Ram {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut (self.data[index])
-    }
-}
+// impl IndexMut<usize> for Ram {
+//     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+//         &mut (self.data[index])
+//     }
+// }
 
 impl Ram {
     /// TODO: use random init for better debug.
@@ -49,49 +48,57 @@ impl Ram {
         });
     }
 
-    #[allow(unused)]
-    pub fn read_byte(&mut self, addr: WordType) -> u8 {
-        Self::read::<u8>(self, addr)
-    }
-    #[allow(unused)]
-    pub fn read_word(&mut self, addr: WordType) -> u16 {
-        Self::read::<u16>(self, addr)
-    }
-    #[allow(unused)]
-    pub fn read_dword(&mut self, addr: WordType) -> u32 {
-        Self::read::<u32>(self, addr)
-    }
-    #[allow(unused)]
-    pub fn read_qword(&mut self, addr: WordType) -> u64 {
-        Self::read::<u64>(self, addr)
-    }
+    // pub fn read_byte(&mut self, addr: WordType) -> u8 {
+    //     Self::read::<u8>(self, addr)
+    // }
+    // pub fn read_word(&mut self, addr: WordType) -> u16 {
+    //     Self::read::<u16>(self, addr)
+    // }
+    // pub fn read_dword(&mut self, addr: WordType) -> u32 {
+    //     Self::read::<u32>(self, addr)
+    // }
+    // pub fn read_qword(&mut self, addr: WordType) -> u64 {
+    //     Self::read::<u64>(self, addr)
+    // }
 
-    #[allow(unused)]
-    pub fn write_byte(&mut self, data: u8, addr: WordType) {
-        Self::write::<u8>(self, addr, data)
-    }
-    #[allow(unused)]
-    pub fn write_word(&mut self, data: u16, addr: WordType) {
-        Self::write::<u16>(self, addr, data)
-    }
-    #[allow(unused)]
-    pub fn write_dword(&mut self, data: u32, addr: WordType) {
-        Self::write::<u32>(self, addr, data)
-    }
-    #[allow(unused)]
-    pub fn write_qword(&mut self, data: u64, addr: WordType) {
-        Self::write::<u64>(self, addr, data)
-    }
+    // pub fn write_byte(&mut self, data: u8, addr: WordType) {
+    //     Self::write::<u8>(self, addr, data)
+    // }
+    // pub fn write_word(&mut self, data: u16, addr: WordType) {
+    //     Self::write::<u16>(self, addr, data)
+    // }
+    // pub fn write_dword(&mut self, data: u32, addr: WordType) {
+    //     Self::write::<u32>(self, addr, data)
+    // }
+    // pub fn write_qword(&mut self, data: u64, addr: WordType) {
+    //     Self::write::<u64>(self, addr, data)
+    // }
 }
 
 impl Mem for Ram {
-    fn read<T>(&mut self, addr: WordType) -> T {
-        unsafe { read_raw_ptr::<T>(self.data.as_ptr().add(addr as usize)) }
+    fn read<T>(&mut self, addr: WordType) -> Result<T, MemError> {
+        if addr.gt(&(ram_config::SIZE as WordType)) {
+            return Err(MemError::LoadFault);
+        }
+
+        let data = unsafe { read_raw_ptr::<T>(self.data.as_ptr().add(addr as usize)) };
+        if let Some(data) = data {
+            Ok(data)
+        } else {
+            Err(MemError::LoadMisaligned)
+        }
     }
 
-    fn write<T>(&mut self, addr: WordType, data: T) {
-        unsafe {
-            write_raw_ptr(self.data.as_mut_ptr().add(addr as usize), data);
+    fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
+        if addr.gt(&(ram_config::SIZE as WordType)) {
+            return Err(MemError::StoreFault);
+        }
+
+        let ret = unsafe { write_raw_ptr(self.data.as_mut_ptr().add(addr as usize), data) };
+        if let Some(()) = ret {
+            Ok(())
+        } else {
+            Err(MemError::StoreMisaligned)
         }
     }
 }
@@ -132,53 +139,53 @@ mod tests {
         }
 
         // 测试read_byte
-        let b = r.read_byte(base as WordType);
+        let b = r.read::<u8>(base as WordType).unwrap();
         assert_eq!(b, 0x12);
 
         // 测试read_word (2字节)
-        let w = r.read_word(base as WordType);
+        let w = r.read::<u16>(base as WordType).unwrap();
         // 注意你的concat_bits顺序是从高位到低位
         // data[base|1], data[base] => 0x34 0x12 -> 0x3412
         assert_eq!(w, 0x3412);
 
         // 测试read_dword (4字节)
-        let d = r.read_dword(base as WordType);
+        let d = r.read::<u32>(base as WordType).unwrap();
         // data[base|3], base|2, base|1, base
         // 0x78 0x56 0x34 0x12 -> 0x78563412
         assert_eq!(d, 0x78563412);
 
         // 测试read_qword (8字节)
-        let q = r.read_qword(base as WordType);
+        let q = r.read::<u64>(base as WordType).unwrap();
         // data[base|7]...data[base]
         // 0xF0 0xDE 0xBC 0x9A 0x78 0x56 0x34 0x12 -> 0xF0DEBC9A78563412
         assert_eq!(q, 0xF0DEBC9A78563412);
     }
 
     #[test]
-    #[should_panic(expected = "read_word -> addr")]
+    #[should_panic(expected = "Result::unwrap()")]
     fn test_read_unaligned_address() {
         let mut r = Ram::new();
         // 这里用一个不对齐的地址试试，比如 addr & align_ilst[size_of_t] != 0 会断言失败
-        r.read_dword(1); // 如果1不对齐，应该panic
+        r.read::<u64>(1).unwrap(); // 如果1不对齐，应该panic
     }
 
     #[test]
     fn test_write_byte() {
         let mut ram = Ram::new();
-        ram.write_byte(0xAB, 0x00);
+        ram.write::<u8>(0x00, 0xAB).unwrap();
         assert_eq!(ram.data[0], 0xAB);
 
-        ram.write_word(0x1234, 0x00);
+        ram.write::<u16>(0x00, 0x1234).unwrap();
         assert_eq!(ram.data[0], 0x34); // little endian
         assert_eq!(ram.data[1], 0x12);
 
-        ram.write_dword(0x12345678, 0x00);
+        ram.write::<u32>(0x00, 0x12345678).unwrap();
         assert_eq!(ram.data[0], 0x78);
         assert_eq!(ram.data[1], 0x56);
         assert_eq!(ram.data[2], 0x34);
         assert_eq!(ram.data[3], 0x12);
 
-        ram.write_qword(0x1122334455667788, 0x00);
+        ram.write::<u64>(0x00, 0x1122334455667788).unwrap();
         assert_eq!(ram.data[0], 0x88);
         assert_eq!(ram.data[1], 0x77);
         assert_eq!(ram.data[2], 0x66);

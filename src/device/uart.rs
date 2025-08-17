@@ -18,7 +18,8 @@ use log::error;
 
 use crate::{
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, config::UART_DEFAULT_DIV},
+    device::{DeviceTrait, Mem, MemError, config::UART_DEFAULT_DIV},
+    isa::riscv::trap::Exception,
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -393,7 +394,7 @@ impl Uart16550 {
 }
 
 impl Mem for Uart16550 {
-    fn read<T>(&mut self, inner_addr: WordType) -> T
+    fn read<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -422,9 +423,9 @@ impl Mem for Uart16550 {
             }
         }
 
-        data
+        Ok(data)
     }
-    fn write<T>(&mut self, inner_addr: WordType, data: T)
+    fn write<T>(&mut self, inner_addr: WordType, data: T) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -450,6 +451,8 @@ impl Mem for Uart16550 {
                 data >>= 1;
             }
         }
+
+        Ok(())
     }
 }
 impl DeviceTrait for Uart16550 {
@@ -582,10 +585,10 @@ mod test {
                 uart.step();
             }
         }
-        assert!((uart.read::<u8>(offset::LSR) & (1 << 5)) != 0);
-        assert!((uart.read::<u8>(offset::LSR) & (1 << 6)) != 0);
-        assert!((uart.read::<u8>(offset::LSR) & 0x01) != 0);
-        assert!(uart.read::<u8>(offset::RBR) == 0xaa);
-        assert!((uart.read::<u8>(offset::LSR) & 0x01) == 0);
+        assert!((uart.read::<u8>(offset::LSR).unwrap() & (1 << 5)) != 0);
+        assert!((uart.read::<u8>(offset::LSR).unwrap() & (1 << 6)) != 0);
+        assert!((uart.read::<u8>(offset::LSR).unwrap() & 0x01) != 0);
+        assert!(uart.read::<u8>(offset::RBR).unwrap() == 0xaa);
+        assert!((uart.read::<u8>(offset::LSR).unwrap() & 0x01) == 0);
     }
 }

@@ -61,14 +61,19 @@ impl RV32CPU {
 
     pub fn step(&mut self) -> Result<(), Exception> {
         let instr_bytes = self.memory.read::<u32>(self.pc);
-        log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
-        let (instr, info) = self.decoder.decode(instr_bytes)?;
-        log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
-        self.execute(instr, info)?;
-        self.memory.step();
+        match instr_bytes {
+            Ok(instr_bytes) => {
+                log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
+                let (instr, info) = self.decoder.decode(instr_bytes)?;
+                log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
+                self.execute(instr, info)?;
+                self.memory.step();
 
-        log::trace!("{}", self.debug_reg_string());
-        Ok(())
+                log::trace!("{}", self.debug_reg_string());
+                return Ok(());
+            }
+            Err(err) => return Err(Exception::from_memory_err(err)),
+        }
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
@@ -112,12 +117,12 @@ mod tests {
         }
 
         fn mem<T: UnsignedInteger>(mut self, addr: WordType, value: T) -> Self {
-            self.cpu.memory.write(addr, value);
+            self.cpu.memory.write(addr, value).unwrap();
             self
         }
 
         fn mem_base<T: UnsignedInteger>(mut self, addr: WordType, value: T) -> Self {
-            self.cpu.memory.write(BASE_ADDR + addr, value);
+            self.cpu.memory.write(BASE_ADDR + addr, value).unwrap();
             self
         }
 
@@ -155,7 +160,7 @@ mod tests {
             T: UnsignedInteger,
         {
             assert_eq!(
-                self.cpu.memory.read::<T>(addr).into(),
+                self.cpu.memory.read::<T>(addr).unwrap().into(),
                 value,
                 "Memory value incorrect at pos {}",
                 addr

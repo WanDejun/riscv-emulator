@@ -40,20 +40,22 @@ impl CliUart {
         self.uart.step();
 
         // Output
-        if (self.uart.read::<u8>(5) & 0b1) != 0 {
-            self.output_tx.send(self.uart.read::<u8>(0)).unwrap();
+        if (self.uart.read::<u8>(5).unwrap() & 0b1) != 0 {
+            self.output_tx
+                .send(self.uart.read::<u8>(0).unwrap())
+                .unwrap();
         }
 
         // Input
         if self.uart.transmit_holding_empty() {
             if let Ok(v) = self.input_rx.try_recv() {
-                self.uart.write(0x00, v);
+                self.uart.write(0x00, v).unwrap();
             }
         }
     }
 
     pub fn sync(&mut self) {
-        while !read_bit(&self.uart.read::<u8>(5), 6) || !self.output_rx.is_empty() {
+        while !read_bit(&self.uart.read::<u8>(5).unwrap(), 6) || !self.output_rx.is_empty() {
             self.step();
         }
     }
@@ -154,20 +156,20 @@ impl FIFOUart {
         self.uart.step();
 
         // Output
-        if (self.uart.read::<u8>(5) & 0b1) != 0 {
-            self.output_fifo.push_back(self.uart.read::<u8>(0));
+        if (self.uart.read::<u8>(5).unwrap() & 0b1) != 0 {
+            self.output_fifo.push_back(self.uart.read::<u8>(0).unwrap());
         }
 
         // Input
-        if (self.uart.read::<u8>(5) & 0x40) != 0 {
+        if (self.uart.read::<u8>(5).unwrap() & 0x40) != 0 {
             if let Some(val) = self.input_fifo.pop_front() {
-                self.uart.write(0x00, val);
+                self.uart.write(0x00, val).unwrap();
             }
         }
     }
 
     pub fn sync(&mut self) {
-        while !read_bit(&self.uart.read::<u8>(5), 6) || !self.output_fifo.is_empty() {
+        while !read_bit(&self.uart.read::<u8>(5).unwrap(), 6) || !self.output_fifo.is_empty() {
             self.step();
         }
     }
@@ -197,7 +199,7 @@ mod test {
         let rx = 1u8;
         let mut uart = Uart16550::new((&rx) as *const u8);
         let mut cli = CliUart::new(uart.get_tx_wiring());
-        uart.write(0, 'a' as u8);
+        uart.write(0, 'a' as u8).unwrap();
         for _ in 0..20 {
             for _ in 0..UART_DEFAULT_DIV * 16 {
                 cli.step();
@@ -219,8 +221,8 @@ mod test {
         loop {
             cli.step();
             uart.step();
-            if (uart.read::<u8>(5) & 0x01) != 0 {
-                let v = uart.read::<u8>(0);
+            if (uart.read::<u8>(5).unwrap() & 0x01) != 0 {
+                let v = uart.read::<u8>(0).unwrap();
                 println!("{}", v);
                 break;
             }

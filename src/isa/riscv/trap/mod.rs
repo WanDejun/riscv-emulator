@@ -1,3 +1,5 @@
+use crate::device::MemError;
+
 /// Trap Cause
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Trap {
@@ -75,6 +77,15 @@ impl Exception {
             13 => Exception::LoadPageFault,
             15 => Exception::StorePageFault,
             _ => Exception::Unknown,
+        }
+    }
+
+    pub fn from_memory_err(err: MemError) -> Self {
+        match err {
+            MemError::LoadMisaligned => Exception::LoadMisaligned,
+            MemError::LoadFault => Exception::LoadFault,
+            MemError::StoreMisaligned => Exception::StoreMisaligned,
+            MemError::StoreFault => Exception::StoreFault,
         }
     }
 }
