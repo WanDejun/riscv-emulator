@@ -6,7 +6,7 @@ use crossterm::style::Stylize;
 use lazy_static::lazy_static;
 use riscv_emulator::{
     cli_coordinator::CliCoordinator,
-    config::arch_config::{REG_NAME, SignedWordType, WordType},
+    config::arch_config::{REG_NAME, WordType},
     isa::riscv::{
         debugger::{DebugEvent, Debugger},
         decoder::DecodeInstr,

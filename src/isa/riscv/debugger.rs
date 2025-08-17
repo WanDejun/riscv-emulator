@@ -131,19 +131,26 @@ impl<T: DebugTarget> Debugger<T> {
             .contains_key(&Breakpoint::new(target.read_pc()))
     }
 
+    fn place_origin_on_break(&mut self, target: &mut T) {
+        let pc = target.read_pc();
+        log::debug!("Placing origin instruction on breakpoint at {:08x}", pc);
+
+        let instr = self
+            .breakpoints
+            .get(&Breakpoint::new(pc))
+            .expect("Breakpoint should exist");
+
+        target.write_mem::<u32>(pc, *instr).unwrap();
+    }
+
     fn step_over_breakpoint(&mut self, target: &mut T) -> Result<(), DebugError> {
         let pc = target.read_pc();
-        if let Some(instr) = self.breakpoints.get(&Breakpoint { pc }).copied() {
-            target.write_mem::<u32>(pc, instr).unwrap();
-            match target.step() {
-                Ok(()) => {
-                    target.write_mem::<u32>(pc, EBREAK).unwrap();
-                    Ok(())
-                }
-                Err(e) => Err(DebugError::TargetException(e)),
+        match target.step() {
+            Ok(()) => {
+                target.write_mem::<u32>(pc, EBREAK).unwrap();
+                Ok(())
             }
-        } else {
-            Ok(())
+            Err(e) => Err(DebugError::TargetException(e)),
         }
     }
 
@@ -158,9 +165,12 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => Ok(DebugEvent::StepCompleted {
                     pc: target.read_pc(),
                 }),
-                Err(Exception::Breakpoint) => Ok(DebugEvent::BreakpointHit {
-                    pc: target.read_pc(),
-                }),
+                Err(Exception::Breakpoint) => {
+                    self.place_origin_on_break(target);
+                    Ok(DebugEvent::BreakpointHit {
+                        pc: target.read_pc(),
+                    })
+                }
                 Err(e) => Err(DebugError::TargetException(e)),
             }
         }
@@ -188,6 +198,7 @@ impl<T: DebugTarget> Debugger<T> {
                     rest -= 1;
                 }
                 Err(Exception::Breakpoint) => {
+                    self.place_origin_on_break(target);
                     return Ok(DebugEvent::BreakpointHit {
                         pc: target.read_pc(),
                     });
