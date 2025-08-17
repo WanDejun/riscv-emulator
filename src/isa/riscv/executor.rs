@@ -5,9 +5,8 @@ use crate::{
     isa::riscv::{
         csr_reg::CsrRegFile,
         decoder::Decoder,
-        instruction::{
-            Exception, RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr,
-        },
+        instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
+        trap::Exception,
         vaddr::VirtAddrManager,
     },
     ram_config::DEFAULT_PC_VALUE,

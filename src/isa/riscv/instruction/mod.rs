@@ -77,11 +77,5 @@ macro_rules! define_riscv_isa {
     };
 }
 
-#[derive(Debug, Clone)]
-pub enum Exception {
-    InvalidInstruction,
-    EBreak,
-}
-
 // call [`define_riscv_isa!`] to generate instructions
 // include!(concat!(env!("OUT_DIR"), "/rv32i_gen.rs"));

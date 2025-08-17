@@ -2,7 +2,8 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         executor::RV32CPU,
-        instruction::{Exception, RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
+        instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
+        trap::Exception,
     },
     utils::sign_extend,
 };
@@ -117,8 +118,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         },
 
-        RiscvInstr::EBREAK => |_info, _cpu| Err(Exception::EBreak),
-        RiscvInstr::ECALL => exec_todo::<()>,
+        RiscvInstr::EBREAK => |_info, _cpu| Err(Exception::Breakpoint),
+        RiscvInstr::ECALL => |_info, _cpu| Err(Exception::MachineEnvCall),
         // todo!("Both ebreak and ecall are not implemented yet.")
 
         // We are executing in order, so don't need to do anything.

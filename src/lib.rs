@@ -17,7 +17,7 @@ pub use config::ram_config;
 
 use crate::{
     device::{Mem, POWER_MANAGER, power_manager::POWER_OFF_CODE},
-    isa::riscv::{executor::RV32CPU, instruction::Exception, vaddr::VirtAddrManager},
+    isa::riscv::{executor::RV32CPU, trap::Exception, vaddr::VirtAddrManager},
     ram::Ram,
 };
 

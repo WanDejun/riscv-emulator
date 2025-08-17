@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Debug, marker::PhantomData, u64};
 use crate::{
     config::arch_config::WordType,
     device::Mem,
-    isa::riscv::{executor::RV32CPU, instruction::Exception},
+    isa::riscv::{executor::RV32CPU, trap::Exception},
     utils::UnsignedInteger,
 };
 
@@ -140,7 +140,7 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => Ok(DebugEvent::StepCompleted {
                     pc: target.read_pc(),
                 }),
-                Err(Exception::EBreak) => Ok(DebugEvent::BreakpointHit {
+                Err(Exception::Breakpoint) => Ok(DebugEvent::BreakpointHit {
                     pc: target.read_pc(),
                 }),
                 Err(e) => Err(DebugError::TargetException(e)),
@@ -169,7 +169,7 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => {
                     rest -= 1;
                 }
-                Err(Exception::EBreak) => {
+                Err(Exception::Breakpoint) => {
                     return Ok(DebugEvent::BreakpointHit {
                         pc: target.read_pc(),
                     });
