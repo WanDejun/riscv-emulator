@@ -112,7 +112,8 @@ mod tests {
 
     use crate::{
         config::arch_config::REGFILE_CNT,
-        ram_config::BASE_ADDR,
+        isa::riscv::csr_reg::{csr_index, csr_macro::Mcause},
+        ram_config::{self, BASE_ADDR},
         utils::{UnsignedInteger, negative_of, sign_extend},
     };
 
@@ -207,6 +208,13 @@ mod tests {
             assert_eq!(self.cpu.csr.read(addr).unwrap(), value);
             self
         }
+
+        fn customized<F>(self, f: F) -> Self
+        where
+            F: FnOnce(Self) -> Self,
+        {
+            f(self)
+        }
     }
 
     fn run_test_exec<F, G>(instr: RiscvInstr, info: RVInstrInfo, build: F, check: G)
@@ -227,6 +235,22 @@ mod tests {
         let mut cpu = build(TestCPUBuilder::new()).build();
         let (instr, info) = cpu.decoder.decode(raw_instr).unwrap();
         cpu.execute(instr, info).unwrap();
+        check(CPUChecker::new(&mut cpu));
+    }
+
+    fn run_test_cpu_step<F, G>(raw_instrs: &[u32], build: F, check: G)
+    where
+        F: FnOnce(TestCPUBuilder) -> TestCPUBuilder,
+        G: FnOnce(CPUChecker) -> CPUChecker,
+    {
+        let mut builder = build(TestCPUBuilder::new());
+        for (i, inst) in raw_instrs.iter().enumerate() {
+            builder = builder.mem(i as WordType + ram_config::BASE_ADDR, *inst);
+        }
+        let mut cpu = builder.build();
+        for _ in 0..raw_instrs.len() {
+            cpu.step().unwrap()
+        }
         check(CPUChecker::new(&mut cpu));
     }
 
@@ -488,12 +512,23 @@ mod tests {
             |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8),
         );
     }
-}
-
-#[cfg(test)]
-mod exception_test {
-    use crate::*;
 
     #[test]
-    fn test_illgal_instr() {}
+    fn test_illgal_instr() {
+        run_test_cpu_step(
+            &[0x00003503], // ld a0, 0(zero)
+            |builder| builder.csr(csr_index::mtvec, 0x00FF << 2),
+            |checker| {
+                checker
+                    .pc(0x00FF << 2)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
+                        checker
+                    })
+            },
+        );
+    }
 }

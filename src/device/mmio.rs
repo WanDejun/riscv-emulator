@@ -150,7 +150,8 @@ impl Mem for MemoryMapIO {
             Ok(i) => self.read_from_device(i, p_addr),
             Err(i) => {
                 if i == 0 {
-                    panic!("physical address: {} is not mapped to the device", p_addr);
+                    Err(MemError::LoadFault)
+                    // panic!("physical address: {} is not mapped to the device", p_addr);
                 } else {
                     self.read_from_device(i - 1, p_addr)
                 }
