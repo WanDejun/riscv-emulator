@@ -112,11 +112,10 @@ impl<T: DebugTarget> Debugger<T> {
             return;
         }
         let orig: u32 = self.read_mem(pc).unwrap();
-        if orig != EBREAK {
+        self.breakpoints.insert(breakpoint, orig);
+        if orig != EBREAK && pc != self.read_pc() {
             self.write_mem(pc, EBREAK).unwrap();
         }
-
-        self.breakpoints.insert(breakpoint, orig);
     }
 
     pub fn clear_breakpoint(&mut self, pc: WordType) {
