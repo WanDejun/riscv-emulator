@@ -45,6 +45,15 @@ impl TestCPUBuilder {
         self
     }
 
+    pub(super) fn program(mut self, instrs: &[u32]) -> Self {
+        let mut addr = BASE_ADDR;
+        for instr in instrs {
+            self.cpu.memory.write(addr, *instr).unwrap();
+            addr += 4;
+        }
+        self
+    }
+
     pub(super) fn csr(mut self, csr_addr: WordType, value: WordType) -> Self {
         self.cpu.csr.write(csr_addr, value);
         self

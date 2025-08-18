@@ -235,3 +235,49 @@ impl<T: DebugTarget> Debugger<T> {
         self.target.decoded_info(instr)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{isa::riscv::cpu_tester::TestCPUBuilder, ram_config::BASE_ADDR};
+
+    use super::*;
+
+    #[test]
+    fn test_breakpoint() {
+        // Test that a breakpoint can be hit
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+            ])
+            .build();
+
+        let mut debugger = Debugger::new(cpu);
+        debugger.set_breakpoint(BASE_ADDR + 4);
+        debugger.continue_run().unwrap();
+
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+        assert!(debugger.on_breakpoint());
+        assert_eq!(debugger.read_mem::<u32>(BASE_ADDR + 4).unwrap(), 0x02520333);
+    }
+
+    #[test]
+    fn test_breakpoint_on_current() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+            ])
+            .build();
+
+        let mut debugger = Debugger::new(cpu);
+        debugger.set_breakpoint(BASE_ADDR);
+        assert!(debugger.on_breakpoint());
+
+        debugger.step().unwrap();
+
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+        assert!(debugger.on_breakpoint() == false);
+        assert_eq!(debugger.read_mem::<u32>(BASE_ADDR).unwrap(), 0x0010_0073); // ebreak
+    }
+}
