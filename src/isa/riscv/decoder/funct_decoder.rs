@@ -53,12 +53,10 @@ impl<K: Ord + Copy, V> SmallMap<K, V> {
 }
 
 pub(super) struct Decoder {
-    decode_table: Vec<(PartialDecode, SmallMap<u32, (RiscvInstr, InstrFormat)>)>,
-}
-
-#[inline]
-fn opcode_f3_f7(opcode: u8, f3: u8, f7: u8) -> u32 {
-    (opcode as u32) + ((f3 as u32) << 7) + ((f7 as u32) << 10)
+    decode_table: Vec<(
+        PartialDecode,
+        SmallMap<(u8, u8, u8), (RiscvInstr, InstrFormat)>,
+    )>,
 }
 
 impl DecoderTrait for Decoder {
@@ -83,19 +81,19 @@ impl DecoderTrait for Decoder {
                 InstrFormat::R => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::RequireF7;
-                    map.insert(opcode_f3_f7(opcode, funct3, funct7), (instr, format));
+                    map.insert((opcode, funct3, funct7), (instr, format));
                 }
 
                 InstrFormat::I | InstrFormat::S | InstrFormat::B => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::RequireF3;
-                    map.insert(opcode_f3_f7(opcode, funct3, 0), (instr, format));
+                    map.insert((opcode, funct3, 0), (instr, format));
                 }
 
                 _ => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::Complete;
-                    map.insert(opcode_f3_f7(opcode, funct3, funct7), (instr, format));
+                    map.insert((opcode, funct3, funct7), (instr, format));
                 }
             }
         }
@@ -114,8 +112,8 @@ impl DecoderTrait for Decoder {
 
         let (instr_kind, fmt) = match partial {
             PartialDecode::Complete => map.data.get(0).unwrap().1.clone(),
-            PartialDecode::RequireF3 => map.get(&opcode_f3_f7(opcode, funct3, 0))?.clone(),
-            PartialDecode::RequireF7 => map.get(&opcode_f3_f7(opcode, funct3, funct7))?.clone(),
+            PartialDecode::RequireF3 => map.get(&(opcode, funct3, 0))?.clone(),
+            PartialDecode::RequireF7 => map.get(&(opcode, funct3, funct7))?.clone(),
             PartialDecode::Unknown => {
                 return None;
             }
