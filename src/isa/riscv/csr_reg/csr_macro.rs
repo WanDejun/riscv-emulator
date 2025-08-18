@@ -1,5 +1,6 @@
 use super::CsrReg;
-use crate::config::arch_config::{SignedWordType, WordType};
+use crate::config::arch_config::{SignedWordType, WordType, XLEN};
+use crate::utils::BIT_ONES_ARRAY;
 
 /// Generator a single csr register.
 macro_rules! gen_csr_reg {
@@ -31,29 +32,31 @@ macro_rules! gen_csr_reg {
 
         impl $name {
             $(
+                #[inline]
                 pub fn ${concat(get_, $fname)}(&self) -> WordType {
                     const LOW_BIT: WordType = if ($bit >= 0) {
                         ($bit as SignedWordType).abs() as WordType
                     }
                     else {
-                        ((size_of::<WordType>() as SignedWordType) + $bit) as WordType
+                        ((XLEN as SignedWordType) + $bit) as WordType
                     };
 
                     ((unsafe { self.data.read_volatile() })
-                    & ((WordType::from(1u8) << $len) - 1) << LOW_BIT) >> LOW_BIT
+                    & (BIT_ONES_ARRAY[$len]) << LOW_BIT) >> LOW_BIT
                 }
 
+                #[inline]
                 pub fn ${concat(set_, $fname)}(&self, val: WordType) {
-                    assert!(val < (1 << $len));
+                    assert!(val <= BIT_ONES_ARRAY[$len]);
                     const LOW_BIT: WordType = if ($bit >= 0) {
                         ($bit as SignedWordType).abs() as WordType
                     }
                     else {
-                        ((size_of::<WordType>() as SignedWordType) + $bit) as WordType
+                        ((XLEN as SignedWordType) + $bit) as WordType
                     };
 
                     let mut data = unsafe { self.data.read_volatile() };
-                    data &= !((((WordType::from(1u8) << $len) - 1) as WordType) << LOW_BIT);
+                    data &= !((BIT_ONES_ARRAY[$len]) << LOW_BIT);
                     unsafe { self.data.write_volatile(data | (val << LOW_BIT)) };
                 }
             )*
@@ -125,29 +128,29 @@ gen_csr_regfile! {
         8,  1, ueie,
         9,  1, seie,
         10, 1, meie,
-        0, size_of::<WordType>(), mip
+        0, XLEN, mip
     ];
 
     Mtvec, 0x305, 0x00, [
         0, 2, mode,
-        2, size_of::<WordType>() - 2, base,
+        2, XLEN - 2, base,
     ];
 
     Mcratch, 0x340, 0x00, [
-        0, size_of::<WordType>(), mscratch,
+        0, XLEN, mscratch,
     ];
 
     Mepc, 0x341, 0x00, [
-        0, size_of::<WordType>(), mepc,
+        0, XLEN, mepc,
     ];
 
     Mcause, 0x342, 0x00, [
-        0, size_of::<WordType>() - 1, exception_code,
+        0, XLEN - 1, exception_code,
         -1, 1, interrupt,
     ];
 
     Mtval, 0x343, 0x00, [
-        0, size_of::<WordType>(), mtval,
+        0, XLEN, mtval,
     ];
 
     Mip, 0x344, 0x00, [
@@ -160,7 +163,7 @@ gen_csr_regfile! {
         8,  1, ueip,
         9,  1, seip,
         10, 1, meip,
-        0, size_of::<WordType>(), mip,
+        0, XLEN, mip,
     ];
 }
 

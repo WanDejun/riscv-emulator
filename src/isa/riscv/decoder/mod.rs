@@ -41,6 +41,7 @@ impl Decoder {
             .add(TABLE_RV64I)
             .add(TABLE_RV32M)
             .add(TABLE_RV64M)
+            .add(TABLE_RVZICSR)
             .build();
         Self {
             funct3_decoder: funct_decoder::Decoder::from_isa(&isa),

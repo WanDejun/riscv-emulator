@@ -150,7 +150,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
         }
 
         let rhs = if UIMM {
-            rd as WordType
+            rs1 as WordType
         } else {
             cpu.reg_file.read(rs1, rs1).0
         };

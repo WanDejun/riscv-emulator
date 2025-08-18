@@ -1,4 +1,10 @@
-use crate::device::MemError;
+use core::panic;
+
+use crate::{
+    config::arch_config::{WordType, XLEN},
+    device::MemError,
+};
+pub mod trap_controller;
 
 /// Trap Cause
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -59,6 +65,25 @@ impl Interrupt {
     }
 }
 
+impl Into<WordType> for Interrupt {
+    fn into(self) -> WordType {
+        match self {
+            Interrupt::UserSoft => 0,
+            Interrupt::SupervisorSoft => 1,
+            Interrupt::MachineSoft => 3,
+            Interrupt::UserTimer => 4,
+            Interrupt::SupervisorTimer => 5,
+            Interrupt::MachineTimer => 7,
+            Interrupt::UserExternal => 8,
+            Interrupt::SupervisorExternal => 9,
+            Interrupt::MachineExternal => 11,
+            _ => {
+                panic!("Unknown Exception.")
+            }
+        }
+    }
+}
+
 impl Exception {
     pub fn from(nr: usize) -> Self {
         match nr {
@@ -86,6 +111,52 @@ impl Exception {
             MemError::LoadFault => Exception::LoadFault,
             MemError::StoreMisaligned => Exception::StoreMisaligned,
             MemError::StoreFault => Exception::StoreFault,
+        }
+    }
+
+    pub fn from_instr_fetch_err(err: MemError) -> Self {
+        match err {
+            MemError::LoadMisaligned => Exception::InstructionMisaligned,
+            MemError::LoadFault => Exception::InstructionFault,
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+}
+
+impl Into<WordType> for Exception {
+    fn into(self) -> WordType {
+        match self {
+            Exception::InstructionMisaligned => 0,
+            Exception::InstructionFault => 1,
+            Exception::IllegalInstruction => 2,
+            Exception::Breakpoint => 3,
+            Exception::LoadMisaligned => 4,
+            Exception::LoadFault => 5,
+            Exception::StoreMisaligned => 6,
+            Exception::StoreFault => 7,
+            Exception::UserEnvCall => 8,
+            Exception::SupervisorEnvCall => 9,
+            Exception::MachineEnvCall => 11,
+            Exception::InstructionPageFault => 12,
+            Exception::LoadPageFault => 13,
+            Exception::StorePageFault => 15,
+            Exception::Unknown => {
+                panic!("Unknown Exception.")
+            }
+        }
+    }
+}
+
+impl Into<WordType> for Trap {
+    fn into(self) -> WordType {
+        match self {
+            Self::Interrupt(nr) => {
+                let nr: WordType = nr.into();
+                nr | (1u64 << (XLEN - 1))
+            }
+            Self::Exception(nr) => nr.into(),
         }
     }
 }

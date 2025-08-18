@@ -1,3 +1,6 @@
+#[cfg(not(test))]
+use crossterm::terminal::disable_raw_mode;
+
 use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
@@ -6,7 +9,7 @@ use crate::{
         csr_reg::CsrRegFile,
         decoder::{DecodeInstr, Decoder},
         instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
-        trap::Exception,
+        trap::{Exception, Trap, trap_controller::TrapController},
         vaddr::VirtAddrManager,
     },
     ram_config::DEFAULT_PC_VALUE,
@@ -60,24 +63,49 @@ impl RV32CPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
+        // IF
         let instr_bytes = self.memory.read::<u32>(self.pc);
-        match instr_bytes {
-            Ok(instr_bytes) => {
-                log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
-                let DecodeInstr(instr, info) = self.decoder.decode(instr_bytes)?;
-                log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
-                self.execute(instr, info)?;
-                self.memory.step();
+        if let Err(err) = instr_bytes {
+            TrapController::send_trap_signal(
+                self,
+                Trap::Exception(Exception::from_instr_fetch_err(err)),
+                self.pc,
+                self.pc,
+            );
+            return Ok(());
+        }
+        let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
+        log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
 
-                log::trace!("{}", self.debug_reg_string());
+        // ID
+        let decoder_result = self.decoder.decode(instr_bytes);
+        if let Err(nr) = decoder_result {
+            TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
+            return Ok(());
+        }
+        let DecodeInstr(instr, info) = unsafe { decoder_result.unwrap_unchecked() };
+        log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
+
+        // EX && MEM && WB
+        let excute_result = self.execute(instr, info);
+        match excute_result {
+            Err(Exception::Breakpoint) => return excute_result,
+            Err(nr) => {
+                TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
                 return Ok(());
             }
-            Err(err) => return Err(Exception::from_memory_err(err)),
+            Ok(()) => {} //there is nothing todo.
         }
+
+        self.memory.step();
+        log::trace!("{}", self.debug_reg_string());
+        return Ok(());
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
         self.memory.sync();
+        #[cfg(not(test))]
+        disable_raw_mode().unwrap();
         Ok(())
     }
 }
@@ -89,7 +117,8 @@ mod tests {
 
     use crate::{
         config::arch_config::REGFILE_CNT,
-        ram_config::BASE_ADDR,
+        isa::riscv::csr_reg::{csr_index, csr_macro::Mcause},
+        ram_config::{self, BASE_ADDR},
         utils::{UnsignedInteger, negative_of, sign_extend},
     };
 
@@ -123,6 +152,11 @@ mod tests {
 
         fn mem_base<T: UnsignedInteger>(mut self, addr: WordType, value: T) -> Self {
             self.cpu.memory.write(BASE_ADDR + addr, value).unwrap();
+            self
+        }
+
+        fn csr(mut self, csr_addr: WordType, value: WordType) -> Self {
+            self.cpu.csr.write(csr_addr, value);
             self
         }
 
@@ -174,6 +208,18 @@ mod tests {
         {
             self.mem::<T>(BASE_ADDR + addr, value)
         }
+
+        fn csr(self, addr: WordType, value: WordType) -> Self {
+            assert_eq!(self.cpu.csr.read(addr).unwrap(), value);
+            self
+        }
+
+        fn customized<F>(self, f: F) -> Self
+        where
+            F: FnOnce(Self) -> Self,
+        {
+            f(self)
+        }
     }
 
     fn run_test_exec<F, G>(instr: RiscvInstr, info: RVInstrInfo, build: F, check: G)
@@ -194,6 +240,22 @@ mod tests {
         let mut cpu = build(TestCPUBuilder::new()).build();
         let DecodeInstr(instr, info) = cpu.decoder.decode(raw_instr).unwrap();
         cpu.execute(instr, info).unwrap();
+        check(CPUChecker::new(&mut cpu));
+    }
+
+    fn run_test_cpu_step<F, G>(raw_instrs: &[u32], build: F, check: G)
+    where
+        F: FnOnce(TestCPUBuilder) -> TestCPUBuilder,
+        G: FnOnce(CPUChecker) -> CPUChecker,
+    {
+        let mut builder = build(TestCPUBuilder::new());
+        for (i, inst) in raw_instrs.iter().enumerate() {
+            builder = builder.mem(i as WordType + ram_config::BASE_ADDR, *inst);
+        }
+        let mut cpu = builder.build();
+        for _ in 0..raw_instrs.len() {
+            cpu.step().unwrap()
+        }
         check(CPUChecker::new(&mut cpu));
     }
 
@@ -408,6 +470,70 @@ mod tests {
             0x00078067, // jr a5
             |builder| builder.reg(15, 0x2468).pc(0x1234),
             |checker| checker.pc(0x2468),
+        );
+    }
+
+    #[test]
+    fn test_csr() {
+        // 1) CSRRW x11, mstatus(0x300), x5
+        run_test_exec_decode(
+            0x300295f3,
+            |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234),
+            |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA),
+        );
+
+        // 2) CSRRS x12, mtvec(0x305), x6
+        run_test_exec_decode(
+            0x30532673,
+            |builder| builder.reg(6, 0x00F0).csr(0x305, 0x0F00),
+            |checker| checker.reg(12, 0x0F00).csr(0x305, 0x0FF0),
+        );
+
+        // 3) CSRRC x13, mepc(0x341), x7
+        run_test_exec_decode(
+            0x3413b6f3,
+            |builder| builder.reg(7, 0x0FF0).csr(0x341, 0x0FFF),
+            |checker| checker.reg(13, 0x0FFF).csr(0x341, 0x000F),
+        );
+
+        // 4) CSRRWI x11, mcause(0x342), imm=5
+        run_test_exec_decode(
+            0x3422d5f3,
+            |builder| builder.csr(0x342, 0xABCD),
+            |checker| checker.reg(11, 0xABCD).csr(0x342, 5),
+        );
+
+        // 5) CSRRSI x12, mip(0x344), imm=6
+        run_test_exec_decode(
+            0x34436673,
+            |builder| builder.csr(0x344, 0x00F0),
+            |checker| checker.reg(12, 0x00F0).csr(0x344, 0x00F6),
+        );
+
+        // 6) CSRRCI x13, mie(0x304), imm=7
+        run_test_exec_decode(
+            0x3043f6f3,
+            |builder| builder.csr(0x304, 0x00FF),
+            |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8),
+        );
+    }
+
+    #[test]
+    fn test_illgal_instr() {
+        run_test_cpu_step(
+            &[0x00003503], // ld a0, 0(zero)
+            |builder| builder.csr(csr_index::mtvec, 0x00FF << 2),
+            |checker| {
+                checker
+                    .pc(0x00FF << 2)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
+                        checker
+                    })
+            },
         );
     }
 }

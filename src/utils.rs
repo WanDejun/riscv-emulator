@@ -4,7 +4,7 @@ use std::{
     usize,
 };
 
-use crate::config::arch_config::WordType;
+use crate::config::arch_config::{WordType, XLEN};
 
 fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
 where
@@ -268,6 +268,19 @@ where
 {
     (*data & (T::from(1u8) << idx)) != T::from(0u8)
 }
+
+const fn gen_ones_array<const LEN: usize>() -> [WordType; LEN + 1] {
+    let mut arr: [WordType; LEN + 1] = [0; LEN + 1];
+    let mut i = 0;
+    while i < LEN {
+        arr[i + 1] = arr[i] | ((1 as WordType) << i);
+        i += 1;
+    }
+
+    arr
+}
+
+pub const BIT_ONES_ARRAY: [WordType; XLEN + 1] = gen_ones_array::<XLEN>();
 
 #[cfg(test)]
 mod test {
