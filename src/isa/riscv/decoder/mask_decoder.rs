@@ -39,6 +39,8 @@ impl DecoderTrait for MaskDecoder {
             }
         }
 
+        log::debug!("Mask decoder loads {} instructions", masks.len());
+
         Self { masks }
     }
 }

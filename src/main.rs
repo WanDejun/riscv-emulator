@@ -7,6 +7,8 @@ mod dbg_repl;
 mod logging;
 mod welcome;
 
+use std::time::Instant;
+
 use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{Emulator, device::peripheral_init};
@@ -56,6 +58,7 @@ fn main() {
     if cli_args.debug {
         DebugREPL::new(emulator.into()).run();
     } else {
+        let now = Instant::now();
         match emulator.run() {
             Ok(cnt) => {
                 println!("Executed {} instructions.\r", cnt);
@@ -64,5 +67,6 @@ fn main() {
                 eprintln!("Error occurred while running emulator: {:?}\r", e);
             }
         }
+        println!("Used time: {}s", now.elapsed().as_secs_f32());
     }
 }

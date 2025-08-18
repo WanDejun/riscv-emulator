@@ -2,6 +2,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(cold_path)]
+#![feature(likely_unlikely)]
 
 mod cpu;
 mod load;
@@ -22,7 +24,7 @@ use crate::{
     ram::Ram,
 };
 
-use std::path::Path;
+use std::{hint::cold_path, path::Path};
 
 pub struct Emulator {
     cpu: RV32CPU,
@@ -44,19 +46,22 @@ impl Emulator {
         loop {
             self.cpu.step()?;
 
-            if POWER_MANAGER
-                .lock()
-                .unwrap()
-                .read::<u16>(0)
-                .unwrap()
-                .eq(&POWER_OFF_CODE)
+            if instr_cnt % 32 == 0
+                && POWER_MANAGER
+                    .lock()
+                    .unwrap()
+                    .read::<u16>(0)
+                    .unwrap()
+                    .eq(&POWER_OFF_CODE)
             {
+                cold_path();
+                self.cpu.power_off()?;
                 break;
             }
 
             instr_cnt += 1;
         }
-        self.cpu.power_off()?;
+
         Ok(instr_cnt)
     }
 
