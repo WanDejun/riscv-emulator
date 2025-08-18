@@ -19,7 +19,7 @@ pub mod isa;
 pub use config::ram_config;
 
 use crate::{
-    device::{Mem, POWER_MANAGER, power_manager::POWER_OFF_CODE},
+    device::power_manager::{POWER_OFF_CODE, POWER_STATUS},
     isa::riscv::{executor::RV32CPU, trap::Exception, vaddr::VirtAddrManager},
     ram::Ram,
 };
@@ -45,15 +45,9 @@ impl Emulator {
 
         loop {
             self.cpu.step()?;
+            let power = POWER_STATUS.load(std::sync::atomic::Ordering::Acquire);
 
-            if instr_cnt % 32 == 0
-                && POWER_MANAGER
-                    .lock()
-                    .unwrap()
-                    .read::<u16>(0)
-                    .unwrap()
-                    .eq(&POWER_OFF_CODE)
-            {
+            if instr_cnt % 32 == 0 && power.eq(&POWER_OFF_CODE) {
                 cold_path();
                 self.cpu.power_off()?;
                 break;

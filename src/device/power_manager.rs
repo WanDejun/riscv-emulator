@@ -1,6 +1,8 @@
 use crate::device::{DeviceTrait, Mem, MemError};
+use std::sync::atomic::AtomicU16;
 
 pub(crate) const POWER_OFF_CODE: u16 = 0x5555;
+pub static POWER_STATUS: AtomicU16 = AtomicU16::new(0);
 
 pub struct PowerManager {
     reg: u16,
@@ -30,6 +32,10 @@ impl Mem for PowerManager {
         assert!(addr == 0x00);
         let data: u64 = data.into();
         self.reg = data as u16;
+
+        if self.reg == POWER_OFF_CODE {
+            POWER_STATUS.store(0x5555, std::sync::atomic::Ordering::Release);
+        }
         Ok(())
     }
 }

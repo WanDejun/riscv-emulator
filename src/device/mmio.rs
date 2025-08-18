@@ -1,15 +1,14 @@
-use std::{
-    cmp::Ordering,
-    sync::{Arc, Mutex},
-};
+use std::cmp::Ordering;
 
 use crate::{
     config::arch_config::WordType,
     device::{
-        DEBUG_UART, DeviceTrait, Mem, MemError, POWER_MANAGER, UART1,
+        DebugUart, DeviceTrait, Mem, MemError,
         config::{
             Device, MMIO_FREQ_DIV, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR,
         },
+        power_manager::PowerManager,
+        uart::Uart16550,
     },
     ram::Ram,
     ram_config,
@@ -20,7 +19,7 @@ struct MemoryMapItem {
     pub start: WordType,
     pub size: WordType,
     // pub name: &'static str,
-    pub device: Arc<Mutex<Device>>,
+    pub device: Device,
 }
 
 impl PartialEq for MemoryMapItem {
@@ -41,7 +40,7 @@ impl Ord for MemoryMapItem {
 }
 
 impl MemoryMapItem {
-    fn new(start: WordType, size: WordType, device: Arc<Mutex<Device>>) -> Self {
+    fn new(start: WordType, size: WordType, device: Device) -> Self {
         Self {
             start,
             size,
@@ -62,6 +61,7 @@ impl MemoryMapItem {
 /// ```
 pub struct MemoryMapIO {
     dev_counter: usize,
+    debug_uart: DebugUart,
     map: Vec<MemoryMapItem>,
 }
 
@@ -71,19 +71,31 @@ impl MemoryMapIO {
     }
 
     pub fn from_ram(ram: Ram) -> Self {
-        let ram = Arc::new(Mutex::new(Device::Ram(ram)));
+        let ram = Device::Ram(ram);
+
+        let mut uart1 = Uart16550::new(0 as *const u8);
+        let mut debug_uart = DebugUart::new(0 as *const u8);
+        let power_manager = Device::PowerManager(PowerManager::new());
+
+        // Uart
+        uart1.change_rx_wiring(debug_uart.uart.get_tx_wiring());
+        debug_uart.uart.change_rx_wiring(uart1.get_tx_wiring());
+
+        #[cfg(not(test))]
+        {
+            use crate::device::cli_uart::spawn_io_thread;
+            spawn_io_thread(debug_uart.input_tx.clone(), debug_uart.output_rx.clone());
+        }
 
         let map = vec![
-            MemoryMapItem::new(
-                POWER_MANAGER_ADDR,
-                POWER_MANAGER_SIZE,
-                POWER_MANAGER.clone(),
-            ),
-            MemoryMapItem::new(UART1_ADDR, UART_SIZE, UART1.clone()),
-            MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram.clone()),
+            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
+            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::Uart16550(uart1)),
+            MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram),
         ];
+
         Self {
             dev_counter: 0,
+            debug_uart,
             map,
         }
     }
@@ -105,7 +117,7 @@ impl MemoryMapIO {
             // )
         } else {
             // in range
-            let mut device = self.map[device_index].device.lock().unwrap();
+            let device = &mut self.map[device_index].device;
             device.read(p_addr - start)
         }
     }
@@ -132,7 +144,7 @@ impl MemoryMapIO {
             )
         } else {
             // in range
-            let mut device = self.map[device_index].device.lock().unwrap();
+            let device = &mut self.map[device_index].device;
             device.write(p_addr - st, data)
         }
     }
@@ -195,25 +207,25 @@ impl DeviceTrait for MemoryMapIO {
         if self.dev_counter == MMIO_FREQ_DIV {
             self.dev_counter = 0;
 
-            for item in self.map.iter() {
-                item.device.lock().unwrap().step();
+            for item in self.map.iter_mut() {
+                item.device.step();
             }
-            DEBUG_UART.lock().unwrap().step();
+            self.debug_uart.step();
         }
 
         self.dev_counter += 1;
     }
     fn sync(&mut self) {
-        for item in self.map.iter() {
-            item.device.lock().unwrap().sync();
+        for item in self.map.iter_mut() {
+            item.device.sync();
         }
-        DEBUG_UART.lock().unwrap().sync();
+        self.debug_uart.sync();
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::device::{DEBUG_UART, config::UART_DEFAULT_DIV, peripheral_init};
+    use crate::device::{config::UART_DEFAULT_DIV, peripheral_init};
 
     use super::*;
 
@@ -243,18 +255,15 @@ mod test {
             mmio.step();
         }
         assert_ne!((mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x20), 0);
-        assert_eq!(
-            (DEBUG_UART.lock().unwrap().uart.read::<u8>(5).unwrap() & 0x01),
-            0
-        );
-        assert_eq!(DEBUG_UART.lock().unwrap().receive(), Some('a' as u8));
+        assert_eq!((mmio.debug_uart.uart.read::<u8>(5).unwrap() & 0x01), 0);
+        assert_eq!(mmio.debug_uart.receive(), Some('a' as u8));
     }
 
     #[test]
     fn mmio_stdio_test() {
         let _handles = peripheral_init();
         let mut mmio = MemoryMapIO::new();
-        DEBUG_UART.lock().unwrap().send('x' as u8);
+        mmio.debug_uart.send('x' as u8);
         loop {
             mmio.step();
             if (mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x01) != 0 {
