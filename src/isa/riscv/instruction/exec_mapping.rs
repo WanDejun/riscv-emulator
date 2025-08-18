@@ -131,5 +131,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::CSRRWI => exec_csrw::<true>,
         RiscvInstr::CSRRCI => exec_csr_bit::<false, true>,
         RiscvInstr::CSRRSI => exec_csr_bit::<true, true>,
+
+        _ => todo!(),
     }
 }

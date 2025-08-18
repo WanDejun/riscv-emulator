@@ -42,6 +42,7 @@ impl Decoder {
             .add(TABLE_RV32M)
             .add(TABLE_RV64M)
             .add(TABLE_RVZICSR)
+            .add(TABLE_RVSYSTEM)
             .build();
         Self {
             funct3_decoder: funct_decoder::Decoder::from_isa(&isa),
@@ -124,6 +125,7 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
                 imm: imm as WordType,
             }
         }
+        InstrFormat::None => RVInstrInfo::None,
     }
 }
 
@@ -330,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decoder_instr() {
+    fn test_decoder_rv32i() {
         let mut checker = Checker::new();
 
         checker.check(
@@ -391,25 +393,15 @@ mod tests {
             },
         );
 
-        checker.check(
-            0x100073,
-            RiscvInstr::EBREAK,
-            RVInstrInfo::I {
-                rs1: 0,
-                rd: 0,
-                imm: 1,
-            },
-        );
+        checker.check(0x100073, RiscvInstr::EBREAK, RVInstrInfo::None);
+        checker.check(0x000073, RiscvInstr::ECALL, RVInstrInfo::None);
+    }
 
-        checker.check(
-            0x000073,
-            RiscvInstr::ECALL,
-            RVInstrInfo::I {
-                rs1: 0,
-                rd: 0,
-                imm: 0,
-            },
-        );
+    #[test]
+    fn test_decoder_privilege() {
+        let mut checker = Checker::new();
+
+        checker.check(0x30200073, RiscvInstr::MRET, RVInstrInfo::None);
     }
 
     #[test]
