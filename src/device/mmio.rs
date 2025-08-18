@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, rc::Rc, sync::atomic::AtomicBool};
 
 use crate::{
     config::arch_config::WordType,
@@ -49,6 +49,21 @@ impl MemoryMapItem {
     }
 }
 
+struct MMIOLockGuard {
+    p: Rc<AtomicBool>,
+}
+
+impl MMIOLockGuard {
+    fn new(p: Rc<AtomicBool>) -> Self {
+        Self { p }
+    }
+}
+impl Drop for MMIOLockGuard {
+    fn drop(&mut self) {
+        self.p.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// # mmio
 /// ## Usage
 /// make sure the address was aligned.
@@ -60,6 +75,7 @@ impl MemoryMapItem {
 /// mmio.write::<u32>(ram_config::BASE_ADDR + 0x03); // ILLIGAL! unaligned accesses
 /// ```
 pub struct MemoryMapIO {
+    atomic_lock: Rc<AtomicBool>,
     dev_counter: usize,
     debug_uart: DebugUart,
     map: Vec<MemoryMapItem>,
@@ -94,6 +110,7 @@ impl MemoryMapIO {
         ];
 
         Self {
+            atomic_lock: Rc::new(AtomicBool::new(false)),
             dev_counter: 0,
             debug_uart,
             map,
@@ -148,6 +165,20 @@ impl MemoryMapIO {
             device.write(p_addr - st, data)
         }
     }
+
+    fn lock(&mut self) -> MMIOLockGuard {
+        loop {
+            if self
+                .atomic_lock
+                .swap(true, std::sync::atomic::Ordering::Acquire)
+                == false
+            {
+                break;
+            }
+        }
+
+        MMIOLockGuard::new(self.atomic_lock.clone())
+    }
 }
 
 impl Mem for MemoryMapIO {
@@ -155,6 +186,7 @@ impl Mem for MemoryMapIO {
     where
         T: crate::utils::UnsignedInteger,
     {
+        let _guard = self.lock();
         match self.map.binary_search_by(|device| {
             if p_addr < device.start {
                 Ordering::Greater
@@ -180,6 +212,7 @@ impl Mem for MemoryMapIO {
     where
         T: crate::utils::UnsignedInteger,
     {
+        let _guard = self.lock();
         match self.map.binary_search_by(|device| {
             if p_addr < device.start {
                 Ordering::Greater
@@ -202,8 +235,12 @@ impl Mem for MemoryMapIO {
     }
 }
 
+/// # MemoryMapIO
+/// ## NOTE
+/// If there was more than one hart/core for emulator. Only one hart/core is allowed to do `MemoryMapIO::step`.
 impl DeviceTrait for MemoryMapIO {
     fn step(&mut self) {
+        let _guard = self.lock();
         if self.dev_counter == MMIO_FREQ_DIV {
             self.dev_counter = 0;
 
@@ -216,6 +253,7 @@ impl DeviceTrait for MemoryMapIO {
         self.dev_counter += 1;
     }
     fn sync(&mut self) {
+        let _guard = self.lock();
         for item in self.map.iter_mut() {
             item.device.sync();
         }
