@@ -1,3 +1,4 @@
+mod cpu_tester;
 pub mod csr_reg;
 pub mod debugger;
 pub mod decoder;
