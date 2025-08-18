@@ -165,10 +165,6 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     Ok(())
 }
 
-pub fn exec_todo<T>(_info: RVInstrInfo, _cpu: &mut RV32CPU) -> Result<(), Exception> {
-    todo!();
-}
-
 // =============================================
 //                  ExecTrait
 // =============================================
@@ -453,17 +449,5 @@ pub(super) struct ExecUnsignedGreatEqual {}
 impl ExecTrait<bool> for ExecUnsignedGreatEqual {
     fn exec(a: WordType, b: WordType) -> bool {
         a >= b
-    }
-}
-
-pub(super) struct ExecNothing {}
-impl ExecTrait<bool> for ExecNothing {
-    fn exec(_: WordType, _: WordType) -> bool {
-        todo!()
-    }
-}
-impl ExecTrait<Result<WordType, Exception>> for ExecNothing {
-    fn exec(_: WordType, _: WordType) -> Result<WordType, Exception> {
-        todo!()
     }
 }

@@ -57,8 +57,6 @@ pub mod arch_config {
                 pub type SignedWordType = $signed_word;
 
                 #[cfg(feature = $feature)]
-
-                #[cfg(feature = $feature)]
                 pub const MEM_ORDER: $crate::config::arch_config::Endianness = $endian;
 
                 #[cfg(feature = $feature)]

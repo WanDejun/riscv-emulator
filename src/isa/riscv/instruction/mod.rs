@@ -17,6 +17,7 @@ pub enum RVInstrInfo {
     B { rs1: u8, rs2: u8, imm: WordType },
     U { rd: u8, imm: WordType },
     J { rd: u8, imm: WordType },
+    None,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +28,7 @@ pub enum InstrFormat {
     I,
     S,
     R,
+    None,
 }
 
 // define a single enum for every instruction
