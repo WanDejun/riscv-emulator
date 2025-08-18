@@ -51,3 +51,190 @@ impl TrapController {
         cpu.write_pc(cpu.csr.read(csr_index::mepc).unwrap());
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        isa::riscv::{cpu_tester::run_test_cpu_step, csr_reg::csr_macro::*, trap::Exception},
+        ram_config,
+    };
+
+    const IRQ_HANDLER_ADDR: WordType = 0x80002000;
+
+    #[test]
+    fn test_load_fault() {
+        run_test_cpu_step(
+            &[0x00003503], // ld a0, 0(zero)
+            |builder| builder.csr(csr_index::mtvec, IRQ_HANDLER_ADDR),
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    // .csr(csr_index::mtval, 0)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_load_misaligned() {
+        const BASE_LOAD_MEM: WordType = 0x80001000;
+        run_test_cpu_step(
+            &[0x0017B503], // ld a0, 1(a5)
+            |builder| {
+                builder
+                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR)
+                    .reg(15, BASE_LOAD_MEM)
+            },
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    // .csr(csr_index::mtval, BASE_LOAD_MEM)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(
+                            mcause.get_exception_code(),
+                            Exception::LoadMisaligned.into()
+                        );
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_store_fault() {
+        run_test_cpu_step(
+            &[0x00a7b023], // sd a0, 0(a5)
+            |builder| builder.csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00),
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(mcause.get_exception_code(), Exception::StoreFault.into());
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_store_misaligned() {
+        const BASE_STORE_MEM: WordType = 0x80001000;
+        run_test_cpu_step(
+            &[0x00a7b0a3], // sd a0, 1(a5)
+            |builder| {
+                builder
+                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR)
+                    .reg(15, BASE_STORE_MEM)
+            },
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    // .csr(csr_index::mtval, BASE_LOAD_MEM)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(
+                            mcause.get_exception_code(),
+                            Exception::StoreMisaligned.into()
+                        );
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_illegal_instr() {
+        const PC_START: WordType = 0x80001000;
+        run_test_cpu_step(
+            &[0x00a7b023], // Any Instr. Because `PC` do not start as 0x80000000.
+            |builder| {
+                builder
+                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00)
+                    .pc(PC_START)
+            },
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, PC_START)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(
+                            mcause.get_exception_code(),
+                            Exception::IllegalInstruction.into()
+                        );
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_instr_fault() {
+        const PC_START: WordType = 0x70000000;
+        run_test_cpu_step(
+            &[0x00a7b023], // Any Instr. Because `PC` do not start as 0x80000000.
+            |builder| {
+                builder
+                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00)
+                    .pc(PC_START)
+            },
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, PC_START)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(
+                            mcause.get_exception_code(),
+                            Exception::InstructionFault.into()
+                        );
+                        checker
+                    })
+            },
+        );
+    }
+
+    #[test]
+    fn test_instr_misaligned() {
+        const PC_START: WordType = 0x80000001;
+        run_test_cpu_step(
+            &[0x00a7b023], // Any Instr. Because `PC` do not start as 0x80000000.
+            |builder| {
+                builder
+                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00)
+                    .pc(PC_START)
+            },
+            |checker| {
+                checker
+                    .pc(IRQ_HANDLER_ADDR)
+                    .csr(csr_index::mepc, PC_START)
+                    .customized(|checker| {
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        assert_eq!(mcause.get_interrupt(), 0);
+                        assert_eq!(
+                            mcause.get_exception_code(),
+                            Exception::InstructionMisaligned.into()
+                        );
+                        checker
+                    })
+            },
+        );
+    }
+}

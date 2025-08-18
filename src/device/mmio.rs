@@ -92,7 +92,9 @@ impl MemoryMapIO {
     where
         T: UnsignedInteger,
     {
-        check_align::<T>(p_addr);
+        if !check_align::<T>(p_addr) {
+            return Err(MemError::LoadMisaligned);
+        }
         let start = self.map[device_index].start;
         if p_addr >= start + self.map[device_index].size {
             // out of range
@@ -118,7 +120,9 @@ impl MemoryMapIO {
     where
         T: UnsignedInteger,
     {
-        check_align::<T>(p_addr);
+        if !check_align::<T>(p_addr) {
+            return Err(MemError::StoreMisaligned);
+        }
         let st = self.map[device_index].start;
         if p_addr >= st + self.map[device_index].size {
             // out of range

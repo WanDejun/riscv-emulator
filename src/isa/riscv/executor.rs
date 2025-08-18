@@ -118,10 +118,7 @@ impl RV32CPU {
 mod tests {
     use super::*;
     use crate::{
-        isa::riscv::{
-            cpu_tester::*,
-            csr_reg::{csr_index, csr_macro::Mcause},
-        },
+        isa::riscv::cpu_tester::*,
         ram_config,
         utils::{negative_of, sign_extend},
     };
@@ -292,25 +289,6 @@ mod tests {
             0x3043f6f3,
             |builder| builder.csr(0x304, 0x00FF),
             |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8),
-        );
-    }
-
-    #[test]
-    fn test_illgal_instr() {
-        run_test_cpu_step(
-            &[0x00003503], // ld a0, 0(zero)
-            |builder| builder.csr(csr_index::mtvec, 0x00FF << 2),
-            |checker| {
-                checker
-                    .pc(0x00FF << 2)
-                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
-                    .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
-                        checker
-                    })
-            },
         );
     }
 }
