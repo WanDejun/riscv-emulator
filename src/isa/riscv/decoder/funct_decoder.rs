@@ -19,34 +19,35 @@ enum PartialDecode {
 const MAP_LENGTH: usize = 8;
 
 #[derive(Debug, Clone)]
-pub struct SmallMap<K, V> {
+struct SmallMap<K, V> {
     data: SmallVec<[(K, V); MAP_LENGTH]>,
 }
 
+#[allow(unused)]
 impl<K: Ord + Copy, V> SmallMap<K, V> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         SmallMap {
             data: SmallVec::new(),
         }
     }
 
-    pub fn insert(&mut self, key: K, value: V) {
+    fn insert(&mut self, key: K, value: V) {
         self.data.push((key, value));
     }
 
-    pub fn get(&self, key: &K) -> Option<&V> {
+    fn get(&self, key: &K) -> Option<&V> {
         self.data.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(K, V)> {
+    fn iter(&self) -> impl Iterator<Item = &(K, V)> {
         self.data.iter()
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.data.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 }

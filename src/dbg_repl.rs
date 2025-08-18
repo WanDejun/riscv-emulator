@@ -192,7 +192,7 @@ impl DebugREPL {
                     let is_curr_line = curr_addr == self.dbg.read_pc();
 
                     if is_curr_line {
-                        print!("{} ", ">".cyan());
+                        print!("{} ", palette.arrow(">"));
                     } else {
                         print!("  ");
                     }
@@ -205,7 +205,7 @@ impl DebugREPL {
             Cli::Info(InfoCmd::Breakpoints) => {
                 println!("Breakpoints:");
                 for (idx, bp) in self.dbg.breakpoints().keys().enumerate() {
-                    println!("{}: {}", idx, format_addr(bp.pc));
+                    println!("{}: {}", format_idx(idx), format_addr(bp.pc));
                 }
             }
 
@@ -376,6 +376,10 @@ fn parse_reg(s: &str) -> Result<u8, String> {
     }
 
     Err(format!("invalid register: {}", s))
+}
+
+fn format_idx(idx: usize) -> impl std::fmt::Display {
+    palette.index(&idx.to_string()).to_string()
 }
 
 fn format_addr(word: WordType) -> impl std::fmt::Display {
