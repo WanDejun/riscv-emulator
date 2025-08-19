@@ -236,7 +236,7 @@ mod test {
 
     #[test]
     fn mmio_stdout_test() {
-        let _handles = peripheral_init();
+        let _handles = peripheral_init(false);
         let mut mmio = MemoryMapIO::new();
         mmio.write(UART1_ADDR + 0x00, 'a' as u8).unwrap();
         for _ in 0..MMIO_FREQ_DIV * UART_DEFAULT_DIV * 16 * 20 {
@@ -252,7 +252,7 @@ mod test {
 
     #[test]
     fn mmio_stdio_test() {
-        let _handles = peripheral_init();
+        let _handles = peripheral_init(false);
         let mut mmio = MemoryMapIO::new();
         DEBUG_UART.lock().unwrap().send('x' as u8);
         loop {

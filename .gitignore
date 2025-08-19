@@ -24,6 +24,11 @@
 # track `*.md` files in `doc/`
 !doc/**/*.md
 
+# track `benches` directory
+!benches/
+!benches/**/
+!benches/**/*.rs
+
 # track `test_resources` directory
 !test_resources/
 !test_resources/**/

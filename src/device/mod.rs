@@ -60,7 +60,7 @@ lazy_static! {
         Arc::new(Mutex::new(Device::PowerManager(PowerManager::new())));
 }
 
-pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
+pub fn peripheral_init(with_io_thread: bool) -> Vec<Box<dyn HandleTrait>> {
     // Uart
     if let Ok(mut device_guard) = UART1.lock() {
         if let Device::Uart16550(uart) = &mut *device_guard {
@@ -69,9 +69,35 @@ pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
             cli_inner_uart.change_rx_wiring(uart.get_tx_wiring());
         }
     }
+
+    if with_io_thread {
+        #[cfg(not(test))]
+        if let Ok(guard) = DEBUG_UART.lock() {
+            spawn_io_thread(guard.input_tx.clone(), guard.output_rx.clone());
+        } else {
+            panic!("Failed to get DEBUG_UART");
+        }
+        #[cfg(test)]
+        panic!("IO thread spawning is not supported in test mode.");
+    }
+
+    return vec![Box::new(CliUartHandle::new())];
+}
+
+pub fn peripheral_init_with_mock_io() -> Vec<Box<dyn HandleTrait>> {
+    // Uart
+    if let Ok(mut device_guard) = UART1.lock() {
+        if let Device::Uart16550(uart) = &mut *device_guard {
+            let cli_inner_uart = &mut DEBUG_UART.lock().unwrap().uart;
+            uart.change_rx_wiring(cli_inner_uart.get_tx_wiring());
+            cli_inner_uart.change_rx_wiring(uart.get_tx_wiring());
+        }
+    }
+
     #[cfg(not(test))]
     if let Ok(guard) = DEBUG_UART.lock() {
-        spawn_io_thread(guard.input_tx.clone(), guard.output_rx.clone());
+        use crate::device::cli_uart::spawn_mock_io_thread;
+        spawn_mock_io_thread(guard.input_tx.clone(), guard.output_rx.clone());
     } else {
         panic!("Failed to get DEBUG_UART");
     }

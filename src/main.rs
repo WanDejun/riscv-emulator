@@ -40,7 +40,7 @@ struct Args {
 fn main() {
     display_welcome_message();
     let _logger_handle = logging::init(cli_args.log_level);
-    let _init_handle = peripheral_init();
+    let _init_handle = peripheral_init(true);
 
     println!(
         "path = {:?}, debug = {}, verbose = {}.\r",

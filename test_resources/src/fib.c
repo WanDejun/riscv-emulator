@@ -35,11 +35,7 @@ int fib(int n) {
 }
 
 int main() {
-    int n;
-    // scanf("%d", &n);
-    output(fib(28));
-    uart_putc('\n');
-
+    output(fib(25));
     printf("%d\n", 1);
 
     PowerOff();

@@ -111,6 +111,15 @@ pub fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>) {
     });
 }
 
+/// TODO: Remove this once the new implementation of Uart is done.
+pub fn spawn_mock_io_thread(_input_tx: Sender<u8>, output_rx: Receiver<u8>) {
+    thread::spawn(move || {
+        loop {
+            while let Ok(_v) = output_rx.try_recv() {}
+        }
+    });
+}
+
 /// Set terminal to raw mode. RAII to unset terminal raw mode.
 pub struct CliUartHandle {}
 impl CliUartHandle {

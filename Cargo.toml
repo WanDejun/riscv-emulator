@@ -36,3 +36,11 @@ debug = true
 version = "1"
 default-features = false # Disable features which are enabled by default
 features = ["precommit-hook", "run-cargo-test", "run-cargo-fmt"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "bench_emulator"
+path = "benches/bench_emulator.rs"
+harness = false

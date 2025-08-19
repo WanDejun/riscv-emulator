@@ -12,10 +12,16 @@ QEMU := qemu-system-$(ARCH)
 
 TARGET ?= main
 
-DEFAULT_TARGET: build
+TARGETS := main fib prime matrix_mul io_bench
 
-.PNONY:
-	build_lib build run clear 
+DEFAULT_TARGET: build_all
+
+.PHONY: build_lib build run clean build_all
+
+build_all:
+	@for t in $(TARGETS); do \
+		$(MAKE) -s build TARGET=$$t || exit $$?; \
+	done
 
 
 $(OBJ)/%.o: $(LIB)/%.c
@@ -25,6 +31,7 @@ $(OBJ)/%.o: $(LIB)/%.c
 build_lib: $(OBJ)/io.o $(OBJ)/log.o
 
 build: $(SRC)/boot.S $(SRC)/$(TARGET).c linker.ld build_lib
+	@ mkdir -p $(OBJ) $(BIN)
 	@ $(CC) $(C_FLAG) -c $(SRC)/$(TARGET).c -o $(OBJ)/$(TARGET).o
 	@ $(CC) $(C_FLAG) -c $(SRC)/boot.S -o $(OBJ)/boot.o
 	@ $(LD) $(LD_FLAG) -T linker.ld -o $(BIN)/$(TARGET).elf $(OBJ)/$(TARGET).o $(OBJ)/boot.o $(OBJ)/io.o $(OBJ)/log.o
@@ -32,5 +39,5 @@ build: $(SRC)/boot.S $(SRC)/$(TARGET).c linker.ld build_lib
 run: build
 	$(QEMU) -machine virt -bios $(BIN)/$(TARGET).elf -serial stdio
 
-clear:
+clean:
 	rm -r $(BIN) $(OBJ)
