@@ -42,9 +42,6 @@ impl Mem for VirtAddrManager {
 }
 
 impl DeviceTrait for VirtAddrManager {
-    fn step(&mut self) {
-        self.mmio.step();
-    }
     fn sync(&mut self) {
         self.mmio.sync();
     }

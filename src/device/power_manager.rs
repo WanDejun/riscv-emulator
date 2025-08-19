@@ -41,7 +41,6 @@ impl Mem for PowerManager {
 }
 
 impl DeviceTrait for PowerManager {
-    fn step(&mut self) {}
     fn sync(&mut self) {}
 }
 

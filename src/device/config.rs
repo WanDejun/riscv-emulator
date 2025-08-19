@@ -1,7 +1,7 @@
 use super::{DeviceTrait, Mem};
 use crate::{
     config::arch_config::WordType,
-    device::{MemError, power_manager::PowerManager, uart::Uart16550},
+    device::{MemError, fast_uart::FastUart16550, power_manager::PowerManager},
     ram::Ram,
     utils::UnsignedInteger,
 };
@@ -14,7 +14,7 @@ pub const UART1_ADDR: WordType = 0x10000000;
 pub const POWER_MANAGER_SIZE: WordType = 2;
 pub const POWER_MANAGER_ADDR: WordType = 0x100000;
 
-pub const MMIO_FREQ_DIV: usize = 32;
+// pub const MMIO_FREQ_DIV: usize = 32;
 
 macro_rules! make_device_enum {
     ( $($name:ident),* $(,)? ) => {
@@ -44,11 +44,6 @@ macro_rules! make_device_enum {
         }
 
         impl DeviceTrait for Device {
-            fn step(&mut self) {
-                match self {
-                    $( Device::$name(dev) => dev.step(), )*
-                }
-            }
             fn sync(&mut self) {
                 match self {
                     $( Device::$name(dev) => dev.sync(), )*
@@ -57,4 +52,4 @@ macro_rules! make_device_enum {
         }
     };
 }
-make_device_enum!(Ram, Uart16550, PowerManager);
+make_device_enum!(Ram, FastUart16550, PowerManager);

@@ -101,7 +101,6 @@ impl RV32CPU {
             Ok(()) => {} //there is nothing todo.
         }
 
-        self.memory.step();
         log::trace!("{}", self.debug_reg_string());
         return Ok(());
     }
