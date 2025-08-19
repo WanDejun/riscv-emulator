@@ -5,10 +5,13 @@ use rand_chacha::ChaCha12Rng;
 use crate::{
     config::arch_config::{REGFILE_CNT, WordType},
     device::Mem,
-    isa::riscv::{
-        decoder::DecodeInstr,
-        executor::RV32CPU,
-        instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+    isa::{
+        DecoderTrait,
+        riscv::{
+            decoder::DecodeInstr,
+            executor::RV32CPU,
+            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+        },
     },
     ram_config::{self, BASE_ADDR},
     utils::{UnsignedInteger, sign_extend},

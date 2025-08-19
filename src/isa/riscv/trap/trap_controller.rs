@@ -1,13 +1,15 @@
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::{
-        csr_reg::{
-            PrivilegeLevel, csr_index,
-            csr_macro::{Mstatus, Mtvec},
+    isa::{
+        DebugTarget,
+        riscv::{
+            csr_reg::{
+                PrivilegeLevel, csr_index,
+                csr_macro::{Mstatus, Mtvec},
+            },
+            executor::RV32CPU,
+            trap::Trap,
         },
-        debugger::DebugTarget,
-        executor::RV32CPU,
-        trap::Trap,
     },
 };
 

@@ -42,6 +42,7 @@ impl Emulator {
 
     pub fn run(&mut self) -> Result<usize, Exception> {
         let mut instr_cnt: usize = 0;
+        POWER_STATUS.store(0, std::sync::atomic::Ordering::Release);
 
         loop {
             self.cpu.step()?;
@@ -50,6 +51,9 @@ impl Emulator {
             if instr_cnt % 32 == 0 && power.eq(&POWER_OFF_CODE) {
                 cold_path();
                 self.cpu.power_off()?;
+                log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);
+                let rate = self.cpu.icache_cnt as f64 / instr_cnt as f64;
+                log::debug!("iCache hit rate {}", rate);
                 break;
             }
 

@@ -35,18 +35,26 @@ impl CliCoordinator {
         &INSTANCE
     }
 
+    pub fn pause_uart_without_wait(&self) {
+        let (lock, _cvar) = &*self.state;
+
+        {
+            let mut s = lock.lock().unwrap();
+            *s = CliThreadState::Pausing;
+        }
+    }
+
     pub fn pause_uart(&self) {
         let (lock, cvar) = &*self.state;
 
         {
             let mut s = lock.lock().unwrap();
             *s = CliThreadState::Pausing;
+            while *s != CliThreadState::Paused {
+                s = cvar.wait(s).unwrap();
+            }
         }
 
-        let mut s = lock.lock().unwrap();
-        while *s != CliThreadState::Paused {
-            s = cvar.wait(s).unwrap();
-        }
         log::debug!("Uart cli loop paused");
 
         disable_raw_mode().unwrap();

@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use lazy_static::lazy_static;
-use riscv_emulator::{Emulator, device::peripheral_init};
+use riscv_emulator::{Emulator, device::peripheral_init, isa::riscv::RiscvTypes};
 
 use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
 
@@ -56,7 +56,7 @@ fn main() {
     };
 
     if cli_args.debug {
-        DebugREPL::new(emulator.into()).run();
+        DebugREPL::<RiscvTypes>::new(emulator.into()).run();
     } else {
         let now = Instant::now();
         match emulator.run() {

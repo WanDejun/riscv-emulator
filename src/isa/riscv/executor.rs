@@ -5,12 +5,17 @@ use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     device::{DeviceTrait, Mem},
-    isa::riscv::{
-        csr_reg::CsrRegFile,
-        decoder::{DecodeInstr, Decoder},
-        instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
-        trap::{Exception, Trap, trap_controller::TrapController},
-        vaddr::VirtAddrManager,
+    isa::{
+        DecoderTrait,
+        icache::{ICache, SetICache},
+        riscv::{
+            RiscvTypes,
+            csr_reg::CsrRegFile,
+            decoder::{DecodeInstr, Decoder},
+            instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
+            trap::{Exception, Trap, trap_controller::TrapController},
+            vaddr::VirtAddrManager,
+        },
     },
     ram_config::DEFAULT_PC_VALUE,
 };
@@ -21,6 +26,8 @@ pub struct RV32CPU {
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
+    pub(super) icache: SetICache<RiscvTypes, 64, 8>,
+    pub icache_cnt: usize,
 }
 
 impl RV32CPU {
@@ -36,6 +43,8 @@ impl RV32CPU {
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
             csr: CsrRegFile::new(),
+            icache: SetICache::new(),
+            icache_cnt: 0,
         }
     }
 
@@ -67,27 +76,42 @@ impl RV32CPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
-        // IF
-        let instr_bytes = self.memory.read::<u32>(self.pc);
-        if let Err(err) = instr_bytes {
-            TrapController::send_trap_signal(
-                self,
-                Trap::Exception(Exception::from_instr_fetch_err(err)),
-                self.pc,
-                self.pc,
-            );
-            return Ok(());
-        }
-        let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
-        log::trace!("raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
+        let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
+            log::trace!("Cache hit at pc: {:#x}", self.pc);
+            self.icache_cnt += 1;
+            decode_instr
+        } else {
+            // IF
+            let instr_bytes = self.memory.read::<u32>(self.pc);
+            if let Err(err) = instr_bytes {
+                TrapController::send_trap_signal(
+                    self,
+                    Trap::Exception(Exception::from_instr_fetch_err(err)),
+                    self.pc,
+                    self.pc,
+                );
+                return Ok(());
+            }
+            let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
+            log::trace!("Raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
 
-        // ID
-        let decoder_result = self.decoder.decode(instr_bytes);
-        if let Err(nr) = decoder_result {
-            TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
-            return Ok(());
-        }
-        let DecodeInstr(instr, info) = unsafe { decoder_result.unwrap_unchecked() };
+            // ID
+            let decoder_result = self.decoder.decode(instr_bytes);
+            if let None = decoder_result {
+                TrapController::send_trap_signal(
+                    self,
+                    Trap::Exception(Exception::IllegalInstruction),
+                    self.pc,
+                    self.pc,
+                );
+                return Ok(());
+            }
+
+            let decode_instr = unsafe { decoder_result.unwrap_unchecked() };
+            self.icache.put(self.pc, decode_instr.clone());
+            decode_instr
+        };
+
         log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
 
         // EX && MEM && WB

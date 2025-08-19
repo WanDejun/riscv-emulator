@@ -3,9 +3,10 @@ use std::fmt::Display;
 use crate::{
     config::arch_config::WordType,
     isa::{
+        DecoderTrait,
         riscv::{
+            RiscvTypes,
             instruction::{InstrFormat, RVInstrInfo, rv32i_table::*},
-            trap::Exception,
         },
         utils::ISABuilder,
     },
@@ -14,19 +15,13 @@ use crate::{
 mod funct_decoder;
 mod mask_decoder;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeInstr(pub RiscvInstr, pub RVInstrInfo);
 
 impl Display for DecodeInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}, {:?}", self.0, self.1)
     }
-}
-
-trait DecoderTrait {
-    fn from_isa(instrs: &[RV32Desc]) -> Self;
-
-    fn decode(&self, instr: u32) -> Option<DecodeInstr>;
 }
 
 pub struct Decoder {
@@ -49,8 +44,10 @@ impl Decoder {
             mask_decoder: mask_decoder::MaskDecoder::from_isa(&isa),
         }
     }
+}
 
-    pub fn from_isa(instrs: &[RV32Desc]) -> Self {
+impl DecoderTrait<RiscvTypes> for Decoder {
+    fn from_isa(instrs: &[RV32Desc]) -> Self {
         Self {
             // TODO: Unnecessary copy happens in funct_decoder::from_isa
             funct3_decoder: funct_decoder::Decoder::from_isa(instrs),
@@ -58,11 +55,10 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&self, instr: u32) -> Result<DecodeInstr, Exception> {
+    fn decode(&self, instr: u32) -> Option<DecodeInstr> {
         // TODO: Should we call `decode_info` here instead of in `mask_decoder` and `funct3_decoder`?
         None.or_else(|| self.mask_decoder.decode(instr))
             .or_else(|| self.funct3_decoder.decode(instr))
-            .ok_or(Exception::IllegalInstruction)
     }
 }
 

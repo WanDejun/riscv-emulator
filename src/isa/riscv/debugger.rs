@@ -3,7 +3,11 @@ use std::{collections::BTreeMap, fmt::Debug, u64};
 use crate::{
     config::arch_config::WordType,
     device::{Mem, MemError},
-    isa::riscv::{self, executor::RV32CPU, trap::Exception},
+    isa::{
+        DebugTarget, DecoderTrait, HasBreakpointException, ISATypes,
+        icache::ICache,
+        riscv::{RiscvTypes, decoder::DecodeInstr, executor::RV32CPU, trap::Exception},
+    },
     utils::UnsignedInteger,
 };
 
@@ -14,37 +18,28 @@ pub enum DebugEvent {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum DebugError {
+pub enum DebugError<I: ISATypes> {
     #[error("target exception: {0:?}")]
-    TargetException(Exception),
+    TargetException(I::StepException),
 }
 
-pub trait DebugTarget {
-    type DecodeInstr;
-
-    fn read_pc(&self) -> WordType;
-    fn write_pc(&mut self, new_pc: WordType);
-
-    fn read_reg(&self, idx: u8) -> WordType;
-    fn write_reg(&mut self, idx: u8, value: WordType);
-
-    fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError>;
-    fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError>;
-
-    fn step(&mut self) -> Result<(), Exception>;
-
-    fn decoded_info(&mut self, addr: u32) -> Option<Self::DecodeInstr>;
-}
-
-impl DebugTarget for RV32CPU {
-    type DecodeInstr = riscv::decoder::DecodeInstr;
-
+impl DebugTarget<RiscvTypes> for RV32CPU {
     fn read_pc(&self) -> WordType {
         self.pc
     }
 
     fn write_pc(&mut self, new_pc: WordType) {
         self.pc = new_pc;
+    }
+
+    fn read_instr(&mut self, addr: WordType) -> Result<u32, MemError> {
+        self.memory.read::<u32>(addr)
+    }
+
+    fn write_back_instr(&mut self, instr: u32, addr: WordType) -> Result<(), MemError> {
+        self.memory.write(addr, instr)?;
+        self.icache.invalidate(addr);
+        Ok(())
     }
 
     fn read_reg(&self, idx: u8) -> WordType {
@@ -67,8 +62,8 @@ impl DebugTarget for RV32CPU {
         RV32CPU::step(self)
     }
 
-    fn decoded_info(&mut self, instr: u32) -> Option<Self::DecodeInstr> {
-        self.decoder.decode(instr).ok()
+    fn decoded_info(&mut self, instr: u32) -> Option<DecodeInstr> {
+        self.decoder.decode(instr)
     }
 }
 
@@ -83,40 +78,38 @@ impl Breakpoint {
     }
 }
 
-pub struct Debugger<T: DebugTarget> {
-    breakpoints: BTreeMap<Breakpoint, u32>,
-    target: T,
+pub struct Debugger<I: ISATypes> {
+    breakpoints: BTreeMap<Breakpoint, I::RawInstr>,
+    target: I::CPU,
 }
 
-const EBREAK: u32 = 0x0010_0073;
-
-impl<T: DebugTarget> Debugger<T> {
-    pub fn new(target: T) -> Self {
+impl<I: ISATypes> Debugger<I> {
+    pub fn new(target: I::CPU) -> Self {
         Self {
             breakpoints: BTreeMap::new(),
             target: target,
         }
     }
 
-    pub fn breakpoints(&self) -> &BTreeMap<Breakpoint, u32> {
+    pub fn breakpoints(&self) -> &BTreeMap<Breakpoint, I::RawInstr> {
         &self.breakpoints
     }
 
-    pub fn set_breakpoint(&mut self, pc: WordType) {
-        let breakpoint = Breakpoint::new(pc);
+    pub fn set_breakpoint(&mut self, addr: WordType) {
+        let breakpoint = Breakpoint::new(addr);
         if self.breakpoints.contains_key(&breakpoint) {
             return;
         }
-        let orig: u32 = self.read_mem(pc).unwrap();
+        let orig: I::RawInstr = self.target.read_instr(addr).unwrap();
         self.breakpoints.insert(breakpoint, orig);
-        if orig != EBREAK && pc != self.read_pc() {
-            self.write_mem(pc, EBREAK).unwrap();
+        if addr != self.read_pc() {
+            self.target.write_back_instr(I::EBREAK, addr).unwrap();
         }
     }
 
     pub fn clear_breakpoint(&mut self, pc: WordType) {
         if let Some(orig) = self.breakpoints.remove(&Breakpoint { pc }) {
-            self.write_mem(pc, orig).unwrap();
+            self.target.write_back_instr(orig, pc).unwrap();
         }
     }
 
@@ -134,37 +127,40 @@ impl<T: DebugTarget> Debugger<T> {
             .get(&Breakpoint::new(pc))
             .expect("Breakpoint should exist");
 
-        self.write_mem::<u32>(pc, *instr).unwrap();
+        self.target.write_back_instr(*instr, pc).unwrap();
     }
 
-    fn step_over_breakpoint(&mut self) -> Result<(), DebugError> {
+    fn step_over_breakpoint(&mut self) -> Result<(), DebugError<I>> {
         let pc = self.read_pc();
         match self.target.step() {
             Ok(()) => {
-                self.write_mem::<u32>(pc, EBREAK).unwrap();
+                self.target.write_back_instr(I::EBREAK, pc).unwrap();
                 Ok(())
             }
             Err(e) => Err(DebugError::TargetException(e)),
         }
     }
 
-    pub fn step(&mut self) -> Result<DebugEvent, DebugError> {
+    pub fn step(&mut self) -> Result<DebugEvent, DebugError<I>> {
         if self.on_breakpoint() {
             self.step_over_breakpoint()?;
             Ok(DebugEvent::StepCompleted { pc: self.read_pc() })
         } else {
             match self.target.step() {
                 Ok(()) => Ok(DebugEvent::StepCompleted { pc: self.read_pc() }),
-                Err(Exception::Breakpoint) => {
-                    self.place_origin_on_break();
-                    Ok(DebugEvent::BreakpointHit { pc: self.read_pc() })
+                Err(e) => {
+                    if e.is_breakpoint() {
+                        self.place_origin_on_break();
+                        Ok(DebugEvent::BreakpointHit { pc: self.read_pc() })
+                    } else {
+                        Err(DebugError::TargetException(e))
+                    }
                 }
-                Err(e) => Err(DebugError::TargetException(e)),
             }
         }
     }
 
-    pub fn continue_until(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError> {
+    pub fn continue_until(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError<I>> {
         let mut rest = max_steps;
         if self.on_breakpoint() {
             self.step_over_breakpoint()?;
@@ -179,18 +175,19 @@ impl<T: DebugTarget> Debugger<T> {
                 Ok(()) => {
                     rest -= 1;
                 }
-                Err(Exception::Breakpoint) => {
-                    self.place_origin_on_break();
-                    return Ok(DebugEvent::BreakpointHit { pc: self.read_pc() });
-                }
                 Err(e) => {
-                    return Err(DebugError::TargetException(e));
+                    if e.is_breakpoint() {
+                        self.place_origin_on_break();
+                        return Ok(DebugEvent::BreakpointHit { pc: self.read_pc() });
+                    } else {
+                        return Err(DebugError::TargetException(e));
+                    }
                 }
             }
         }
     }
 
-    pub fn continue_run(&mut self) -> Result<DebugEvent, DebugError> {
+    pub fn continue_run(&mut self) -> Result<DebugEvent, DebugError<I>> {
         self.continue_until(u64::MAX)
     }
 
@@ -214,11 +211,11 @@ impl<T: DebugTarget> Debugger<T> {
         self.target.read_mem::<V>(addr)
     }
 
-    pub fn read_origin_instr(&mut self, addr: WordType) -> Result<u32, MemError> {
+    pub fn read_origin_instr(&mut self, addr: WordType) -> Result<I::RawInstr, MemError> {
         if let Some(instr) = self.breakpoints.get(&Breakpoint::new(addr)) {
             Ok(*instr)
         } else {
-            self.read_mem(addr)
+            self.target.read_instr(addr)
         }
     }
 
@@ -230,7 +227,7 @@ impl<T: DebugTarget> Debugger<T> {
         self.target.write_mem::<V>(addr, data)
     }
 
-    pub fn decoded_info(&mut self, addr: WordType) -> Option<T::DecodeInstr> {
+    pub fn decoded_info(&mut self, addr: WordType) -> Option<I::DecodeRst> {
         let instr = self.read_origin_instr(addr).ok()?;
         self.target.decoded_info(instr)
     }
@@ -243,26 +240,45 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_breakpoint() {
+    fn test_breakpoint_riscv() {
         // Test that a breakpoint can be hit
         let cpu = TestCPUBuilder::new()
             .program(&[
                 0x02520333, // mul x6, x4, x5
                 0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
             ])
             .build();
 
-        let mut debugger = Debugger::new(cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(cpu);
         debugger.set_breakpoint(BASE_ADDR + 4);
         debugger.continue_run().unwrap();
 
         assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
         assert!(debugger.on_breakpoint());
         assert_eq!(debugger.read_mem::<u32>(BASE_ADDR + 4).unwrap(), 0x02520333);
+
+        debugger.step().unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+
+        debugger.set_breakpoint(BASE_ADDR + 12);
+        assert_eq!(
+            debugger.read_origin_instr(BASE_ADDR + 12).unwrap(),
+            0x02520333
+        );
+
+        debugger.continue_until(2).unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 12);
+        assert_eq!(
+            debugger.read_mem::<u32>(BASE_ADDR + 12).unwrap(),
+            0x02520333
+        );
     }
 
     #[test]
-    fn test_breakpoint_on_current() {
+    fn test_breakpoint_riscv_on_current() {
         let cpu = TestCPUBuilder::new()
             .program(&[
                 0x02520333, // mul x6, x4, x5
@@ -270,7 +286,7 @@ mod test {
             ])
             .build();
 
-        let mut debugger = Debugger::new(cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(cpu);
         debugger.set_breakpoint(BASE_ADDR);
         assert!(debugger.on_breakpoint());
 
