@@ -201,7 +201,19 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                         print!("  ");
                     }
 
-                    let raw = self.dbg.read_origin_instr(curr_addr).unwrap();
+                    let raw = self.dbg.read_origin_instr(curr_addr);
+
+                    if let Err(_) = raw {
+                        println!(
+                            "{}: {}",
+                            format_addr(curr_addr),
+                            palette.invalid("<invalid>")
+                        );
+                        curr_addr += 4; // TODO: How long should i go if it's invalid?
+                        continue;
+                    }
+
+                    let raw = unsafe { raw.unwrap_unchecked() };
                     let raw_formatted = <I as AsmFormattable<I>>::format_raw(raw);
                     let asm =
                         <I as AsmFormattable<I>>::format_asm(self.dbg.decoded_info(curr_addr));
@@ -334,6 +346,10 @@ impl OutputPalette {
     fn data(&self, value: &str) -> impl std::fmt::Display {
         value.yellow()
     }
+
+    fn invalid(&self, value: &str) -> impl std::fmt::Display {
+        value.red()
+    }
 }
 
 // helpers
@@ -404,7 +420,7 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
 
     fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
         if decode_instr.is_none() {
-            return format!("{}", String::from("<invalid instruction>").red());
+            return format!("{}", palette.invalid("<invalid instruction>"));
         } else {
             let DecodeInstr(instr, info) = decode_instr.unwrap();
             match info {

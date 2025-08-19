@@ -7,6 +7,7 @@ pub(super) trait ICache<I: ISATypes> {
     fn new() -> Self;
     fn get(&self, addr: WordType) -> Option<I::DecodeRst>;
     fn put(&mut self, addr: WordType, data: I::DecodeRst);
+    fn invalidate(&mut self, addr: WordType);
 }
 
 pub(super) trait ToGroupId {
@@ -50,6 +51,11 @@ impl<I: ISATypes + ToGroupId, const N: usize> ICache<I> for DirectICache<I, N> {
     fn put(&mut self, addr: WordType, data: I::DecodeRst) {
         self.cache[Self::get_group_id(addr)] = (addr, Some(data));
     }
+
+    #[inline]
+    fn invalidate(&mut self, addr: WordType) {
+        self.cache[Self::get_group_id(addr)] = (0, None);
+    }
 }
 
 // Set-associative iCache
@@ -69,6 +75,7 @@ impl<I: ISATypes, const S: usize> SetICacheLine<I, S> {
         }
     }
 
+    #[inline]
     fn insert(&mut self, addr: WordType, data: I::DecodeRst) {
         self.source_addr[self.nxt_idx] = addr;
         self.data[self.nxt_idx] = Some(data);
@@ -78,6 +85,13 @@ impl<I: ISATypes, const S: usize> SetICacheLine<I, S> {
             self.nxt_idx = 0;
         }
     }
+
+    fn invalidate(&mut self, addr: WordType) {
+        if let Some(index) = self.source_addr.iter().position(|&item| item == addr) {
+            self.source_addr[index] = 0;
+            self.data[index] = None;
+        }
+    }
 }
 
 pub(super) struct SetICache<I: ISATypes, const N: usize, const S: usize> {
@@ -85,7 +99,6 @@ pub(super) struct SetICache<I: ISATypes, const N: usize, const S: usize> {
 }
 
 impl<I: ISATypes + ToGroupId, const N: usize, const S: usize> SetICache<I, N, S> {
-    // calculate high bit of S
     const SLEN: u32 = S.trailing_zeros();
 
     #[inline]
@@ -118,5 +131,10 @@ impl<I: ISATypes + ToGroupId, const N: usize, const S: usize> ICache<I> for SetI
     #[inline]
     fn put(&mut self, addr: WordType, data: I::DecodeRst) {
         self.cache[Self::get_group_id(addr)].insert(addr, data);
+    }
+
+    #[inline]
+    fn invalidate(&mut self, addr: WordType) {
+        self.cache[Self::get_group_id(addr)].invalidate(addr);
     }
 }

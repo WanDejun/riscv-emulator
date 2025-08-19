@@ -5,6 +5,7 @@ use crate::{
     device::{Mem, MemError},
     isa::{
         DebugTarget, DecoderTrait, HasBreakpointException, ISATypes,
+        icache::ICache,
         riscv::{RiscvTypes, decoder::DecodeInstr, executor::RV32CPU, trap::Exception},
     },
     utils::UnsignedInteger,
@@ -36,7 +37,9 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
     }
 
     fn write_back_instr(&mut self, instr: u32, addr: WordType) -> Result<(), MemError> {
-        self.memory.write(addr, instr)
+        self.memory.write(addr, instr)?;
+        self.icache.invalidate(addr);
+        Ok(())
     }
 
     fn read_reg(&self, idx: u8) -> WordType {
@@ -237,10 +240,13 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_breakpoint() {
+    fn test_breakpoint_riscv() {
         // Test that a breakpoint can be hit
         let cpu = TestCPUBuilder::new()
             .program(&[
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
                 0x02520333, // mul x6, x4, x5
                 0x02520333, // mul x6, x4, x5
             ])
@@ -253,10 +259,26 @@ mod test {
         assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
         assert!(debugger.on_breakpoint());
         assert_eq!(debugger.read_mem::<u32>(BASE_ADDR + 4).unwrap(), 0x02520333);
+
+        debugger.step().unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+
+        debugger.set_breakpoint(BASE_ADDR + 12);
+        assert_eq!(
+            debugger.read_origin_instr(BASE_ADDR + 12).unwrap(),
+            0x02520333
+        );
+
+        debugger.continue_until(2).unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 12);
+        assert_eq!(
+            debugger.read_mem::<u32>(BASE_ADDR + 12).unwrap(),
+            0x02520333
+        );
     }
 
     #[test]
-    fn test_breakpoint_on_current() {
+    fn test_breakpoint_riscv_on_current() {
         let cpu = TestCPUBuilder::new()
             .program(&[
                 0x02520333, // mul x6, x4, x5
