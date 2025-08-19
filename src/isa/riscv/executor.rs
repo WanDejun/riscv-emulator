@@ -5,12 +5,15 @@ use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     device::{DeviceTrait, Mem},
-    isa::riscv::{
-        csr_reg::CsrRegFile,
-        decoder::{DecodeInstr, Decoder},
-        instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
-        trap::{Exception, Trap, trap_controller::TrapController},
-        vaddr::VirtAddrManager,
+    isa::{
+        DecoderTrait,
+        riscv::{
+            csr_reg::CsrRegFile,
+            decoder::{DecodeInstr, Decoder},
+            instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
+            trap::{Exception, Trap, trap_controller::TrapController},
+            vaddr::VirtAddrManager,
+        },
     },
     ram_config::DEFAULT_PC_VALUE,
 };
@@ -83,8 +86,13 @@ impl RV32CPU {
 
         // ID
         let decoder_result = self.decoder.decode(instr_bytes);
-        if let Err(nr) = decoder_result {
-            TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
+        if let None = decoder_result {
+            TrapController::send_trap_signal(
+                self,
+                Trap::Exception(Exception::IllegalInstruction),
+                self.pc,
+                self.pc,
+            );
             return Ok(());
         }
         let DecodeInstr(instr, info) = unsafe { decoder_result.unwrap_unchecked() };

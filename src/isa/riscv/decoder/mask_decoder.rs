@@ -1,5 +1,6 @@
 use crate::isa::{
     riscv::{
+        RiscvTypes,
         decoder::{DecodeInstr, DecoderTrait, decode_info},
         instruction::{
             InstrFormat,
@@ -13,7 +14,7 @@ pub(super) struct MaskDecoder {
     masks: Vec<(DecodeMask, RiscvInstr, InstrFormat)>,
 }
 
-impl DecoderTrait for MaskDecoder {
+impl DecoderTrait<RiscvTypes> for MaskDecoder {
     fn decode(&self, raw_instr: u32) -> Option<DecodeInstr> {
         for (mask, instr, fmt) in self.masks.iter() {
             if mask.matches(raw_instr) {

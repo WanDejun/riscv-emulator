@@ -1,6 +1,7 @@
 use smallvec::SmallVec;
 
 use crate::isa::riscv::{
+    RiscvTypes,
     decoder::{DecodeInstr, DecoderTrait, decode_info},
     instruction::{
         rv32i_table::{RV32Desc, RiscvInstr},
@@ -59,7 +60,7 @@ pub(super) struct Decoder {
     )>,
 }
 
-impl DecoderTrait for Decoder {
+impl DecoderTrait<RiscvTypes> for Decoder {
     fn from_isa(instrs: &[RV32Desc]) -> Self {
         let mut decode_table = vec![(PartialDecode::Unknown, SmallMap::new()); 1 << 7];
 

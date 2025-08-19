@@ -3,6 +3,7 @@ use core::panic;
 use crate::{
     config::arch_config::{WordType, XLEN},
     device::MemError,
+    isa::HasBreakpointException,
 };
 pub mod trap_controller;
 
@@ -158,5 +159,11 @@ impl Into<WordType> for Trap {
             }
             Self::Exception(nr) => nr.into(),
         }
+    }
+}
+
+impl HasBreakpointException for Exception {
+    fn is_breakpoint(&self) -> bool {
+        matches!(self, Exception::Breakpoint)
     }
 }
