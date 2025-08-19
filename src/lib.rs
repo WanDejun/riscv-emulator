@@ -56,6 +56,7 @@ impl Emulator {
             {
                 cold_path();
                 self.cpu.power_off()?;
+                log::debug!("icache hit for {} times.", self.cpu.icache_cnt);
                 break;
             }
 

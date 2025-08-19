@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use crate::{config::arch_config::WordType, device::MemError, utils::UnsignedInteger};
 
+pub mod icache;
 pub mod riscv;
 mod utils;
 
@@ -41,7 +42,7 @@ pub trait ISATypes: Sized {
 
     type RawInstr: Copy + InstrLen;
     type ISADesc;
-    type DecodeRst;
+    type DecodeRst: Clone + Copy;
     type StepException: HasBreakpointException + Debug;
     type Decoder: DecoderTrait<Self>;
     type CPU: DebugTarget<Self>;

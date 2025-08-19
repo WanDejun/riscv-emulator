@@ -15,7 +15,7 @@ use crate::{
 mod funct_decoder;
 mod mask_decoder;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeInstr(pub RiscvInstr, pub RVInstrInfo);
 
 impl Display for DecodeInstr {

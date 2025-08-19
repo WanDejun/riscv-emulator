@@ -9,15 +9,15 @@ use crate::config::arch_config::WordType;
 /// Type B: 1
 /// Type U: 12
 /// Type J: 12
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RVInstrInfo {
+    None,
     R { rs1: u8, rs2: u8, rd: u8 },
     I { rs1: u8, rd: u8, imm: WordType },
     S { rs1: u8, rs2: u8, imm: WordType },
     B { rs1: u8, rs2: u8, imm: WordType },
     U { rd: u8, imm: WordType },
     J { rd: u8, imm: WordType },
-    None,
 }
 
 #[derive(Debug, Clone, Copy)]
