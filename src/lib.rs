@@ -56,7 +56,9 @@ impl Emulator {
             {
                 cold_path();
                 self.cpu.power_off()?;
-                log::debug!("icache hit for {} times.", self.cpu.icache_cnt);
+                log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);
+                let rate = self.cpu.icache_cnt as f64 / instr_cnt as f64;
+                log::debug!("iCache hit rate {}", rate);
                 break;
             }
 

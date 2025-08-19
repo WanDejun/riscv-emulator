@@ -7,7 +7,7 @@ use crate::{
     device::{DeviceTrait, Mem},
     isa::{
         DecoderTrait,
-        icache::{DirectICache, ICache},
+        icache::{ICache, SetICache},
         riscv::{
             RiscvTypes,
             csr_reg::CsrRegFile,
@@ -26,7 +26,7 @@ pub struct RV32CPU {
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
-    pub(super) icache: DirectICache<RiscvTypes, 64>,
+    pub(super) icache: SetICache<RiscvTypes, 64, 8>,
     pub icache_cnt: usize,
 }
 
@@ -43,7 +43,7 @@ impl RV32CPU {
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
             csr: CsrRegFile::new(),
-            icache: DirectICache::new(),
+            icache: SetICache::new(),
             icache_cnt: 0,
         }
     }

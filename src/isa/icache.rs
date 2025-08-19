@@ -32,7 +32,7 @@ impl<I: ISATypes + ToGroupId, const N: usize> DirectICache<I, N> {
     }
 }
 
-impl<I: ISATypes, const N: usize> ICache<I> for DirectICache<I, N> {
+impl<I: ISATypes + ToGroupId, const N: usize> ICache<I> for DirectICache<I, N> {
     fn new() -> Self {
         debug_assert!(N > 0 && (N & (N - 1)) == 0, "N must be a power of two");
         Self {
@@ -42,12 +42,81 @@ impl<I: ISATypes, const N: usize> ICache<I> for DirectICache<I, N> {
 
     #[inline]
     fn get(&self, addr: WordType) -> Option<I::DecodeRst> {
-        let (tag, data) = &self.cache[addr as usize & (N - 1)];
+        let (tag, data) = &self.cache[Self::get_group_id(addr)];
         if *tag == addr { data.clone() } else { None }
     }
 
     #[inline]
     fn put(&mut self, addr: WordType, data: I::DecodeRst) {
-        self.cache[addr as usize & (N - 1)] = (addr, Some(data));
+        self.cache[Self::get_group_id(addr)] = (addr, Some(data));
+    }
+}
+
+// Set-associative iCache
+
+struct SetICacheLine<I: ISATypes, const S: usize> {
+    nxt_idx: usize,
+    source_addr: [WordType; S],
+    data: [Option<I::DecodeRst>; S],
+}
+
+impl<I: ISATypes, const S: usize> SetICacheLine<I, S> {
+    const fn new() -> Self {
+        Self {
+            nxt_idx: 0,
+            source_addr: [0; S],
+            data: [None; S],
+        }
+    }
+
+    fn insert(&mut self, addr: WordType, data: I::DecodeRst) {
+        self.source_addr[self.nxt_idx] = addr;
+        self.data[self.nxt_idx] = Some(data);
+
+        self.nxt_idx += 1;
+        if self.nxt_idx == S {
+            self.nxt_idx = 0;
+        }
+    }
+}
+
+pub(super) struct SetICache<I: ISATypes, const N: usize, const S: usize> {
+    cache: [SetICacheLine<I, S>; N],
+}
+
+impl<I: ISATypes + ToGroupId, const N: usize, const S: usize> SetICache<I, N, S> {
+    // calculate high bit of S
+    const SLEN: u32 = S.trailing_zeros();
+
+    #[inline]
+    fn get_group_id(addr: WordType) -> usize {
+        (I::group_id(addr).wrapping_shr(Self::SLEN)) & (N - 1)
+    }
+}
+
+impl<I: ISATypes + ToGroupId, const N: usize, const S: usize> ICache<I> for SetICache<I, N, S> {
+    fn new() -> Self {
+        debug_assert!(N > 0 && (N & (N - 1)) == 0, "N must be a power of two.");
+        debug_assert!(S > 0 && (S & (S - 1)) == 0, "S must be a power of two.");
+
+        Self {
+            cache: std::array::from_fn(|_| SetICacheLine::new()),
+        }
+    }
+
+    #[inline]
+    fn get(&self, addr: WordType) -> Option<I::DecodeRst> {
+        let group_id = Self::get_group_id(addr);
+        let line = &self.cache[group_id];
+
+        line.source_addr
+            .iter()
+            .position(|&item| item == addr)
+            .and_then(|index| line.data[index].clone())
+    }
+
+    #[inline]
+    fn put(&mut self, addr: WordType, data: I::DecodeRst) {
+        self.cache[Self::get_group_id(addr)].insert(addr, data);
     }
 }
