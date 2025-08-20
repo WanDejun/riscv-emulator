@@ -4,7 +4,7 @@ use std::{
     usize,
 };
 
-use crate::config::arch_config::{WordType, XLEN};
+use crate::config::arch_config::{SignedWordType, WordType, XLEN};
 
 fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
 where
@@ -25,14 +25,8 @@ where
 }
 
 pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
-    let sign_bit = (1u64 << (from_bits - 1)) as WordType;
-
-    if (value & sign_bit) != 0 {
-        let mask = (!0u64 ^ ((1u64 << from_bits) - 1)) as WordType;
-        value | mask
-    } else {
-        value
-    }
+    let sign_bit = 64 - from_bits;
+    ((value << sign_bit) as SignedWordType >> sign_bit) as WordType
 }
 
 /// get the negative of given number of [`WordType`] in 2's complement.

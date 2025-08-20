@@ -18,6 +18,8 @@ use riscv_emulator::{
     },
 };
 
+// TODO: This file contains too much things. Consider move something out of here.
+
 #[derive(Debug, Parser)]
 #[command(multicall = true)]
 enum Cli {
@@ -381,7 +383,7 @@ fn parse_word(s: &str) -> Result<WordType, String> {
 
 fn parse_reg(s: &str) -> Result<u8, String> {
     let t = s.trim();
-    if let Some(index) = REG_NAME.iter().position(|&r| r == t) {
+    if let Some(index) = REG_NAME.iter().position(|s| s.split("/").any(|r| r == t)) {
         return Ok(index as u8);
     }
 
@@ -486,5 +488,22 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn test_parse_reg_riscv64() {
+        assert_eq!(parse_reg("x0"), Ok(0));
+        assert_eq!(parse_reg("a5"), Ok(15));
+        assert_eq!(parse_reg("x31"), Ok(31));
+        assert!(matches!(parse_reg("x32"), Err(_)));
+
+        assert!(REG_NAME[parse_reg("s0").unwrap() as usize] == "s0/fp");
+        assert!(REG_NAME[parse_reg("fp").unwrap() as usize] == "s0/fp");
     }
 }
