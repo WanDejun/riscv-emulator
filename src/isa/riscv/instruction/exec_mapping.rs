@@ -3,7 +3,7 @@ use crate::{
     isa::riscv::{
         executor::RV32CPU,
         instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
-        trap::Exception,
+        trap::{Exception, trap_controller::TrapController},
     },
     utils::sign_extend,
 };
@@ -120,10 +120,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::EBREAK => |_info, _cpu| Err(Exception::Breakpoint),
         RiscvInstr::ECALL => |_info, _cpu| Err(Exception::MachineEnvCall),
-        // todo!("Both ebreak and ecall are not implemented yet.")
 
         // We are executing in order, so don't need to do anything.
-        RiscvInstr::FENCE => |_info, _cpu| Ok(()),
+        RiscvInstr::FENCE => exec_nop,
 
         RiscvInstr::CSRRW => exec_csrw::<false>,
         RiscvInstr::CSRRC => exec_csr_bit::<false, false>,
@@ -132,6 +131,11 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::CSRRCI => exec_csr_bit::<false, true>,
         RiscvInstr::CSRRSI => exec_csr_bit::<true, true>,
 
-        _ => todo!(),
+        RiscvInstr::MRET => |_info, cpu| {
+            TrapController::mret(cpu);
+            Ok(())
+        },
+
+        RiscvInstr::WFI => exec_nop,
     }
 }

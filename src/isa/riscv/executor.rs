@@ -275,43 +275,43 @@ mod tests {
         // 1) CSRRW x11, mstatus(0x300), x5
         run_test_exec_decode(
             0x300295f3,
-            |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234),
-            |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA),
+            |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234).pc(0x1000),
+            |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA).pc(0x1004),
         );
 
         // 2) CSRRS x12, mtvec(0x305), x6
         run_test_exec_decode(
             0x30532673,
-            |builder| builder.reg(6, 0x00F0).csr(0x305, 0x0F00),
-            |checker| checker.reg(12, 0x0F00).csr(0x305, 0x0FF0),
+            |builder| builder.reg(6, 0x00F0).csr(0x305, 0x0F00).pc(0x1000),
+            |checker| checker.reg(12, 0x0F00).csr(0x305, 0x0FF0).pc(0x1004),
         );
 
         // 3) CSRRC x13, mepc(0x341), x7
         run_test_exec_decode(
             0x3413b6f3,
-            |builder| builder.reg(7, 0x0FF0).csr(0x341, 0x0FFF),
-            |checker| checker.reg(13, 0x0FFF).csr(0x341, 0x000F),
+            |builder| builder.reg(7, 0x0FF0).csr(0x341, 0x0FFF).pc(0x1000),
+            |checker| checker.reg(13, 0x0FFF).csr(0x341, 0x000F).pc(0x1004),
         );
 
         // 4) CSRRWI x11, mcause(0x342), imm=5
         run_test_exec_decode(
             0x3422d5f3,
-            |builder| builder.csr(0x342, 0xABCD),
-            |checker| checker.reg(11, 0xABCD).csr(0x342, 5),
+            |builder| builder.csr(0x342, 0xABCD).pc(0x1000),
+            |checker| checker.reg(11, 0xABCD).csr(0x342, 5).pc(0x1004),
         );
 
         // 5) CSRRSI x12, mip(0x344), imm=6
         run_test_exec_decode(
             0x34436673,
-            |builder| builder.csr(0x344, 0x00F0),
-            |checker| checker.reg(12, 0x00F0).csr(0x344, 0x00F6),
+            |builder| builder.csr(0x344, 0x00F0).pc(0x1000),
+            |checker| checker.reg(12, 0x00F0).csr(0x344, 0x00F6).pc(0x1004),
         );
 
         // 6) CSRRCI x13, mie(0x304), imm=7
         run_test_exec_decode(
             0x3043f6f3,
-            |builder| builder.csr(0x304, 0x00FF),
-            |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8),
+            |builder| builder.csr(0x304, 0x00FF).pc(0x1000),
+            |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8).pc(0x1004),
         );
     }
 }

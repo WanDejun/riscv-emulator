@@ -136,6 +136,8 @@ pub(super) fn exec_csrw<const UIMM: bool>(
         }
     }
 
+    cpu.pc = cpu.pc.wrapping_add(4);
+
     Ok(())
 }
 
@@ -162,6 +164,13 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
         }
     }
 
+    cpu.pc = cpu.pc.wrapping_add(4);
+
+    Ok(())
+}
+
+pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception> {
+    cpu.pc = cpu.pc.wrapping_add(4);
     Ok(())
 }
 
