@@ -41,6 +41,16 @@ impl Emulator {
     }
 
     pub fn run(&mut self) -> Result<usize, Exception> {
+        self.run_until(|_cpu, _instr| true) // Do nothing
+    }
+
+    /// Invoke `f` after each CPU step.
+    /// `f` is called as with &mut CPU and instruction count.
+    /// If `f` returns `true`, the emulator will power off.
+    pub fn run_until(
+        &mut self,
+        mut f: impl FnMut(&mut RV32CPU, usize) -> bool,
+    ) -> Result<usize, Exception> {
         let mut instr_cnt: usize = 0;
         POWER_STATUS.store(0, std::sync::atomic::Ordering::Release);
 
@@ -48,7 +58,7 @@ impl Emulator {
             self.cpu.step()?;
             let power = POWER_STATUS.load(std::sync::atomic::Ordering::Acquire);
 
-            if instr_cnt % 32 == 0 && power.eq(&POWER_OFF_CODE) {
+            if instr_cnt % 32 == 0 && power.eq(&POWER_OFF_CODE) || f(&mut self.cpu, instr_cnt) {
                 cold_path();
                 self.cpu.power_off()?;
                 log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);

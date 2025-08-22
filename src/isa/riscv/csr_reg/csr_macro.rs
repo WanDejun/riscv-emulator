@@ -165,6 +165,35 @@ gen_csr_regfile! {
         10, 1, meip,
         0, XLEN, mip,
     ];
+
+    // TODO: Below are just stub to make riscv-tests executable, not fully implemented.
+    Mhartid, 0xF14, 0x00, [
+        0, XLEN, mhartid,
+    ];
+
+    Mnstatus, 0x744, 0x00, [
+        0, XLEN, mnstatus,
+    ];
+
+    Satp, 0x180, 0x00, [
+        0, XLEN, satp,
+    ];
+
+    Pmpaddr0, 0x3B0, 0x00, [
+        0, XLEN, pmpaddr0,
+    ];
+
+    Pmpcfg0, 0x3A0, 0x00, [
+        0, XLEN, pmpcfg0,
+    ];
+
+    Stvec, 0x105, 0x00, [
+        0, XLEN, stvec,
+    ];
+
+    Medeleg, 0x302, 0x00, [
+        0, XLEN, medeleg,
+    ];
 }
 
 gen_csr_reg! {

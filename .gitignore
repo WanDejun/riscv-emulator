@@ -29,6 +29,10 @@
 !benches/**/
 !benches/**/*.rs
 
+!tests/
+!tests/**/
+!tests/**/*.rs
+
 # track `test_resources` directory
 !test_resources/
 !test_resources/**/
@@ -48,3 +52,8 @@
 !data/
 # track all files in `data/`
 !data/**
+
+# track submodule
+!.gitmodules
+!riscv-tests/
+!riscv-tests/**
