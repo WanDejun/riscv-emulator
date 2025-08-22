@@ -2,7 +2,7 @@ use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
     isa::riscv::{csr_reg::CsrReg, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception},
-    utils::{TruncateTo, UnsignedInteger, sign_extend},
+    utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32},
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
@@ -355,35 +355,44 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
 pub(super) struct ExecSLL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a << b) // TODO: Do we need to check for shift amount and throw Invalid Instruction?
+        Ok(a.wrapping_shl(b as u32)) // TODO: Do we need to check for shift amount and throw Invalid Instruction?
     }
 }
 
 pub(super) struct ExecSRL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a >> b)
+        Ok(a.wrapping_shr(b as u32))
     }
 }
 
 pub(super) struct ExecSRA {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRA {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a.cast_signed() >> b.cast_signed()).cast_unsigned())
+        Ok((a.cast_signed().wrapping_shr(b.cast_signed() as u32)).cast_unsigned())
     }
 }
 
 pub(super) struct ExecSLLW {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLLW {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend((a << b).truncate_to(32), 32))
+        Ok(sign_extend_u32((a as u32).wrapping_shl((b & 0x1F) as u32)))
     }
 }
 
 pub(super) struct ExecSRLW {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSRLW {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend((a >> b).truncate_to(32), 32))
+        Ok(sign_extend_u32((a as u32).wrapping_shr(b as u32)))
+    }
+}
+
+pub(super) struct ExecSRAW {}
+impl ExecTrait<Result<WordType, Exception>> for ExecSRAW {
+    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        Ok(sign_extend_u32(
+            (a.cast_signed() as i32).wrapping_shr(b as u32) as u32,
+        ))
     }
 }
 

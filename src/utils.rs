@@ -29,6 +29,10 @@ pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
     ((value << sign_bit) as SignedWordType >> sign_bit) as WordType
 }
 
+pub fn sign_extend_u32(value: u32) -> u64 {
+    sign_extend(value as WordType, 32)
+}
+
 /// get the negative of given number of [`WordType`] in 2's complement.
 pub fn negative_of(value: WordType) -> WordType {
     !value + 1

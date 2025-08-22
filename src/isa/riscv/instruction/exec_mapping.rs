@@ -34,9 +34,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // Shift
         RiscvInstr::SLL | RiscvInstr::SLLI => exec_arith::<ExecSLL>,
         RiscvInstr::SRL | RiscvInstr::SRLI => exec_arith::<ExecSRL>,
-        RiscvInstr::SRA | RiscvInstr::SRAI | RiscvInstr::SRAW | RiscvInstr::SRAIW => {
-            exec_arith::<ExecSRA>
-        }
+        RiscvInstr::SRA | RiscvInstr::SRAI => exec_arith::<ExecSRA>,
+        RiscvInstr::SRAW | RiscvInstr::SRAIW => exec_arith::<ExecSRAW>,
 
         RiscvInstr::SLLW | RiscvInstr::SLLIW => exec_arith::<ExecSLLW>,
         RiscvInstr::SRLW | RiscvInstr::SRLIW => exec_arith::<ExecSRLW>,
