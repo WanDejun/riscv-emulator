@@ -6,7 +6,6 @@
 #![feature(likely_unlikely)]
 
 mod cpu;
-mod load;
 mod ram;
 mod utils;
 
@@ -15,6 +14,7 @@ pub mod config;
 pub mod device;
 pub mod handle_trait;
 pub mod isa;
+pub mod load;
 
 pub use config::ram_config;
 
@@ -24,7 +24,7 @@ use crate::{
     ram::Ram,
 };
 
-use std::{hint::cold_path, path::Path};
+use std::{hint::cold_path, path::Path, sync::atomic::Ordering};
 
 pub struct Emulator {
     cpu: RV32CPU,
@@ -41,7 +41,7 @@ impl Emulator {
     }
 
     pub fn run(&mut self) -> Result<usize, Exception> {
-        self.run_until(|_cpu, _instr| true) // Do nothing
+        self.run_until(|_cpu, _instr| false) // Do nothing
     }
 
     /// Invoke `f` after each CPU step.
@@ -52,13 +52,15 @@ impl Emulator {
         mut f: impl FnMut(&mut RV32CPU, usize) -> bool,
     ) -> Result<usize, Exception> {
         let mut instr_cnt: usize = 0;
-        POWER_STATUS.store(0, std::sync::atomic::Ordering::Release);
+        POWER_STATUS.store(0, Ordering::Release);
 
         loop {
             self.cpu.step()?;
-            let power = POWER_STATUS.load(std::sync::atomic::Ordering::Acquire);
+            instr_cnt += 1;
 
-            if instr_cnt % 32 == 0 && power.eq(&POWER_OFF_CODE) || f(&mut self.cpu, instr_cnt) {
+            if instr_cnt % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE)
+                || f(&mut self.cpu, instr_cnt)
+            {
                 cold_path();
                 self.cpu.power_off()?;
                 log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);
@@ -66,8 +68,6 @@ impl Emulator {
                 log::debug!("iCache hit rate {}", rate);
                 break;
             }
-
-            instr_cnt += 1;
         }
 
         Ok(instr_cnt)

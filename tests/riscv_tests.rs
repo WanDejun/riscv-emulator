@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use riscv_emulator::Emulator;
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
+use riscv_emulator::load::get_section_addr;
 
 #[allow(unused)]
 fn get_test_by_name(name: &str) -> PathBuf {
@@ -37,17 +38,16 @@ fn find_tests(prefix: &str) -> Vec<PathBuf> {
 #[must_use]
 fn run_test(elf: &Path) -> bool {
     // Load the ELF file and run it
-    eprintln!("Running {:?}", elf);
-
     let result = std::panic::catch_unwind(|| {
         let mut run_result = false;
         let mut emu = Emulator::from_elf(&elf);
+        let bytes = std::fs::read(elf).unwrap();
+        let tohost: WordType = get_section_addr(&bytes, ".tohost").unwrap();
+
         emu.run_until(|cpu, instr_cnt| {
             // Handle tohost
-            const TOHOST: WordType = 0x80001000;
-
             if (instr_cnt & (0xFFF)) == 0 {
-                let msg = cpu.read_mem::<u64>(TOHOST).unwrap();
+                let msg = cpu.read_mem::<u64>(tohost).unwrap();
 
                 if msg != 0 {
                     run_result = msg == 1;
@@ -77,7 +77,7 @@ fn run_test(elf: &Path) -> bool {
         }
 
         Ok(true) => {
-            eprintln!("Test {:?} passed", elf);
+            // eprintln!("Test {:?} passed", elf);
             true
         }
     }

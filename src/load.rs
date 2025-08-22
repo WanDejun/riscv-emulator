@@ -5,6 +5,7 @@ pub fn load_elf(ram: &mut Ram, elf_data: &[u8]) {
     let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
     let elf_header = elf.header;
     let magic = elf_header.pt1.magic;
+
     assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");
     let ph_count = elf_header.pt2.ph_count();
     for i in 0..ph_count {
@@ -21,6 +22,21 @@ pub fn load_elf(ram: &mut Ram, elf_data: &[u8]) {
             );
         }
     }
+}
+
+pub fn get_section_addr(elf_data: &[u8], section_name: &str) -> Option<WordType> {
+    let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
+
+    for sh in elf.section_iter() {
+        if let Ok(name) = sh.get_name(&elf) {
+            if name == section_name {
+                let addr = sh.address();
+                return Some(addr as WordType);
+            }
+        }
+    }
+
+    None
 }
 
 #[allow(unused)]

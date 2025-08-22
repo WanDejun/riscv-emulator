@@ -122,10 +122,10 @@ impl RV32CPU {
                 TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
                 return Ok(());
             }
-            Ok(()) => {} //there is nothing todo.
+            Ok(()) => {} // there is nothing to do.
         }
 
-        log::trace!("{}", self.debug_reg_string());
+        log::trace!("Regs: {}", self.debug_reg_string());
         return Ok(());
     }
 
