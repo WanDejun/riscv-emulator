@@ -122,12 +122,12 @@ impl<I: ISATypes> Debugger<I> {
         let pc = self.read_pc();
         log::debug!("Placing origin instruction on breakpoint at {:08x}", pc);
 
-        let instr = self
-            .breakpoints
-            .get(&Breakpoint::new(pc))
-            .expect("Breakpoint should exist");
-
-        self.target.write_back_instr(*instr, pc).unwrap();
+        // We cannot panic here because the original program could contains "ebreak"
+        if let Some(instr) = self.breakpoints.get(&Breakpoint::new(pc)) {
+            self.target.write_back_instr(*instr, pc).unwrap();
+        } else {
+            log::debug!("No original instruction found for breakpoint at {:08x}", pc);
+        }
     }
 
     fn step_over_breakpoint(&mut self) -> Result<(), DebugError<I>> {

@@ -124,7 +124,7 @@ pub(super) fn exec_csrw<const UIMM: bool>(
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         if rd != 0 {
-            let value = cpu.csr.read(imm).unwrap();
+            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
             cpu.reg_file.write(rd, value);
         }
 
@@ -147,7 +147,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         if rd != 0 || UIMM {
-            let value = cpu.csr.read(imm).unwrap();
+            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
             cpu.reg_file.write(rd, value);
         }
 
@@ -157,10 +157,12 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
             cpu.reg_file.read(rs1, rs1).0
         };
 
+        let mut csr = cpu.csr.get(imm).ok_or(Exception::IllegalInstruction)?;
+
         if SET {
-            cpu.csr.get(imm).set_by_mask(rhs);
+            csr.set_by_mask(rhs);
         } else {
-            cpu.csr.get(imm).clear_by_mask(rhs);
+            csr.clear_by_mask(rhs);
         }
     }
 

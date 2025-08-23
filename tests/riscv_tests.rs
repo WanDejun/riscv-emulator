@@ -83,11 +83,8 @@ fn run_test(elf: &Path) -> bool {
     }
 }
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_all_rv64ui_p_tests() {
-    let tests = find_tests("rv64ui-p-");
+fn run_test_group(name: &str) {
+    let tests = find_tests(name);
     assert!(
         !tests.is_empty(),
         "No rv64ui-p tests found in riscv-tests/isa"
@@ -100,7 +97,25 @@ fn run_all_rv64ui_p_tests() {
         fail_cnt += !run_test(&elf) as u32;
     }
 
-    println!("Totally {}/{} tests failed in rv64ui-p.", fail_cnt, tot);
+    if fail_cnt > 0 {
+        println!("Totally {}/{} tests failed in {}.", fail_cnt, tot, name);
+    } else {
+        println!("All tests passed in {}.", name);
+    }
 
     assert!(fail_cnt == 0);
+}
+
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_all_rv64ui_p_tests() {
+    run_test_group("rv64ui-p-");
+}
+
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_all_rv64mi_p_tests() {
+    run_test_group("rv64mi-p-");
 }

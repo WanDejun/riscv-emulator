@@ -85,17 +85,17 @@ impl CsrRegFile {
         }
     }
 
-    pub fn get_by_type<T>(&mut self) -> T
+    pub fn get_by_type<T>(&mut self) -> Option<T>
     where
         T: CsrReg,
     {
-        let val = self.table.get_mut(&T::get_index()).unwrap();
-        T::from(val as *mut u64)
+        let val = self.table.get_mut(&T::get_index())?;
+        Some(T::from(val as *mut u64))
     }
 
-    pub fn get<'a>(&'a mut self, addr: WordType) -> UniversalCsr {
-        let val = self.table.get_mut(&addr).unwrap();
-        UniversalCsr::from(val as *mut u64)
+    pub fn get<'a>(&'a mut self, addr: WordType) -> Option<UniversalCsr> {
+        let val = self.table.get_mut(&addr)?;
+        Some(UniversalCsr::from(val as *mut u64))
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {
@@ -127,7 +127,7 @@ mod test {
     #[test]
     fn test_rw_by_type() {
         let mut reg = CsrRegFile::new();
-        let mstatus = reg.get_by_type::<Mstatus>();
+        let mstatus = reg.get_by_type::<Mstatus>().unwrap();
 
         mstatus.set_mpp(3);
         mstatus.set_sie(1);
@@ -140,7 +140,7 @@ mod test {
         mstatus.set_mpp(0b10);
         assert_eq!(mstatus.get_mpp(), 0b10);
 
-        let mtvec = reg.get_by_type::<Mtvec>();
+        let mtvec = reg.get_by_type::<Mtvec>().unwrap();
         reg.write(csr_index::mtvec, 0x114514);
         assert_eq!(mtvec.get_base(), 0x114514 >> 2);
     }

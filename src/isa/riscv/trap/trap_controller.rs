@@ -24,12 +24,12 @@ impl TrapController {
         cpu.csr.write(csr_index::mcause, cause.into());
         cpu.csr.write(csr_index::mepc, pc);
         cpu.csr.write(csr_index::mtval, trap_value);
-        let mstatus = cpu.csr.get_by_type::<Mstatus>();
+        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
         mstatus.set_mpie(mstatus.get_mie());
         mstatus.set_mie(0);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
 
-        let mtvec = cpu.csr.get_by_type::<Mtvec>();
+        let mtvec = cpu.csr.get_by_type::<Mtvec>().unwrap();
         if mtvec.get_mode() == 0 {
             // Direct Mode
             cpu.write_pc(mtvec.get_base() << 2);
@@ -43,10 +43,10 @@ impl TrapController {
     }
 
     pub fn mret(cpu: &mut RV32CPU) {
-        let mstatus = cpu.csr.get_by_type::<Mstatus>();
-        cpu.csr
-            .set_current_privileged((mstatus.get_mpp() as u8).into());
-        mstatus.set_mpp(0);
+        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
+        // TODO: Uncomment these two lines when U mode is supported.
+        // cpu.csr.set_current_privileged((mstatus.get_mpp() as u8).into());
+        // mstatus.set_mpp(0);
         mstatus.set_mie(mstatus.get_mpie());
         mstatus.set_mpie(1);
 
@@ -75,7 +75,7 @@ mod test {
                     .csr(csr_index::mepc, ram_config::BASE_ADDR)
                     // .csr(csr_index::mtval, 0)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
                         checker
@@ -100,7 +100,7 @@ mod test {
                     .csr(csr_index::mepc, ram_config::BASE_ADDR)
                     // .csr(csr_index::mtval, BASE_LOAD_MEM)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(
                             mcause.get_exception_code(),
@@ -122,7 +122,7 @@ mod test {
                     .pc(IRQ_HANDLER_ADDR)
                     .csr(csr_index::mepc, ram_config::BASE_ADDR)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(mcause.get_exception_code(), Exception::StoreFault.into());
                         checker
@@ -147,7 +147,7 @@ mod test {
                     .csr(csr_index::mepc, ram_config::BASE_ADDR)
                     // .csr(csr_index::mtval, BASE_LOAD_MEM)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(
                             mcause.get_exception_code(),
@@ -174,7 +174,7 @@ mod test {
                     .pc(IRQ_HANDLER_ADDR)
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(
                             mcause.get_exception_code(),
@@ -201,7 +201,7 @@ mod test {
                     .pc(IRQ_HANDLER_ADDR)
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(
                             mcause.get_exception_code(),
@@ -228,7 +228,7 @@ mod test {
                     .pc(IRQ_HANDLER_ADDR)
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>();
+                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
                         assert_eq!(mcause.get_interrupt(), 0);
                         assert_eq!(
                             mcause.get_exception_code(),

@@ -171,29 +171,29 @@ gen_csr_regfile! {
         0, XLEN, mhartid,
     ];
 
-    Mnstatus, 0x744, 0x00, [
-        0, XLEN, mnstatus,
-    ];
+    // Mnstatus, 0x744, 0x00, [
+    //     0, XLEN, mnstatus,
+    // ];
 
-    Satp, 0x180, 0x00, [
-        0, XLEN, satp,
-    ];
+    // Satp, 0x180, 0x00, [
+    //     0, XLEN, satp,
+    // ];
 
-    Pmpaddr0, 0x3B0, 0x00, [
-        0, XLEN, pmpaddr0,
-    ];
+    // Pmpaddr0, 0x3B0, 0x00, [
+    //     0, XLEN, pmpaddr0,
+    // ];
 
-    Pmpcfg0, 0x3A0, 0x00, [
-        0, XLEN, pmpcfg0,
-    ];
+    // Pmpcfg0, 0x3A0, 0x00, [
+    //     0, XLEN, pmpcfg0,
+    // ];
 
-    Stvec, 0x105, 0x00, [
-        0, XLEN, stvec,
-    ];
+    // Stvec, 0x105, 0x00, [
+    //     0, XLEN, stvec,
+    // ];
 
-    Medeleg, 0x302, 0x00, [
-        0, XLEN, medeleg,
-    ];
+    // Medeleg, 0x302, 0x00, [
+    //     0, XLEN, medeleg,
+    // ];
 }
 
 gen_csr_reg! {

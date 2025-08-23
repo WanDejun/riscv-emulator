@@ -3,7 +3,7 @@ use crate::{
     isa::riscv::{
         executor::RV32CPU,
         instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
-        trap::Exception,
+        trap::{Exception, trap_controller::TrapController},
     },
     utils::sign_extend,
 };
@@ -130,7 +130,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::CSRRCI => exec_csr_bit::<false, true>,
         RiscvInstr::CSRRSI => exec_csr_bit::<true, true>,
 
-        RiscvInstr::MRET => exec_nop, // TODO
+        RiscvInstr::MRET => |_info, cpu| {
+            TrapController::mret(cpu);
+            Ok(())
+        },
         RiscvInstr::WFI => exec_nop,
     }
 }
