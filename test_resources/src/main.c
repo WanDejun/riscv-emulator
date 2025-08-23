@@ -1,5 +1,6 @@
 #include "io.h"
 #include "log.h"
+#include "power.h"
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -7,16 +8,6 @@
 #define UART_ADDR 0x10000000
 #define UART_LSR_ADDR (UART_ADDR + 0x05)
 #define UART_LSR_THRE 0x20  // Bit 5: Transmitter Holding Register Empty
-
-#define VIRT_POWEROFF_ADDR 0x100000
-
-void PowerOff() {
-    uart_putc('\n');
-    volatile uint32_t* poweroff = (uint32_t*)VIRT_POWEROFF_ADDR;
-    *poweroff = 0x5555;
-    while (1) { /* 等待 QEMU 退出 */
-    }
-}
 
 extern char starttext[], endtext[], startrodata[], endrodata[], startdata[], enddata[],
     startbss[], endbss[], stack_lower_bound[], stack_top[];

@@ -1,13 +1,14 @@
-# os/src/trap/trap.S
-
-.macro SAVE_GP n
+.altmacro
+.macro SAVE_REG n
     sd x\n, \n*8(sp)
 .endm
 
-.macro LOAD_GP n
+.macro LOAD_REG n
     ld x\n, \n*8(sp)
 .endm
 
+.globl __traps_entry
+.globl __traps_return
 .align 2
 __traps_entry:
     csrrw sp, sscratch, sp
@@ -22,7 +23,7 @@ __traps_entry:
     # save x5~x31
     .set n, 5
     .rept 27
-        SAVE_GP %n
+        SAVE_REG %n
         .set n, n+1
     .endr
     # we can use t0/t1/t2 freely, because they were saved on kernel stack
@@ -55,7 +56,7 @@ __traps_return:
     ld x3, 3*8(sp)
     .set n, 5
     .rept 27
-        LOAD_GP %n
+        LOAD_REG %n
         .set n, n+1
     .endr
     # release TrapContext on kernel stack

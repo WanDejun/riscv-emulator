@@ -5,17 +5,17 @@ LIB := ./lib
 OBJ := ./obj
 BIN := ./bin
 CC := $(ARCH)-elf-gcc
-C_FLAG := -ffreestanding -nostdlib -march=rv64im -mabi=lp64 -mcmodel=medany -I$(INC) -g
+C_FLAG := -ffreestanding -nostdlib -march=rv64imzicsr -mabi=lp64 -mcmodel=medany -I$(INC) -g
 LD := $(ARCH)-elf-ld
 LD_FLAG := -static -g
 QEMU := qemu-system-$(ARCH)
 
 TARGET ?= main
 
-TARGETS := main fib prime matrix_mul io_bench
+TARGETS := main fib prime matrix_mul io_bench trap_test
 TARGET_ELFS := $(patsubst %,$(BIN)/%.elf,$(TARGETS))
 
-LIBS := io log boot
+LIBS := io log boot trap trap_handler power
 LIBS_OBJ := $(patsubst %,$(OBJ)/%.o,$(LIBS))
 
 # proctect intermediate file.
@@ -26,15 +26,22 @@ DEFAULT_TARGET: build_all
 
 build_all: $(TARGET_ELFS)
 
-# default lib file.
-$(OBJ)/%.o: $(LIB)/%.c
-	@ mkdir $(OBJ) $(BIN) -p
-	$(CC) $(C_FLAG) -c $^ -o $@
+# trap.o
+$(OBJ)/trap.o: $(LIB)/trap.S
+	@ mkdir -p $(OBJ) $(BIN)
+	$(CC) $(C_FLAG) -c $< -o $@
 
 # boot.o
 $(OBJ)/boot.o: $(SRC)/boot.S
 	@ mkdir -p $(OBJ) $(BIN)
 	$(CC) $(C_FLAG) -c $< -o $@
+
+# default lib file.
+$(OBJ)/%.o: $(LIB)/%.c
+	@ mkdir $(OBJ) $(BIN) -p
+	$(CC) $(C_FLAG) -c $^ -o $@
+
+
 
 
 build: $(LIBS_OBJ) $(BIN)/$(TARGET).elf 
