@@ -58,6 +58,14 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
         self.memory.write::<T>(addr, data)
     }
 
+    /// match input {
+    ///     Some() => `Read Write`,
+    ///     None => `Read Only`,
+    /// }
+    fn debug_csr(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
+        self.csr.debug(addr, new_value)
+    }
+
     fn step(&mut self) -> Result<(), Exception> {
         RV32CPU::step(self)
     }
@@ -225,6 +233,14 @@ impl<I: ISATypes> Debugger<I> {
         data: V,
     ) -> Result<(), MemError> {
         self.target.write_mem::<V>(addr, data)
+    }
+
+    pub fn read_csr(&mut self, addr: WordType) -> Option<WordType> {
+        self.target.debug_csr(addr, None)
+    }
+
+    pub fn write_csr(&mut self, addr: WordType, data: WordType) {
+        self.target.debug_csr(addr, Some(data)).unwrap();
     }
 
     pub fn decoded_info(&mut self, addr: WordType) -> Option<I::DecodeRst> {

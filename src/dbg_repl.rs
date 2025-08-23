@@ -11,6 +11,7 @@ use riscv_emulator::{
         ISATypes, InstrLen,
         riscv::{
             RiscvTypes,
+            csr_reg::csr_macro::CSR_NAME,
             debugger::{DebugEvent, Debugger},
             decoder::DecodeInstr,
             instruction::RVInstrInfo,
@@ -74,6 +75,9 @@ enum PrintCmd {
         #[arg(short, long, default_value_t = 4)]
         len: u32,
     },
+    Csr {
+        addr: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -89,6 +93,7 @@ enum PrintObject {
     Pc,
     Reg(u8),
     Mem(WordType, u32),
+    CSR(WordType),
 }
 
 pub struct DebugREPL<I: ISATypes> {
@@ -162,6 +167,9 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             Cli::Print(PrintCmd::Mem { addr, len }) => {
                 self.print_mem(parse_u64(&addr)?, len);
             }
+            Cli::Print(PrintCmd::Csr { addr }) => {
+                self.print_csr(parse_csr(&addr)?);
+            }
 
             Cli::Display(PrintCmd::Pc) => {
                 self.watch_list.push(PrintObject::Pc);
@@ -172,6 +180,9 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             Cli::Display(PrintCmd::Mem { addr, len }) => {
                 self.watch_list
                     .push(PrintObject::Mem(parse_word(&addr)?, len));
+            }
+            Cli::Display(PrintCmd::Csr { addr }) => {
+                self.watch_list.push(PrintObject::CSR(parse_csr(&addr)?));
             }
 
             Cli::Undisplay(PrintCmd::Pc) => {
@@ -186,6 +197,11 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 let addr = parse_word(&addr)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::Mem(addr, len));
+            }
+            Cli::Undisplay(PrintCmd::Csr { addr }) => {
+                let csr_addr = parse_csr(&addr)?;
+                self.watch_list
+                    .retain(|&item| item != PrintObject::CSR(csr_addr));
             }
 
             Cli::List => {
@@ -260,6 +276,7 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 PrintObject::Pc => self.print_pc(),
                 PrintObject::Reg(idx) => self.print_reg(idx)?,
                 PrintObject::Mem(addr, len) => self.print_mem(addr, len),
+                PrintObject::CSR(addr) => self.print_csr(addr),
             }
         }
 
@@ -300,6 +317,14 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
 
         if len > 0 {
             println!();
+        }
+    }
+
+    fn print_csr(&mut self, csr_addr: WordType) {
+        if let Some(v) = self.dbg.read_csr(csr_addr) {
+            println!("{}", format_data(v))
+        } else {
+            println!("Illegal CSR.")
         }
     }
 
@@ -396,6 +421,19 @@ fn parse_reg(s: &str) -> Result<u8, String> {
     }
 
     Err(format!("invalid register: {}", s))
+}
+
+fn parse_csr(s: &str) -> Result<WordType, String> {
+    let t = s.trim();
+    if let Some(index) = CSR_NAME.get(t) {
+        return Ok(*index);
+    }
+
+    if let Ok(n) = parse_word(s) {
+        return Ok(n);
+    }
+
+    Err(format!("invaild csr: {}", s))
 }
 
 fn format_idx(idx: usize) -> impl std::fmt::Display {

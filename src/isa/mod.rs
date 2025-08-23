@@ -19,6 +19,8 @@ pub trait DebugTarget<I: ISATypes> {
     fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError>;
     fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError>;
 
+    fn debug_csr(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType>;
+
     fn step(&mut self) -> Result<(), I::StepException>;
 
     fn decoded_info(&mut self, addr: I::RawInstr) -> Option<I::DecodeRst>;

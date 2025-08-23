@@ -85,6 +85,18 @@ impl CsrRegFile {
         }
     }
 
+    pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
+        if let Some(val) = self.table.get_mut(&addr) {
+            let old = *val;
+            if let Some(new) = new_value {
+                *val = new;
+            }
+            Some(old)
+        } else {
+            None
+        }
+    }
+
     pub fn get_by_type<T>(&mut self) -> Option<T>
     where
         T: CsrReg,

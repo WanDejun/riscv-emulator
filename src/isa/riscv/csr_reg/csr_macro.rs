@@ -1,3 +1,5 @@
+use phf::phf_map;
+
 use super::CsrReg;
 use crate::config::arch_config::{SignedWordType, WordType, XLEN};
 use crate::utils::BIT_ONES_ARRAY;
@@ -64,10 +66,20 @@ macro_rules! gen_csr_reg {
     };
 }
 
+macro_rules! gen_csr_name_hashmap {
+    ($(($name: literal, $addr: expr)),* $(,)? ) => {
+        pub const CSR_NAME: phf::Map<&'static str, WordType> = phf_map! {
+            $(
+                $name => $addr
+            ),*
+        };
+    };
+}
+
 /// Generator csr RegFile.
 macro_rules! gen_csr_regfile {
     (
-        $( $name:ident, $addr:expr, $default:expr, [ $( $bit:expr, $len:expr, $fname:ident ),* $(,)? ] );* $(;)?
+        $( $name:ident, $name_str: literal, $addr:expr, $default:expr, [ $( $bit:expr, $len:expr, $fname:ident ),* $(,)? ] );* $(;)?
     ) => {
         $(
             gen_csr_reg!($name, $addr, [ $( $bit, $len, $fname ),* ]);
@@ -78,11 +90,15 @@ macro_rules! gen_csr_regfile {
                 ($addr, $default)
             ),*
         ];
+
+        gen_csr_name_hashmap!($(($name_str, $addr)),*);
     };
 }
 
+// gen_csr_name_hashmap!(("mstatus", 0x300),);
+
 gen_csr_regfile! {
-    Mstatus, 0x300, 0x00, [
+    Mstatus, "mstatus", 0x300, 0x00, [
         1,  1, sie,
         3,  1, mie,
         5,  1, spie,
@@ -113,12 +129,12 @@ gen_csr_regfile! {
         -1, 1, sd,
     ];
 
-    Misa, 0x301, 0x00, [
+    Misa, "misa", 0x301, 0x00, [
         0, 25, extension,
         -2, 2, mxl,
     ];
 
-    Mie, 0x304, 0x00, [
+    Mie, "mie", 0x304, 0x00, [
         0,  1, usie,
         1,  1, ssie,
         2,  1, msie,
@@ -131,29 +147,29 @@ gen_csr_regfile! {
         0, XLEN, mip
     ];
 
-    Mtvec, 0x305, 0x00, [
+    Mtvec, "mtvec", 0x305, 0x00, [
         0, 2, mode,
         2, XLEN - 2, base,
     ];
 
-    Mcratch, 0x340, 0x00, [
+    Mscratch, "mscratch", 0x340, 0x00, [
         0, XLEN, mscratch,
     ];
 
-    Mepc, 0x341, 0x00, [
+    Mepc, "mepc", 0x341, 0x00, [
         0, XLEN, mepc,
     ];
 
-    Mcause, 0x342, 0x00, [
+    Mcause, "mcause", 0x342, 0x00, [
         0, XLEN - 1, exception_code,
         -1, 1, interrupt,
     ];
 
-    Mtval, 0x343, 0x00, [
+    Mtval, "mtval", 0x343, 0x00, [
         0, XLEN, mtval,
     ];
 
-    Mip, 0x344, 0x00, [
+    Mip, "mip", 0x344, 0x00, [
         0,  1, usip,
         1,  1, ssip,
         2,  1, msip,
@@ -167,7 +183,7 @@ gen_csr_regfile! {
     ];
 
     // TODO: Below are just stub to make riscv-tests executable, not fully implemented.
-    Mhartid, 0xF14, 0x00, [
+    Mhartid, "mhartid", 0xF14, 0x00, [
         0, XLEN, mhartid,
     ];
 
