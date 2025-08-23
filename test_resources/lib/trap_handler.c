@@ -5,9 +5,9 @@
 
 typedef struct TRAP_CONTEXT {
     uint64_t x[32];
-    uint64_t sstatus;
-    uint64_t sepc;
-    uint64_t sscratch;
+    uint64_t mstatus;
+    uint64_t mepc;
+    uint64_t mscratch;
 } TrapContext;
 
 void __traps_entry();
@@ -45,14 +45,16 @@ CSR_LIST
 CSR_LIST
 #undef X
 
+// just display trap val and then PowerOff.
 __attribute__((weak))
 void trap_handler(TrapContext* trap_ctx) {
-    printf("%ld", read_csr_mstatus());
-    write_csr_mepc((uint64_t)(*PowerOff));
+    printf("mcause: %x\n", read_csr_mcause());
+    printf("mtval: %x\n", read_csr_mtval());
+    trap_ctx->mepc = (uint64_t)(PowerOff);
     __traps_return(trap_ctx);
 }
 
 void trap_init() {
-    write_csr_mtval((uint64_t)(*__traps_entry));
-    write_csr_mcratch((uint64_t)(TRAP_STACK + TRAP_STACK_SIZE));
+    write_csr_mtvec((uint64_t)(*__traps_entry));
+    write_csr_mscratch((uint64_t)(TRAP_STACK + TRAP_STACK_SIZE));
 }

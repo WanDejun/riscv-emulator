@@ -123,17 +123,22 @@ pub(super) fn exec_csrw<const UIMM: bool>(
     cpu: &mut RV32CPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
+        // read generate register.
+        let new_val;
+        if UIMM {
+            new_val = rs1 as WordType;
+        } else {
+            new_val = cpu.reg_file.read(rs1, rs1).0;
+        }
+
+        // write generate register.
         if rd != 0 {
             let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
             cpu.reg_file.write(rd, value);
         }
 
-        if UIMM {
-            cpu.csr.write(imm, rs1 as WordType);
-        } else {
-            let new_value = cpu.reg_file.read(rs1, rs1).0;
-            cpu.csr.write(imm, new_value);
-        }
+        // write csr.
+        cpu.csr.write(imm, new_val);
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
@@ -146,16 +151,16 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     cpu: &mut RV32CPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
-        if rd != 0 || UIMM {
-            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
-            cpu.reg_file.write(rd, value);
-        }
-
         let rhs = if UIMM {
             rs1 as WordType
         } else {
             cpu.reg_file.read(rs1, rs1).0
         };
+
+        if rd != 0 || UIMM {
+            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
+            cpu.reg_file.write(rd, value);
+        }
 
         let mut csr = cpu.csr.get(imm).ok_or(Exception::IllegalInstruction)?;
 
