@@ -239,4 +239,13 @@ mod test {
             },
         );
     }
+
+    #[test]
+    fn test_swap() {
+        run_test_cpu_step(
+            &[0x34011173], // csrrw sp, mscratch, sp
+            |builder| builder.csr(csr_index::mscratch, 0x114514).reg(2, 0x0721),
+            |checker| checker.csr(csr_index::mscratch, 0x0721).reg(2, 0x114514),
+        );
+    }
 }

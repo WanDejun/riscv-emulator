@@ -1,6 +1,5 @@
 #include "io.h"
 #include "log.h"
-#include <stdarg.h>
 
 void Log(LogLevelType level, const char* fmt, ...) {
     const char* tag;

@@ -1,3 +1,5 @@
+#pragma once
+
 typedef enum {
     BLACK = 30,
     RED,

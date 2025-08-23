@@ -140,10 +140,12 @@ impl MemoryMapIO {
         let st = self.map[device_index].start;
         if p_addr >= st + self.map[device_index].size {
             // out of range
-            panic!(
-                "write_to_device(index: {}, p_addr: {}, data: {}): physical address overflow",
-                device_index, p_addr, data
-            )
+            // panic!(
+            //     "write_to_device(index: {}, p_addr: {}, data: {}): physical address overflow",
+            //     device_index, p_addr, data
+            // )
+
+            Err(MemError::StoreFault)
         } else {
             // in range
             let device = &mut self.map[device_index].device;
