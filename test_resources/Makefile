@@ -12,17 +12,38 @@ QEMU := qemu-system-$(ARCH)
 
 TARGET ?= main
 
-DEFAULT_TARGET: build
+TARGETS := main fib prime matrix_mul io_bench trap_test
+TARGET_ELFS := $(patsubst %,$(BIN)/%.elf,$(TARGETS))
 
-.PNONY:
-	build_lib build run clear 
+LIBS := io log boot trap
+LIBS_OBJ := $(patsubst %,$(OBJ)/%.o,$(LIBS))
 
 
 $(OBJ)/%.o: $(LIB)/%.c
 	@ mkdir $(OBJ) $(BIN) -p
 	$(CC) $(C_FLAG) -c $^ -o $@
 
-build_lib: $(OBJ)/io.o $(OBJ)/log.o
+# boot.o
+$(OBJ)/boot.o: $(SRC)/boot.S
+	@ mkdir -p $(OBJ) $(BIN)
+	$(CC) $(C_FLAG) -c $< -o $@
+
+# trap.o
+$(OBJ)/trap.o: $(SRC)/trap.S
+	@ mkdir -p $(OBJ) $(BIN)
+	$(CC) $(C_FLAG) -c $< -o $@
+
+
+build: $(LIBS_OBJ) $(BIN)/$(TARGET).elf 
+
+$(BIN)/%.elf: $(OBJ)/%.o $(LIBS_OBJ) linker.ld
+	@ mkdir -p $(OBJ) $(BIN)
+	$(LD) $(LD_FLAG) -T linker.ld -o $@ $(filter %.o,$^)
+	
+# default .c file
+$(OBJ)/%.o: $(SRC)/%.c
+	@ mkdir -p $(OBJ) $(BIN)
+	$(CC) $(C_FLAG) -c $< -o $@
 
 build: $(SRC)/boot.S $(SRC)/$(TARGET).c linker.ld build_lib
 	@ $(CC) $(C_FLAG) -c $(SRC)/$(TARGET).c -o $(OBJ)/$(TARGET).o
