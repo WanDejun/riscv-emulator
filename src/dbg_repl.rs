@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use clap::{Parser, Subcommand};
 
 use crossterm::style::Stylize;
@@ -18,6 +16,7 @@ use riscv_emulator::{
         },
     },
 };
+use rustyline::error::ReadlineError;
 
 // TODO: This file contains too much things. Consider move something out of here.
 
@@ -99,6 +98,7 @@ enum PrintObject {
 pub struct DebugREPL<I: ISATypes> {
     dbg: Debugger<I>,
     watch_list: Vec<PrintObject>,
+    editor: rustyline::DefaultEditor,
 }
 
 impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
@@ -108,29 +108,47 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
         DebugREPL {
             dbg: Debugger::<I>::new(cpu),
             watch_list: Vec::new(),
+            editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
         }
     }
 
     pub fn run(&mut self) {
+        let mut last_line = String::new();
         loop {
-            if let Ok(line) = readline() {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
+            match self.editor.readline(PROMPT) {
+                Ok(line) => {
+                    let mut line = line.trim();
 
-                match self.respond(line) {
-                    Ok(quit) => {
-                        if quit {
-                            break;
+                    if line.is_empty() {
+                        if last_line.is_empty() {
+                            continue;
+                        } else {
+                            line = last_line.as_str();
+                        }
+                    } else {
+                        last_line = line.to_string();
+                        self.editor.add_history_entry(line).ok();
+                    }
+
+                    match self.respond(line) {
+                        Ok(quit) => {
+                            if quit {
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Error occurred while processing command: {}", err);
                         }
                     }
-                    Err(err) => {
-                        eprintln!("Error occurred while processing command: {}", err);
-                    }
                 }
-            } else {
-                eprintln!("Error reading line");
+
+                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                    break;
+                }
+
+                Err(ex) => {
+                    eprintln!("Error occurred while reading line: {}", ex);
+                }
             }
         }
     }
@@ -380,18 +398,6 @@ impl OutputPalette {
 }
 
 // helpers
-
-fn readline() -> Result<String, String> {
-    print!("{}", PROMPT);
-    std::io::stdout().flush().map_err(|e| e.to_string())?;
-
-    let mut buffer = String::new();
-    std::io::stdin()
-        .read_line(&mut buffer)
-        .map_err(|e| e.to_string())?;
-
-    Ok(buffer)
-}
 
 fn parse_u64(s: &str) -> Result<u64, String> {
     let s = s.trim();
