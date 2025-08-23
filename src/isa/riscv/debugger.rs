@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt::Debug, u64};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    fmt::Debug,
+    u64,
+};
 
 use crate::{
     config::arch_config::WordType,
@@ -86,9 +90,12 @@ impl Breakpoint {
     }
 }
 
+const SAVE_PC_CNT: usize = 10;
+
 pub struct Debugger<I: ISATypes> {
     breakpoints: BTreeMap<Breakpoint, I::RawInstr>,
     target: I::CPU,
+    pc_history: VecDeque<WordType>,
 }
 
 impl<I: ISATypes> Debugger<I> {
@@ -96,7 +103,19 @@ impl<I: ISATypes> Debugger<I> {
         Self {
             breakpoints: BTreeMap::new(),
             target: target,
+            pc_history: VecDeque::with_capacity(SAVE_PC_CNT),
         }
+    }
+
+    fn push_history(&mut self) {
+        if self.pc_history.len() == SAVE_PC_CNT {
+            self.pc_history.pop_front();
+        }
+        self.pc_history.push_back(self.read_pc());
+    }
+
+    pub fn pc_history(&self) -> impl Iterator<Item = WordType> {
+        self.pc_history.iter().copied()
     }
 
     pub fn breakpoints(&self) -> &BTreeMap<Breakpoint, I::RawInstr> {
@@ -150,25 +169,10 @@ impl<I: ISATypes> Debugger<I> {
     }
 
     pub fn step(&mut self) -> Result<DebugEvent, DebugError<I>> {
-        if self.on_breakpoint() {
-            self.step_over_breakpoint()?;
-            Ok(DebugEvent::StepCompleted { pc: self.read_pc() })
-        } else {
-            match self.target.step() {
-                Ok(()) => Ok(DebugEvent::StepCompleted { pc: self.read_pc() }),
-                Err(e) => {
-                    if e.is_breakpoint() {
-                        self.place_origin_on_break();
-                        Ok(DebugEvent::BreakpointHit { pc: self.read_pc() })
-                    } else {
-                        Err(DebugError::TargetException(e))
-                    }
-                }
-            }
-        }
+        self.continue_until_step(1)
     }
 
-    pub fn continue_until(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError<I>> {
+    pub fn continue_until_step(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError<I>> {
         let mut rest = max_steps;
         if self.on_breakpoint() {
             self.step_over_breakpoint()?;
@@ -179,6 +183,8 @@ impl<I: ISATypes> Debugger<I> {
             if rest == 0 {
                 return Ok(DebugEvent::StepCompleted { pc: self.read_pc() });
             }
+
+            self.push_history();
             match self.target.step() {
                 Ok(()) => {
                     rest -= 1;
@@ -196,7 +202,7 @@ impl<I: ISATypes> Debugger<I> {
     }
 
     pub fn continue_run(&mut self) -> Result<DebugEvent, DebugError<I>> {
-        self.continue_until(u64::MAX)
+        self.continue_until_step(u64::MAX)
     }
 
     pub fn read_reg(&self, idx: u8) -> WordType {
@@ -285,7 +291,7 @@ mod test {
             0x02520333
         );
 
-        debugger.continue_until(2).unwrap();
+        debugger.continue_until_step(2).unwrap();
         assert_eq!(debugger.read_pc(), BASE_ADDR + 12);
         assert_eq!(
             debugger.read_mem::<u32>(BASE_ADDR + 12).unwrap(),

@@ -35,8 +35,13 @@ enum Cli {
     #[command(subcommand)]
     Undisplay(PrintCmd),
 
+    /// List assembly around current position.
     #[command(alias = "l")]
     List,
+
+    /// Show history PC values.
+    #[command(alias = "his")]
+    History,
 
     /// Step instruction
     #[command(alias = "s")]
@@ -155,7 +160,7 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
 
     fn handle_continue(&mut self, steps: u64) -> Result<(), String> {
         CliCoordinator::global().resume_uart();
-        let rst = self.dbg.continue_until(steps);
+        let rst = self.dbg.continue_until_step(steps);
         CliCoordinator::global().pause_uart();
 
         match rst {
@@ -220,6 +225,12 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 let csr_addr = parse_csr(&addr)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::CSR(csr_addr));
+            }
+
+            Cli::History => {
+                for (idx, pc) in self.dbg.pc_history().enumerate() {
+                    println!("{}: pc = {}", format_idx(idx), format_addr(pc));
+                }
             }
 
             Cli::List => {
