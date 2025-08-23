@@ -13,28 +13,41 @@ QEMU := qemu-system-$(ARCH)
 TARGET ?= main
 
 TARGETS := main fib prime matrix_mul io_bench
+TARGET_ELFS := $(patsubst %,$(BIN)/%.elf,$(TARGETS))
 
-DEFAULT_TARGET: build_all
+LIBS := io log boot
+LIBS_OBJ := $(patsubst %,$(OBJ)/%.o,$(LIBS))
+
+# proctect intermediate file.
+.PRECIOUS: $(OBJ)/%.o
 
 .PHONY: build_lib build run clean build_all
+DEFAULT_TARGET: build_all
 
-build_all:
-	@for t in $(TARGETS); do \
-		$(MAKE) -s build TARGET=$$t || exit $$?; \
-	done
+build_all: $(TARGET_ELFS)
 
-
+# default lib file.
 $(OBJ)/%.o: $(LIB)/%.c
 	@ mkdir $(OBJ) $(BIN) -p
 	$(CC) $(C_FLAG) -c $^ -o $@
 
-build_lib: $(OBJ)/io.o $(OBJ)/log.o
-
-build: $(SRC)/boot.S $(SRC)/$(TARGET).c linker.ld build_lib
+# boot.o
+$(OBJ)/boot.o: $(SRC)/boot.S
 	@ mkdir -p $(OBJ) $(BIN)
-	@ $(CC) $(C_FLAG) -c $(SRC)/$(TARGET).c -o $(OBJ)/$(TARGET).o
-	@ $(CC) $(C_FLAG) -c $(SRC)/boot.S -o $(OBJ)/boot.o
-	@ $(LD) $(LD_FLAG) -T linker.ld -o $(BIN)/$(TARGET).elf $(OBJ)/$(TARGET).o $(OBJ)/boot.o $(OBJ)/io.o $(OBJ)/log.o
+	$(CC) $(C_FLAG) -c $< -o $@
+
+
+build: $(LIBS_OBJ) $(BIN)/$(TARGET).elf 
+
+$(BIN)/%.elf: $(OBJ)/%.o $(LIBS_OBJ) linker.ld
+	@ mkdir -p $(OBJ) $(BIN)
+	$(LD) $(LD_FLAG) -T linker.ld -o $@ $(filter %.o,$^)
+	
+# default .c file
+$(OBJ)/%.o: $(SRC)/%.c
+	@ mkdir -p $(OBJ) $(BIN)
+	$(CC) $(C_FLAG) -c $< -o $@
+
 
 run: build
 	$(QEMU) -machine virt -bios $(BIN)/$(TARGET).elf -serial stdio

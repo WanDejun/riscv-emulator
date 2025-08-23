@@ -17,17 +17,56 @@ pub mod isa;
 pub mod load;
 
 pub use config::ram_config;
+use lazy_static::lazy_static;
 
 use crate::{
-    device::power_manager::{POWER_OFF_CODE, POWER_STATUS},
+    device::{
+        fast_uart::virtual_io::SerialDestination,
+        power_manager::{POWER_OFF_CODE, POWER_STATUS},
+    },
     isa::riscv::{executor::RV32CPU, trap::Exception, vaddr::VirtAddrManager},
     ram::Ram,
 };
 
-use std::{hint::cold_path, path::Path, sync::atomic::Ordering};
+use std::{
+    hint::cold_path,
+    path::Path,
+    sync::atomic::Ordering,
+    sync::{Mutex, MutexGuard},
+};
 
 pub struct Emulator {
     cpu: RV32CPU,
+}
+
+pub(crate) struct EmulatorConfig {
+    pub(crate) serial_destination: SerialDestination,
+}
+impl EmulatorConfig {
+    pub fn new() -> Self {
+        Self {
+            serial_destination: SerialDestination::Stdio,
+        }
+    }
+}
+lazy_static! {
+    pub(crate) static ref EMULATOR_CONFIG: Mutex<EmulatorConfig> =
+        Mutex::new(EmulatorConfig::new());
+}
+
+pub struct EmulatorConfigurator<'a> {
+    lock: MutexGuard<'a, EmulatorConfig>,
+}
+impl<'a> EmulatorConfigurator<'a> {
+    pub fn new() -> Self {
+        Self {
+            lock: EMULATOR_CONFIG.lock().unwrap(),
+        }
+    }
+    pub fn set_serial_destination(mut self, new_destination: SerialDestination) -> Self {
+        self.lock.serial_destination = new_destination;
+        self
+    }
 }
 
 impl Emulator {

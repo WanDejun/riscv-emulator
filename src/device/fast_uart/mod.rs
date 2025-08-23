@@ -7,6 +7,7 @@
 //! - [ ] Different length of data bits;
 
 #![allow(unused)]
+pub mod virtual_io;
 
 use std::{
     cell::RefCell,
@@ -18,15 +19,23 @@ use std::{
 };
 
 use crossbeam::channel::{self, Receiver, Sender};
-use crossterm::event::{self, Event, KeyCode};
-#[cfg(not(test))]
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
 use log::error;
 
+#[cfg(test)]
+use crate::EmulatorConfigurator;
 use crate::{
+    EMULATOR_CONFIG,
     cli_coordinator::CliCoordinator,
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError, config::UART_DEFAULT_DIV},
+    device::{
+        DeviceTrait, Mem, MemError,
+        config::UART_DEFAULT_DIV,
+        fast_uart::virtual_io::{SIMULATION_IO, SerialDestination, spawn_io_thread},
+    },
     handle_trait::HandleTrait,
     isa::riscv::trap::Exception,
     utils::{clear_bit, read_bit, set_bit},
@@ -131,6 +140,7 @@ pub struct FastUart16550 {
     reg_mut_ptr: [*mut u8; 8],
     reg_lcr_ptr: [*mut u8; 8],
 
+    input_tx: Sender<u8>,
     input_rx: Receiver<u8>,
     output_tx: Sender<u8>,
     output_rx: Receiver<u8>,
@@ -173,10 +183,16 @@ impl FastUart16550 {
 
         let (input_tx, input_rx) = channel::unbounded();
         let (output_tx, output_rx) = channel::unbounded();
-
         let sync_lock = Arc::new(AtomicBool::new(false));
 
-        spawn_io_thread(input_tx, output_rx.clone(), sync_lock.clone());
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
+            spawn_io_thread(input_tx.clone(), output_rx.clone(), sync_lock.clone());
+        } else {
+            SIMULATION_IO
+                .lock()
+                .unwrap()
+                .set(Some((input_tx.clone(), output_rx.clone())));
+        }
 
         drop(reg_ref);
         Self {
@@ -184,11 +200,38 @@ impl FastUart16550 {
             reg_ptr,
             reg_mut_ptr,
             reg_lcr_ptr,
+            input_tx,
             input_rx,
             output_tx,
             output_rx,
             sync_lock,
         }
+    }
+
+    #[cfg(test)]
+    /// ## TEST ONLY
+    /// Do not enable terminal output for test, uart will send output data here.
+    /// You can use the function to receive output data for assert.
+    pub fn read_output_data(&mut self) -> Vec<u8> {
+        let mut datas = Vec::new();
+        while let Ok(data) = self.output_rx.try_recv() {
+            datas.push(data);
+        }
+
+        datas
+    }
+
+    /// ## TEST ONLY
+    /// Do not enable terminal input for test, uart will send output data here.
+    /// You can use the function to receive output data for assert.
+    #[cfg(test)]
+    pub fn send_input_data(&mut self) -> Vec<u8> {
+        let mut datas = Vec::new();
+        while let Ok(data) = self.output_rx.try_recv() {
+            datas.push(data);
+        }
+
+        datas
     }
 
     #[allow(non_snake_case)]
@@ -210,8 +253,11 @@ impl Mem for FastUart16550 {
         T: crate::utils::UnsignedInteger,
     {
         // check terminal input.
-        if let Ok(data) = self.input_rx.try_recv() {
-            self.write_RBR(data)
+        if !read_bit(&mut self.reg.borrow_mut().LSR, 0) {
+            // receive data ready.
+            if let Ok(data) = self.input_rx.try_recv() {
+                self.write_RBR(data)
+            }
         }
 
         let inner_addr: usize = inner_addr as usize;
@@ -292,8 +338,9 @@ impl DeviceTrait for FastUart16550 {
 pub struct FastUart16550Handle {}
 impl FastUart16550Handle {
     pub fn new() -> Self {
-        #[cfg(not(test))]
-        enable_raw_mode().unwrap();
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
+            enable_raw_mode().unwrap();
+        }
 
         Self {}
     }
@@ -301,64 +348,8 @@ impl FastUart16550Handle {
 impl HandleTrait for FastUart16550Handle {}
 impl Drop for FastUart16550Handle {
     fn drop(&mut self) {
-        #[cfg(not(test))]
         disable_raw_mode().unwrap(); // 恢复终端原始状态
     }
-}
-
-fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>, sync_lock: Arc<AtomicBool>) {
-    thread::spawn(move || {
-        loop {
-            CliCoordinator::global().confirm_pause_and_wait();
-
-            // output epoll
-            loop {
-                // lock
-                if !sync_lock.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                    break;
-                }
-            }
-            while let Ok(v) = output_rx.try_recv() {
-                print!("{}", v as char);
-            }
-            io::stdout().flush().unwrap();
-            sync_lock.store(false, std::sync::atomic::Ordering::Release);
-
-            // input epoll
-            if event::poll(Duration::from_millis(20)).unwrap() {
-                if let Event::Key(k) = event::read().unwrap() {
-                    match k.code {
-                        KeyCode::Char(c) => input_tx.send(c as u8).unwrap(),
-                        KeyCode::Tab => input_tx.send(b'\t').unwrap(),
-                        KeyCode::Backspace => input_tx.send(0x08).unwrap(),
-                        KeyCode::Enter => input_tx.send(b'\r').unwrap(),
-                        KeyCode::Up => {
-                            for v in [0x1B, 0x5B, 0x41] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Down => {
-                            for v in [0x1B, 0x5B, 0x42] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Left => {
-                            for v in [0x1B, 0x5B, 0x43] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Right => {
-                            for v in [0x1B, 0x5B, 0x44] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    });
 }
 
 #[cfg(test)]
@@ -366,12 +357,60 @@ mod test {
     use super::*;
 
     #[test]
-    #[ignore = "io test"]
     fn output_test() {
+        EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test); // set test mode
         let mut uart = FastUart16550::new();
         let _handler = FastUart16550Handle::new();
 
         uart.write(0, 'a' as u8);
+        // uart.sync();
+
+        let receive = SIMULATION_IO.lock().unwrap().receive_output_data();
+        assert_eq!(receive.len(), 1);
+        assert_eq!(receive[0], 'a' as u8);
+    }
+
+    #[test]
+    fn input_test() {
+        EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test);
+        let mut uart = FastUart16550::new();
+        let _handler = FastUart16550Handle::new();
+
+        SIMULATION_IO
+            .lock()
+            .unwrap()
+            .send_input_data(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
+
+        assert_eq!(uart.read::<u8>(5).unwrap() & 1u8, 1);
+        assert_eq!(uart.read::<u8>(0).unwrap(), 'a' as u8);
+        assert_eq!(uart.read::<u8>(0).unwrap(), 'b' as u8);
+        assert_eq!(uart.read::<u8>(0).unwrap(), 'c' as u8);
+        assert_eq!(uart.read::<u8>(0).unwrap(), 'd' as u8);
+        assert_eq!(uart.read::<u8>(5).unwrap() & 1u8, 0);
+    }
+
+    #[test]
+    #[ignore = "terminal_io test"]
+    fn cli_output_test() {
+        let mut uart = FastUart16550::new();
+        let _handler = FastUart16550Handle::new();
+        uart.write(0, 'a' as u8);
+        uart.sync();
+    }
+
+    #[test]
+    #[ignore = "terminal_io test"]
+    fn cli_input_test() {
+        let mut uart = FastUart16550::new();
+        let _handler = FastUart16550Handle::new();
+
+        loop {
+            if read_bit(&uart.read::<u8>(5).unwrap(), 0) {
+                break;
+            }
+        }
+        let data = uart.read::<u8>(0).unwrap();
+        uart.write(0, data);
 
         uart.sync();
     }

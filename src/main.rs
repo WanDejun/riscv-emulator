@@ -11,7 +11,11 @@ use std::time::Instant;
 
 use clap::Parser;
 use lazy_static::lazy_static;
-use riscv_emulator::{Emulator, device::peripheral_init, isa::riscv::RiscvTypes};
+use riscv_emulator::{
+    Emulator,
+    device::{fast_uart::virtual_io::SerialDestination, peripheral_init},
+    isa::riscv::RiscvTypes,
+};
 
 use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
 
@@ -33,14 +37,20 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
+    /// Switch log level.
     #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Info)]
     log_level: LogLevel,
+
+    /// Choose serial io destination.
+    #[arg(value_enum, long = "serial", default_value_t = SerialDestination::Stdio)]
+    serial_destination: SerialDestination,
 }
 
 fn main() {
     display_welcome_message();
     let _logger_handle = logging::init(cli_args.log_level);
     let _init_handle = peripheral_init();
+    // EmulatorConfigurator::new().set_serial_destination(cli_args.serial_destination);
 
     println!(
         "path = {:?}, debug = {}, verbose = {}.\r",
