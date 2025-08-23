@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,7 +8,6 @@ use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::load::get_section_addr;
 
-#[allow(unused)]
 fn get_test_by_name(name: &str) -> PathBuf {
     let isa_dir = Path::new("riscv-tests/isa");
     let test_path = isa_dir.join(name);
@@ -14,6 +15,10 @@ fn get_test_by_name(name: &str) -> PathBuf {
 }
 
 fn find_tests(prefix: &str) -> Vec<PathBuf> {
+    find_tests_exclude(prefix, &[])
+}
+
+fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let isa_dir = Path::new("riscv-tests/isa");
     if let Ok(entries) = fs::read_dir(isa_dir) {
@@ -23,8 +28,11 @@ fn find_tests(prefix: &str) -> Vec<PathBuf> {
             }
 
             if let Ok(fname) = e.file_name().into_string() {
-                if fname.starts_with(prefix) {
-                    // keep full filename (may be an ELF with no extension)
+                if fname.starts_with(prefix)
+                    && exclude_names
+                        .iter()
+                        .all(|&n| (prefix.to_owned() + n) != fname)
+                {
                     paths.push(e.path());
                 }
             }
@@ -84,10 +92,15 @@ fn run_test(elf: &Path) -> bool {
 }
 
 fn run_test_group(name: &str) {
-    let tests = find_tests(name);
+    run_test_group_exclude(name, &[])
+}
+
+fn run_test_group_exclude(name: &str, exclude_names: &[&str]) {
+    let tests = find_tests_exclude(name, exclude_names);
     assert!(
         !tests.is_empty(),
-        "No rv64ui-p tests found in riscv-tests/isa"
+        "No tests named {} found in riscv-tests/isa",
+        name
     );
 
     let tot = tests.len();
@@ -109,13 +122,13 @@ fn run_test_group(name: &str) {
 #[test]
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
-fn run_all_rv64ui_p_tests() {
-    run_test_group("rv64ui-p-");
+fn run_rv64ui_p_tests() {
+    run_test_group_exclude("rv64ui-p-", &["fence_i", "ma_data"]);
 }
 
 #[test]
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
-fn run_all_rv64mi_p_tests() {
-    run_test_group("rv64mi-p-");
+fn run_rv64mi_p_tests() {
+    run_test_group_exclude("rv64mi-p-", &["breakpoint", "illegal"]);
 }

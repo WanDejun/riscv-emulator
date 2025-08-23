@@ -1,7 +1,12 @@
 use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
-    isa::riscv::{csr_reg::CsrReg, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception},
+    isa::riscv::{
+        csr_reg::{CsrReg, csr_index},
+        executor::RV32CPU,
+        instruction::RVInstrInfo,
+        trap::Exception,
+    },
     utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32},
 };
 
@@ -85,7 +90,10 @@ where
                 }
                 cpu.reg_file.write(rd, data);
             }
-            Err(err) => return Err(Exception::from_memory_err(err)),
+            Err(err) => {
+                cpu.csr.write(csr_index::mtval, addr);
+                return Err(Exception::from_memory_err(err));
+            }
         }
     } else {
         std::unreachable!();
@@ -108,6 +116,7 @@ where
 
         let ret = cpu.memory.write(addr, T::truncate_from(val2));
         if let Err(err) = ret {
+            cpu.csr.write(csr_index::mtval, addr);
             return Err(Exception::from_memory_err(err));
         }
     } else {
