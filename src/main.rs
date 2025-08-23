@@ -23,17 +23,28 @@ lazy_static! {
     static ref cli_args: Args = Args::parse();
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum)]
+enum TargetFormat {
+    Auto,
+    Elf,
+    Bin,
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Path of the target executable file(.elf/.bin)
+    /// Path of the target executable file (elf/bin).
     path: std::path::PathBuf,
 
-    /// Enable debugger REPL
+    /// Specify target executable file format.
+    #[arg(value_enum, short, long, default_value_t = TargetFormat::Auto)]
+    format: TargetFormat,
+
+    /// Enable debugger REPL.
     #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
 
-    /// Enable to print more details
+    /// Enable to print more details.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
@@ -57,12 +68,18 @@ fn main() {
         cli_args.path, cli_args.debug, cli_args.verbose
     );
 
-    let mut emulator = if cli_args.path.extension() == Some("elf".as_ref()) {
-        println!("ELF file detected\r");
-        Emulator::from_elf(&cli_args.path)
-    } else {
-        println!("Non-ELF file detected\r");
-        todo!();
+    let mut emulator = match (
+        cli_args.format,
+        cli_args.path.extension() == Some("elf".as_ref()),
+    ) {
+        (TargetFormat::Elf, _) | (TargetFormat::Auto, true) => {
+            println!("ELF file detected\r");
+            Emulator::from_elf(&cli_args.path)
+        }
+        _ => {
+            println!("Non-ELF file detected\r");
+            todo!();
+        }
     };
 
     if cli_args.debug {
