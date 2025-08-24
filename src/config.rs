@@ -43,6 +43,7 @@ pub mod arch_config {
                     signed_word: $signed_word:ty,
                     endian: $endian:path,
                     reg_name: $reg_name: expr,
+                    float_reg_name: $float_reg_name: expr,
                 }
             ),* $(,)?
         ) => {
@@ -67,6 +68,12 @@ pub mod arch_config {
 
                 #[cfg(feature = $feature)]
                 pub const REG_NAME: [&str; REGFILE_CNT] = $reg_name;
+
+                #[cfg(feature = $feature)]
+                pub const FLOAT_REGFILE_CNT: usize = $float_reg_name.len();
+
+                #[cfg(feature = $feature)]
+                pub const FLOAT_REG_NAME: [&str; FLOAT_REGFILE_CNT] = $float_reg_name;
             )*
         };
     }
@@ -77,19 +84,21 @@ pub mod arch_config {
             arch: Arch::RISCV32,
             word: u32,
             signed_word: i32,
-            endian: Endianness::Big,
+            endian: Endianness::Little,
             reg_name: gen_reg_name_list!(   "zero";     "ra";           "sp";       "gp";
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
                                             "a", 0, 7;  "s", 2, 11;     "t", 3, 6),
+            float_reg_name: gen_reg_name_list!("ft", 0, 7; "fs", 0, 1; "fa", 0, 7; "fs", 2, 11; "ft", 8, 11),
         },
         @item "riscv64" => {
             arch: Arch::RISCV64,
             word: u64,
             signed_word: i64,
-            endian: Endianness::Big,
+            endian: Endianness::Little,
             reg_name: gen_reg_name_list!(   "zero";     "ra";   "sp";   "gp";
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
                                             "a", 0, 7;  "s", 2, 11;     "t", 3, 6),
+            float_reg_name: gen_reg_name_list!("ft", 0, 7; "fs", 0, 1; "fa", 0, 7; "fs", 2, 11; "ft", 8, 11),
         }
     }
 }

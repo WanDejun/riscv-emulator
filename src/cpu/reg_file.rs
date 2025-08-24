@@ -78,21 +78,3 @@ impl RegFile {
         self.data[id as usize] = data
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::Rng;
-
-    #[test]
-    fn test_fmt_output() {
-        let mut rng = rand::rng();
-        let mut reg = RegFile::new();
-
-        for i in 0..32 {
-            reg[i] = rng.random();
-        }
-
-        println!("reg = {:#?}", reg);
-    }
-}

@@ -4,6 +4,7 @@ use crate::{config::arch_config::WordType, device::MemError, utils::UnsignedInte
 
 pub mod icache;
 pub mod riscv;
+
 mod utils;
 
 pub trait DebugTarget<I: ISATypes> {
