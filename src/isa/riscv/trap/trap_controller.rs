@@ -8,7 +8,7 @@ use crate::{
                 csr_macro::{Mstatus, Mtvec},
             },
             executor::RV32CPU,
-            trap::Trap,
+            trap::{Exception, Trap},
         },
     },
 };
@@ -20,10 +20,24 @@ impl TrapController {
         Self {}
     }
 
-    pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, pc: WordType, trap_value: WordType) {
+    pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr.write(csr_index::mcause, cause.into());
-        cpu.csr.write(csr_index::mepc, pc);
-        cpu.csr.write(csr_index::mtval, trap_value);
+        cpu.csr.write(csr_index::mepc, cpu.pc);
+
+        if matches!(
+            cause, // TODO: Do we need to handle other exceptions?
+            Trap::Exception(
+                Exception::LoadMisaligned
+                    | Exception::StoreMisaligned
+                    | Exception::LoadFault
+                    | Exception::StoreFault
+            )
+        ) == false
+        {
+            // Addr has been stored to mtval in `exec_load`/`exec_store` on mem error
+            cpu.csr.write(csr_index::mtval, trap_value);
+        }
+
         let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
         mstatus.set_mpie(mstatus.get_mie());
         mstatus.set_mie(0);

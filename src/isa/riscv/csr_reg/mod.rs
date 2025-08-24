@@ -82,6 +82,8 @@ impl CsrRegFile {
     pub fn write(&mut self, addr: WordType, data: WordType) {
         if let Some(val) = self.table.get_mut(&addr) {
             *val = data
+        } else {
+            // TODO: Raise error
         }
     }
 

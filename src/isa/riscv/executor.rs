@@ -87,8 +87,7 @@ impl RV32CPU {
                 TrapController::send_trap_signal(
                     self,
                     Trap::Exception(Exception::from_instr_fetch_err(err)),
-                    self.pc,
-                    self.pc,
+                    0,
                 );
                 return Ok(());
             }
@@ -101,8 +100,7 @@ impl RV32CPU {
                 TrapController::send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
-                    self.pc,
-                    self.pc,
+                    instr_bytes as WordType,
                 );
                 return Ok(());
             }
@@ -119,7 +117,7 @@ impl RV32CPU {
         match excute_result {
             Err(Exception::Breakpoint) => return excute_result,
             Err(nr) => {
-                TrapController::send_trap_signal(self, Trap::Exception(nr), self.pc, self.pc);
+                TrapController::send_trap_signal(self, Trap::Exception(nr), 0);
                 return Ok(());
             }
             Ok(()) => {} // there is nothing to do.
