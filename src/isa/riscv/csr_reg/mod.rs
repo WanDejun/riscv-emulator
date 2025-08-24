@@ -87,6 +87,7 @@ impl CsrRegFile {
         }
     }
 
+    /// ONLY used in debugger. Read & write without side-effect.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
         if let Some(val) = self.table.get_mut(&addr) {
             let old = *val;

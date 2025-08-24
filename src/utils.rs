@@ -25,7 +25,7 @@ where
 }
 
 pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
-    let sign_bit = 64 - from_bits;
+    let sign_bit = XLEN as u32 - from_bits;
     ((value << sign_bit) as SignedWordType >> sign_bit) as WordType
 }
 

@@ -103,7 +103,7 @@ impl Mem for Ram {
     }
 }
 
-// there is nothing todo.
+// there is nothing to do.
 impl DeviceTrait for Ram {
     fn sync(&mut self) {}
 }

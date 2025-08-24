@@ -275,7 +275,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSignedUnsigned {
 
         if lhs_neg {
             // 修正符号：高位 = ~(高位) + carry ？ 对应RISC-V mulh_su规则
-            // RISC-V mulh_su: 高位 = -(abs(lhs)*rhs)>>64
+            // RISC-V mulh_su: 高位 = -(abs(lhs)*rhs)>>XLEN
             let tmp = b.wrapping_mul(lhs_abs as WordType);
             let result = (!high).wrapping_add((tmp != 0) as WordType);
             Ok(result)
@@ -371,7 +371,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
 pub(super) struct ExecSLL {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_shl(b as u32)) // TODO: Do we need to check for shift amount and throw Invalid Instruction?
+        Ok(a.wrapping_shl(b as u32))
     }
 }
 

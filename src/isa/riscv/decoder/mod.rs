@@ -49,14 +49,12 @@ impl Decoder {
 impl DecoderTrait<RiscvTypes> for Decoder {
     fn from_isa(instrs: &[RV32Desc]) -> Self {
         Self {
-            // TODO: Unnecessary copy happens in funct_decoder::from_isa
             funct3_decoder: funct_decoder::Decoder::from_isa(instrs),
             mask_decoder: mask_decoder::MaskDecoder::from_isa(instrs),
         }
     }
 
     fn decode(&self, instr: u32) -> Option<DecodeInstr> {
-        // TODO: Should we call `decode_info` here instead of in `mask_decoder` and `funct3_decoder`?
         None.or_else(|| self.mask_decoder.decode(instr))
             .or_else(|| self.funct3_decoder.decode(instr))
     }

@@ -266,19 +266,4 @@ mod test {
         // assert_eq!((mmio.debug_uart.uart.read::<u8>(5).unwrap() & 0x01), 0);
         // assert_eq!(mmio.debug_uart.receive(), Some('a' as u8));
     }
-
-    #[test]
-    #[ignore = "TODO: need to add FastUart16550's API for test"]
-    fn mmio_stdio_test() {
-        let _handles = peripheral_init();
-        let mut mmio = MemoryMapIO::new();
-        // mmio.debug_uart.send('x' as u8);
-        loop {
-            // mmio.step();
-            if (mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x01) != 0 {
-                assert_eq!(mmio.read::<u8>(UART1_ADDR + 0).unwrap(), 'x' as u8);
-                break;
-            }
-        }
-    }
 }
