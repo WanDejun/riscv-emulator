@@ -17,7 +17,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum DebugEvent {
-    StepCompleted { pc: WordType },
+    StepCompleted { pc: WordType }, // TODO: Remove useless arg `pc` here.
     BreakpointHit { pc: WordType },
 }
 
@@ -25,6 +25,18 @@ pub enum DebugEvent {
 pub enum DebugError<I: ISATypes> {
     #[error("target exception: {0:?}")]
     TargetException(I::StepException),
+
+    #[error("memory error: {0:?}")]
+    MemoryError(MemError),
+
+    #[error("CSR {0:?} not exist")]
+    CSRNotExist(WordType),
+}
+
+impl<I: ISATypes> From<MemError> for DebugError<I> {
+    fn from(e: MemError) -> Self {
+        DebugError::MemoryError(e)
+    }
 }
 
 impl DebugTarget<RiscvTypes> for RV32CPU {
@@ -122,22 +134,26 @@ impl<I: ISATypes> Debugger<I> {
         &self.breakpoints
     }
 
-    pub fn set_breakpoint(&mut self, addr: WordType) {
+    pub fn set_breakpoint(&mut self, addr: WordType) -> Result<(), DebugError<I>> {
         let breakpoint = Breakpoint::new(addr);
         if self.breakpoints.contains_key(&breakpoint) {
-            return;
+            return Ok(());
         }
-        let orig: I::RawInstr = self.target.read_instr(addr).unwrap();
+        let orig: I::RawInstr = self.target.read_instr(addr)?;
         self.breakpoints.insert(breakpoint, orig);
         if addr != self.read_pc() {
-            self.target.write_back_instr(I::EBREAK, addr).unwrap();
+            self.target.write_back_instr(I::EBREAK, addr)?;
         }
+
+        Ok(())
     }
 
-    pub fn clear_breakpoint(&mut self, pc: WordType) {
+    pub fn clear_breakpoint(&mut self, pc: WordType) -> Result<(), DebugError<I>> {
         if let Some(orig) = self.breakpoints.remove(&Breakpoint { pc }) {
-            self.target.write_back_instr(orig, pc).unwrap();
+            self.target.write_back_instr(orig, pc)?;
         }
+
+        Ok(())
     }
 
     fn on_breakpoint(&mut self) -> bool {
@@ -145,23 +161,25 @@ impl<I: ISATypes> Debugger<I> {
             .contains_key(&Breakpoint::new(self.read_pc()))
     }
 
-    fn place_origin_on_break(&mut self) {
+    fn place_origin_on_break(&mut self) -> Result<(), DebugError<I>> {
         let pc = self.read_pc();
         log::debug!("Placing origin instruction on breakpoint at {:08x}", pc);
 
         // We cannot panic here because the original program could contains "ebreak"
         if let Some(instr) = self.breakpoints.get(&Breakpoint::new(pc)) {
-            self.target.write_back_instr(*instr, pc).unwrap();
+            self.target.write_back_instr(*instr, pc)?;
         } else {
             log::debug!("No original instruction found for breakpoint at {:08x}", pc);
         }
+
+        Ok(())
     }
 
     fn step_over_breakpoint(&mut self) -> Result<(), DebugError<I>> {
         let pc = self.read_pc();
         match self.target.step() {
             Ok(()) => {
-                self.target.write_back_instr(I::EBREAK, pc).unwrap();
+                self.target.write_back_instr(I::EBREAK, pc)?;
                 Ok(())
             }
             Err(e) => Err(DebugError::TargetException(e)),
@@ -191,7 +209,7 @@ impl<I: ISATypes> Debugger<I> {
                 }
                 Err(e) => {
                     if e.is_breakpoint() {
-                        self.place_origin_on_break();
+                        self.place_origin_on_break()?;
                         return Ok(DebugEvent::BreakpointHit { pc: self.read_pc() });
                     } else {
                         return Err(DebugError::TargetException(e));
@@ -245,13 +263,15 @@ impl<I: ISATypes> Debugger<I> {
         self.target.debug_csr(addr, None)
     }
 
-    pub fn write_csr(&mut self, addr: WordType, data: WordType) {
-        self.target.debug_csr(addr, Some(data)).unwrap();
+    pub fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), DebugError<I>> {
+        self.target
+            .debug_csr(addr, Some(data))
+            .ok_or(DebugError::<I>::CSRNotExist(addr))?;
+        Ok(())
     }
 
-    pub fn decoded_info(&mut self, addr: WordType) -> Option<I::DecodeRst> {
-        let instr = self.read_origin_instr(addr).ok()?;
-        self.target.decoded_info(instr)
+    pub fn decoded_info(&mut self, raw: I::RawInstr) -> Option<I::DecodeRst> {
+        self.target.decoded_info(raw)
     }
 }
 
@@ -275,7 +295,7 @@ mod test {
             .build();
 
         let mut debugger = Debugger::<RiscvTypes>::new(cpu);
-        debugger.set_breakpoint(BASE_ADDR + 4);
+        debugger.set_breakpoint(BASE_ADDR + 4).unwrap();
         debugger.continue_run().unwrap();
 
         assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
@@ -285,7 +305,7 @@ mod test {
         debugger.step().unwrap();
         assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
 
-        debugger.set_breakpoint(BASE_ADDR + 12);
+        debugger.set_breakpoint(BASE_ADDR + 12).unwrap();
         assert_eq!(
             debugger.read_origin_instr(BASE_ADDR + 12).unwrap(),
             0x02520333
@@ -309,7 +329,7 @@ mod test {
             .build();
 
         let mut debugger = Debugger::<RiscvTypes>::new(cpu);
-        debugger.set_breakpoint(BASE_ADDR);
+        debugger.set_breakpoint(BASE_ADDR).unwrap();
         assert!(debugger.on_breakpoint());
 
         debugger.step().unwrap();

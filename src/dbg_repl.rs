@@ -142,7 +142,7 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                             }
                         }
                         Err(err) => {
-                            eprintln!("Error occurred while processing command: {}", err);
+                            eprintln!("Error occurred: {}", err);
                         }
                     }
                 }
@@ -165,12 +165,31 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
 
         match rst {
             Ok(DebugEvent::StepCompleted { pc }) => {
-                println!("stepped, pc = {}", format_addr(pc));
+                println!(
+                    "stepped, pc = {}: {}",
+                    format_addr(pc),
+                    self.asm_formatted_at(pc)
+                );
             }
             Ok(DebugEvent::BreakpointHit { pc }) => {
-                println!("breakpoint hit at pc = {}", format_addr(pc));
+                println!(
+                    "breakpoint hit at pc = {}: {}",
+                    format_addr(pc),
+                    self.asm_formatted_at(pc)
+                );
             }
             Err(e) => return Err(format!("step failed: {}", e)),
+        }
+
+        // Showing `display` items.
+        for idx in 0..self.watch_list.len() {
+            let item = self.watch_list[idx]; // bypass borrow check by index and copy
+            match item {
+                PrintObject::Pc => self.print_pc(),
+                PrintObject::Reg(idx) => self.print_reg(idx)?,
+                PrintObject::Mem(addr, len) => self.print_mem(addr, len),
+                PrintObject::CSR(addr) => self.print_csr(addr),
+            }
         }
 
         Ok(())
@@ -228,8 +247,15 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             }
 
             Cli::History => {
-                for (idx, pc) in self.dbg.pc_history().enumerate() {
-                    println!("{}: pc = {}", format_idx(idx), format_addr(pc));
+                // To bypass borrow check.
+                let history = self.dbg.pc_history().collect::<Vec<WordType>>();
+                for (idx, pc) in history.into_iter().enumerate() {
+                    println!(
+                        "{}: pc = {}, {}",
+                        format_idx(idx),
+                        format_addr(pc),
+                        self.asm_formatted_at(pc)
+                    );
                 }
             }
 
@@ -248,33 +274,33 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                         print!("  ");
                     }
 
-                    let raw = self.dbg.read_origin_instr(curr_addr);
-
-                    if let Err(_) = raw {
-                        println!(
-                            "{}: {}",
-                            format_addr(curr_addr),
-                            palette.invalid("<invalid>")
-                        );
-                        curr_addr += 4; // TODO: How long should i go if it's invalid?
-                        continue;
-                    }
-
-                    let raw = unsafe { raw.unwrap_unchecked() };
-                    let raw_formatted = <I as AsmFormattable<I>>::format_raw(raw);
-                    let asm =
-                        <I as AsmFormattable<I>>::format_asm(self.dbg.decoded_info(curr_addr));
+                    let raw = self.dbg.read_origin_instr(curr_addr).ok();
+                    let (raw_formatted, asm) = self.raw_and_asm_formatted(raw);
 
                     println!("{}: {} {}", format_addr(curr_addr), raw_formatted, asm);
 
-                    curr_addr += raw.len();
+                    match raw {
+                        Some(raw) => {
+                            curr_addr += raw.len();
+                        }
+                        None => {
+                            curr_addr += 4; // TODO: How long should I go if I failed to read raw instruction? 
+                        }
+                    }
                 }
             }
 
             Cli::Info(InfoCmd::Breakpoints) => {
                 println!("Breakpoints:");
-                for (idx, bp) in self.dbg.breakpoints().keys().enumerate() {
-                    println!("{}: {}", format_idx(idx), format_addr(bp.pc));
+                // TODO: Unnecessary copy to by pass borrow check.
+                let breakpoints: Vec<_> = self.dbg.breakpoints().keys().copied().collect();
+                for (idx, bp) in breakpoints.into_iter().enumerate() {
+                    println!(
+                        "{}: {}, {}",
+                        format_idx(idx),
+                        format_addr(bp.pc),
+                        self.asm_formatted_at(bp.pc),
+                    );
                 }
             }
 
@@ -289,24 +315,22 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             Cli::Breakpoint { delete, addr } => {
                 let pc = parse_word(&addr)?;
                 if delete {
-                    self.dbg.clear_breakpoint(pc);
-                    println!("cleared breakpoint at {}", format_addr(pc));
+                    self.dbg.clear_breakpoint(pc).map_err(|e| e.to_string())?;
+                    println!(
+                        "cleared breakpoint at {}: {}",
+                        format_addr(pc),
+                        self.asm_formatted_at(pc)
+                    );
                 } else {
-                    self.dbg.set_breakpoint(pc);
-                    println!("set breakpoint at {}", format_addr(pc));
+                    self.dbg.set_breakpoint(pc).map_err(|e| e.to_string())?;
+                    println!(
+                        "set breakpoint at {}: {}",
+                        format_addr(pc),
+                        self.asm_formatted_at(pc)
+                    );
                 }
             }
             Cli::Quit => return Ok(true),
-        }
-
-        for idx in 0..self.watch_list.len() {
-            let item = self.watch_list[idx]; // bypass borrow check by index and copy
-            match item {
-                PrintObject::Pc => self.print_pc(),
-                PrintObject::Reg(idx) => self.print_reg(idx)?,
-                PrintObject::Mem(addr, len) => self.print_mem(addr, len),
-                PrintObject::CSR(addr) => self.print_csr(addr),
-            }
         }
 
         Ok(false)
@@ -369,6 +393,29 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             .read_mem::<u32>(addr)
             .map(|v| format!("0x{:08x}", v))
             .unwrap_or("<invalid>".into())
+    }
+
+    fn asm_formatted_at(&mut self, addr: WordType) -> impl std::fmt::Display {
+        let raw = self.dbg.read_origin_instr(addr).ok();
+        self.raw_and_asm_formatted(raw).1
+    }
+
+    fn decode_info_option(&mut self, raw: Option<I::RawInstr>) -> Option<I::DecodeRst> {
+        if let Some(raw) = raw {
+            self.dbg.decoded_info(raw)
+        } else {
+            None
+        }
+    }
+
+    fn raw_and_asm_formatted(
+        &mut self,
+        raw: Option<I::RawInstr>,
+    ) -> (impl std::fmt::Display, impl std::fmt::Display) {
+        (
+            <I as AsmFormattable<I>>::format_raw(raw),
+            <I as AsmFormattable<I>>::format_asm(self.decode_info_option(raw)),
+        )
     }
 }
 
@@ -466,81 +513,83 @@ fn format_data(data: WordType) -> impl std::fmt::Display {
 }
 
 pub trait AsmFormattable<I: ISATypes> {
-    fn format_raw(raw: I::RawInstr) -> impl std::fmt::Display;
+    fn format_raw(raw: Option<I::RawInstr>) -> impl std::fmt::Display;
     fn format_asm(decode_instr: Option<I::DecodeRst>) -> impl std::fmt::Display;
 }
 
 impl AsmFormattable<RiscvTypes> for RiscvTypes {
-    fn format_raw(raw: u32) -> impl std::fmt::Display {
-        palette.data(&format!("0x{:08x}", raw)).to_string()
+    fn format_raw(raw: Option<u32>) -> impl std::fmt::Display {
+        match raw {
+            Some(raw) => palette.data(&format!("0x{:08x}", raw)).to_string(),
+            None => palette.invalid("<invalid>").to_string(),
+        }
     }
 
     fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
         if decode_instr.is_none() {
             return format!("{}", palette.invalid("<invalid instruction>"));
-        } else {
-            let DecodeInstr(instr, info) = decode_instr.unwrap();
-            match info {
-                RVInstrInfo::I { rd, rs1, imm } => {
-                    format!(
-                        "{} {},{},{} - type I",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
-                        palette.reg(REG_NAME[rs1 as usize]),
-                        palette.data(imm.to_string().as_str()),
-                    )
-                }
+        }
+        let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
+        match info {
+            RVInstrInfo::I { rd, rs1, imm } => {
+                format!(
+                    "{} {},{},{} - type I",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.data(imm.to_string().as_str()),
+                )
+            }
 
-                RVInstrInfo::R { rs1, rs2, rd } => {
-                    format!(
-                        "{} {},{},{} - type R",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
-                        palette.reg(REG_NAME[rs1 as usize]),
-                        palette.reg(REG_NAME[rs2 as usize])
-                    )
-                }
+            RVInstrInfo::R { rs1, rs2, rd } => {
+                format!(
+                    "{} {},{},{} - type R",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize])
+                )
+            }
 
-                RVInstrInfo::B { rs1, rs2, imm } => {
-                    format!(
-                        "{} {},{},{} - type B",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rs1 as usize]),
-                        palette.reg(REG_NAME[rs2 as usize]),
-                        palette.data((imm >> 1).to_string().as_str())
-                    )
-                }
+            RVInstrInfo::B { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{} - type B",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.data((imm >> 1).to_string().as_str())
+                )
+            }
 
-                RVInstrInfo::J { rd, imm } => {
-                    format!(
-                        "{} {},{} - type J",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
-                        palette.data((imm >> 12).to_string().as_str())
-                    )
-                }
+            RVInstrInfo::J { rd, imm } => {
+                format!(
+                    "{} {},{} - type J",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.data((imm >> 12).to_string().as_str())
+                )
+            }
 
-                RVInstrInfo::S { rs1, rs2, imm } => {
-                    format!(
-                        "{} {},{},{} - type S",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rs1 as usize]),
-                        palette.reg(REG_NAME[rs2 as usize]),
-                        palette.data((imm).to_string().as_str())
-                    )
-                }
-                RVInstrInfo::U { rd, imm } => {
-                    format!(
-                        "{} {},{} - type U",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
-                        palette.data((imm >> 12).to_string().as_str())
-                    )
-                }
+            RVInstrInfo::S { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{} - type S",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.data((imm).to_string().as_str())
+                )
+            }
+            RVInstrInfo::U { rd, imm } => {
+                format!(
+                    "{} {},{} - type U",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.data((imm >> 12).to_string().as_str())
+                )
+            }
 
-                RVInstrInfo::None => {
-                    format!("{}", palette.instr(instr.name()))
-                }
+            RVInstrInfo::None => {
+                format!("{}", palette.instr(instr.name()))
             }
         }
     }
