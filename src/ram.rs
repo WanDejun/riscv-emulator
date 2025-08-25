@@ -1,4 +1,5 @@
 use core::panic;
+use std::ops::{Index, IndexMut};
 
 use crate::{
     config::arch_config::WordType,
@@ -12,18 +13,18 @@ pub struct Ram {
     data: Box<[u8]>,
 }
 
-// impl Index<usize> for Ram {
-//     type Output = u8;
-//     fn index(&self, index: usize) -> &Self::Output {
-//         &(self.data[index])
-//     }
-// }
+impl Index<usize> for Ram {
+    type Output = u8;
+    fn index(&self, index: usize) -> &Self::Output {
+        &(self.data[index])
+    }
+}
 
-// impl IndexMut<usize> for Ram {
-//     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-//         &mut (self.data[index])
-//     }
-// }
+impl IndexMut<usize> for Ram {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut (self.data[index])
+    }
+}
 
 impl Ram {
     /// TODO: use random init for better debug.

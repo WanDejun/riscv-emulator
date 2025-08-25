@@ -210,6 +210,13 @@ gen_csr_regfile! {
     // Medeleg, 0x302, 0x00, [
     //     0, XLEN, medeleg,
     // ];
+
+    // TODO: riscv-32 support.
+    Satp, "satp", 0x180, 0x00, [
+        0, 44, ppn,
+        44, 16, asid,
+        60, 4, mode,
+    ];
 }
 
 gen_csr_reg! {

@@ -1,3 +1,7 @@
+pub mod address;
+pub mod config;
+mod page_table;
+
 use crate::{
     device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
     ram::Ram,

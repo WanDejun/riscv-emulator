@@ -24,7 +24,7 @@ use crate::{
         fast_uart::virtual_io::SerialDestination,
         power_manager::{POWER_OFF_CODE, POWER_STATUS},
     },
-    isa::riscv::{executor::RV32CPU, trap::Exception, vaddr::VirtAddrManager},
+    isa::riscv::{executor::RV32CPU, mmu::VirtAddrManager, trap::Exception},
     ram::Ram,
 };
 

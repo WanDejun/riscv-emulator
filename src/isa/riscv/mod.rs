@@ -9,8 +9,8 @@ pub mod debugger;
 pub mod decoder;
 pub mod executor;
 pub mod instruction;
+pub mod mmu;
 pub mod trap;
-pub mod vaddr;
 
 #[derive(Debug)]
 pub struct RiscvTypes;
