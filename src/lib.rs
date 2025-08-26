@@ -6,6 +6,7 @@
 #![feature(likely_unlikely)]
 
 mod cpu;
+mod fpu;
 mod ram;
 mod utils;
 
