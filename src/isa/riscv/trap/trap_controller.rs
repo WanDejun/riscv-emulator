@@ -16,9 +16,9 @@ use crate::{
 pub(in crate::isa::riscv) struct TrapController {}
 
 impl TrapController {
-    pub fn new() -> Self {
-        Self {}
-    }
+    // pub fn new() -> Self {
+    //     Self {}
+    // }
 
     pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr.write(csr_index::mcause, cause.into());

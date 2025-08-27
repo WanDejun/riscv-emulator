@@ -4,6 +4,7 @@
 #![feature(macro_metavar_expr_concat)]
 #![feature(cold_path)]
 #![feature(likely_unlikely)]
+#![feature(unsafe_cell_access)]
 
 mod cpu;
 mod ram;

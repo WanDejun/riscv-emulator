@@ -3,7 +3,7 @@ use std::ops::{Index, IndexMut};
 
 use crate::{
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError},
+    device::MemError,
     ram_config,
     utils::{read_raw_ptr, write_raw_ptr},
 };
@@ -74,10 +74,7 @@ impl Ram {
     // pub fn write_qword(&mut self, data: u64, addr: WordType) {
     //     Self::write::<u64>(self, addr, data)
     // }
-}
-
-impl Mem for Ram {
-    fn read<T>(&mut self, addr: WordType) -> Result<T, MemError> {
+    pub fn read<T>(&self, addr: WordType) -> Result<T, MemError> {
         if addr.gt(&(ram_config::SIZE as WordType)) {
             return Err(MemError::LoadFault);
         }
@@ -90,7 +87,7 @@ impl Mem for Ram {
         }
     }
 
-    fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
+    pub fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
         if addr.gt(&(ram_config::SIZE as WordType)) {
             return Err(MemError::StoreFault);
         }
@@ -104,10 +101,10 @@ impl Mem for Ram {
     }
 }
 
-// there is nothing to do.
-impl DeviceTrait for Ram {
-    fn sync(&mut self) {}
-}
+// // there is nothing to do.
+// impl DeviceTrait for Ram {
+//     fn sync(&mut self) {}
+// }
 
 #[cfg(test)]
 mod tests {
@@ -164,7 +161,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Result::unwrap()")]
     fn test_read_unaligned_address() {
-        let mut r = Ram::new();
+        let r = Ram::new();
         // 这里用一个不对齐的地址试试，比如 addr & align_ilst[size_of_t] != 0 会断言失败
         r.read::<u64>(1).unwrap(); // 如果1不对齐，应该panic
     }

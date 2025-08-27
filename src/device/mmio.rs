@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cell::UnsafeCell, cmp::Ordering, rc::Rc};
 
 use crate::{
     config::arch_config::WordType,
@@ -74,31 +74,28 @@ impl MemoryMapItem {
 /// ```
 pub struct MemoryMapIO {
     // atomic_lock: Rc<AtomicBool>,
-    dev_counter: usize,
     map: Vec<MemoryMapItem>,
+    ram: Rc<UnsafeCell<Ram>>,
 }
 
 impl MemoryMapIO {
     pub fn new() -> Self {
-        Self::from_ram(Ram::new())
+        Self::from_ram(Rc::new(UnsafeCell::new(Ram::new())))
     }
 
-    pub fn from_ram(ram: Ram) -> Self {
-        let ram = Device::Ram(ram);
-
+    pub fn from_ram(ram: Rc<UnsafeCell<Ram>>) -> Self {
         let uart1 = FastUart16550::new();
         let power_manager = Device::PowerManager(PowerManager::new());
 
         let map = vec![
             MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
-            MemoryMapItem::new(ram_config::BASE_ADDR, ram_config::SIZE as u64, ram),
         ];
 
         Self {
             // atomic_lock: Rc::new(AtomicBool::new(false)),
-            dev_counter: 0,
             map,
+            ram,
         }
     }
 
@@ -174,6 +171,14 @@ impl Mem for MemoryMapIO {
         T: crate::utils::UnsignedInteger,
     {
         // let _guard = self.lock();
+        if p_addr >= ram_config::BASE_ADDR {
+            return unsafe {
+                self.ram
+                    .as_mut_unchecked()
+                    .read(p_addr - ram_config::BASE_ADDR)
+            };
+        }
+
         match self.map.binary_search_by(|device| {
             if p_addr < device.start {
                 Ordering::Greater
@@ -200,6 +205,13 @@ impl Mem for MemoryMapIO {
         T: crate::utils::UnsignedInteger,
     {
         // let _guard = self.lock();
+        if p_addr >= ram_config::BASE_ADDR {
+            return unsafe {
+                self.ram
+                    .as_mut_unchecked()
+                    .write(p_addr - ram_config::BASE_ADDR, data)
+            };
+        }
         match self.map.binary_search_by(|device| {
             if p_addr < device.start {
                 Ordering::Greater

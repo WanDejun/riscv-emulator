@@ -185,7 +185,7 @@ impl PageTable {
 
 #[cfg(test)]
 mod test {
-    use crate::{device::Mem, ram_config};
+    use crate::ram_config;
 
     use super::*;
 

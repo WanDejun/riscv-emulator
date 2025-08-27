@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[rustfmt::skip]
-#[allow(non_upper_case_globals)]
+#[allow(non_upper_case_globals, unused)]
 pub(crate) mod csr_index {
     use crate::config::arch_config::WordType;
 

@@ -2,6 +2,8 @@ pub mod address;
 pub mod config;
 mod page_table;
 
+use std::{cell::UnsafeCell, rc::Rc};
+
 use crate::{
     device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
     ram::Ram,
@@ -9,18 +11,19 @@ use crate::{
 
 pub struct VirtAddrManager {
     mmio: MemoryMapIO,
+    ram: Rc<UnsafeCell<Ram>>,
 }
 
 impl VirtAddrManager {
     pub fn new() -> Self {
-        Self {
-            mmio: MemoryMapIO::new(),
-        }
+        Self::from_ram(Ram::new())
     }
 
     pub fn from_ram(ram: Ram) -> Self {
+        let ram_ref = Rc::new(UnsafeCell::new(ram));
         Self {
-            mmio: MemoryMapIO::from_ram(ram),
+            mmio: MemoryMapIO::from_ram(ram_ref.clone()),
+            ram: ram_ref,
         }
     }
 }
