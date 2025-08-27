@@ -28,8 +28,6 @@ fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
-const TARGET_EXT: &[&'static str] = &["rv_i", "rv_m", "rv64_i", "rv64_m", "rv_zicsr", "rv_system"];
-
 fn main() {
     let json_path = PathBuf::from("./data/instr_dict.json");
     let ext_to_name: HashMap<&'static str, &'static str> = {
@@ -40,8 +38,12 @@ fn main() {
         m.insert("rv64_m", "RV64M");
         m.insert("rv_zicsr", "RVZicsr");
         m.insert("rv_system", "RVSystem");
+        m.insert("rv_f", "RV32F");
+        m.insert("rv64_f", "RV64F");
         m
     };
+
+    let target_ext = ext_to_name.keys().collect::<Vec<_>>();
 
     let data = fs::read_to_string(&json_path).expect("Failed to read instr.json");
     let v: Value = serde_json::from_str(&data).expect("Invalid JSON");
@@ -58,7 +60,7 @@ fn main() {
         if let Some(ext) = exts
             .iter()
             .map(|val| val.as_str().unwrap())
-            .find(|e| TARGET_EXT.contains(&e))
+            .find(|e| target_ext.contains(&e))
         {
             let encoding = instr["encoding"].as_str().unwrap();
 
@@ -73,8 +75,12 @@ fn main() {
                 .map(|f| f.as_str().unwrap())
                 .collect::<Vec<_>>();
 
-            let format = if fields == ["rd", "rs1", "rs2"] {
+            let format = if fields == ["rd", "rs1", "rs2"] || fields == ["rd", "rs1"] {
                 "R"
+            } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
+                "R_rm"
+            } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
+                "R4_rm"
             } else if fields == ["rd", "rs1", "imm12"]
                 || fields == ["rd", "rs1", "shamtd"]
                 || fields == ["rd", "rs1", "shamtw"]
@@ -107,8 +113,10 @@ fn main() {
             let mask = hex_to_u64(instr["mask"].as_str().unwrap());
             let key = hex_to_u64(instr["match"].as_str().unwrap());
 
-            let use_mask =
-                fields.contains(&"shamtd") || fields.contains(&"shamtw") || fields.is_empty();
+            let use_mask = fields.contains(&"shamtd")
+                || fields.contains(&"shamtw")
+                || fields.is_empty()
+                || fields.contains(&"rm");
 
             let s = format!(
                 "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",
