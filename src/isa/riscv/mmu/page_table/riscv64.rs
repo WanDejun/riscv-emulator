@@ -5,8 +5,10 @@ use crate::{
     isa::riscv::{
         csr_reg::csr_macro::Satp,
         mmu::{
-            address::{PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
-            config::{PAGE_SIZE, PPN_MASK, PTE_FLAG_MASK, VirtualMemoryMode, get_page_table_level},
+            address::{PageSize, PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
+            config::{
+                PAGE_SIZE_XLEN, PPN_MASK, PTE_FLAG_MASK, VirtualMemoryMode, get_page_table_level,
+            },
         },
     },
     ram::Ram,
@@ -151,8 +153,12 @@ impl PageTable {
         vaddr: VirtualAddr,
     ) -> Result<PhysicalAddr, PageTableError> {
         let target_pte = self.find_pte(mem, vaddr.floor())?;
-        let ppn = target_pte.ppn();
-        let paddr = ppn.0 | (vaddr.0 & (PAGE_SIZE - 1));
+        let ppn = target_pte.0.ppn();
+        let paddr = match target_pte.1 {
+            PageSize::Small4K => ppn.0 | (vaddr.0 & ((1 << (1 * PAGE_SIZE_XLEN as WordType)) - 1)),
+            PageSize::Medium2M => ppn.0 | (vaddr.0 & ((1 << (2 * PAGE_SIZE_XLEN as WordType)) - 1)),
+            PageSize::Large1G => ppn.0 | (vaddr.0 & ((1 << (3 * PAGE_SIZE_XLEN as WordType)) - 1)),
+        };
         Ok(paddr.into())
     }
 
@@ -160,7 +166,7 @@ impl PageTable {
         &self,
         mem: &mut Ram,
         vpn: VirtualPageNum,
-    ) -> Result<&mut PageTableEntry, PageTableError> {
+    ) -> Result<(&mut PageTableEntry, PageSize), PageTableError> {
         let level = get_page_table_level(self.mode);
         let mut entry = self.root_ppn;
         let sub_vpn_array = vpn.get_sub_vpn();
@@ -172,8 +178,8 @@ impl PageTable {
                 return Err(PageTableError::PageFault);
             }
 
-            if i == 0 {
-                return Ok(pte);
+            if i == 0 || !pte.is_page() {
+                return Ok((pte, PageSize::from(i as u8)));
             }
 
             entry = pte.ppn();
@@ -216,11 +222,42 @@ mod test {
 
         let page_table = PageTable::new(ppn0.into(), VirtualMemoryMode::Page39bit);
         let data_pte = page_table.find_pte(&mut ram, 0x0000_0010.into()).unwrap();
-        assert_eq!(pte.bits, data_pte.bits);
+        assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
             .translate_addr(&mut ram, 0x0000_0123.into())
             .unwrap();
         assert_eq!(paddr.0, data_page | 0x123);
+    }
+
+    #[test]
+    fn big_page_test() {
+        // 2MB Page.
+        let mut ram: Ram = Ram::new();
+        let ppn0 = 0x8000_1000u64;
+        let ppn1 = 0x8000_2000u64;
+        let data_page = 0x8100_0000u64;
+
+        let mut pte = PageTableEntry::empty();
+        pte.set_vaild();
+
+        // level 0
+        pte.set_ppn(ppn1.into());
+        ram.write(ppn0 - ram_config::BASE_ADDR, pte.bits).unwrap();
+
+        // level 1
+        pte.set_ppn(data_page.into());
+        pte.set_readable();
+        pte.set_writeable();
+        ram.write(ppn1 - ram_config::BASE_ADDR, pte.bits).unwrap();
+
+        let page_table = PageTable::new(ppn0.into(), VirtualMemoryMode::Page39bit);
+        let data_pte = page_table.find_pte(&mut ram, 0x0000_8000.into()).unwrap();
+        assert_eq!(pte.bits, data_pte.0.bits);
+
+        let paddr = page_table
+            .translate_addr(&mut ram, 0x0011_4514.into())
+            .unwrap();
+        assert_eq!(paddr.0, 0x8111_4514);
     }
 }

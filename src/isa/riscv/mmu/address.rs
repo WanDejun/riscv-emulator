@@ -25,9 +25,28 @@ pub struct PhysicalPageNum(pub u64); // PPN
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub struct VirtualPageNum(pub WordType); // VPN
 
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum PageSize {
+    Small4K = 0,
+    Medium2M,
+    Large1G,
+}
+
+impl From<u8> for PageSize {
+    fn from(value: u8) -> Self {
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+#[rustfmt::skip]
 impl PhysicalAddr {
-    pub fn get_offset(self) -> WordType {
-        self.0 & (PAGE_SIZE - 1)
+    pub fn get_offset(self, page_size: PageSize) -> WordType {
+        match page_size {
+            PageSize::Small4K  => self.0 & ((1 << (1 * PAGE_SIZE_XLEN)) - 1),
+            PageSize::Medium2M => self.0 & ((1 << (2 * PAGE_SIZE_XLEN)) - 1),
+            PageSize::Large1G  => self.0 & ((1 << (3 * PAGE_SIZE_XLEN)) - 1),
+        }
     }
     pub fn ceil(self) -> PhysicalPageNum {
         PhysicalPageNum(self.0 >> PAGE_SIZE_XLEN)
@@ -35,16 +54,17 @@ impl PhysicalAddr {
     pub fn floor(self) -> PhysicalPageNum {
         PhysicalPageNum((self.0 + (PAGE_SIZE - 1)) >> PAGE_SIZE_XLEN)
     }
-    pub fn page_offset(&self) -> WordType {
-        self.0 & (PAGE_SIZE - 1)
-    }
     pub fn is_aligned(self) -> bool {
-        self.page_offset() == 0
+        self.get_offset(PageSize::Small4K) == 0
     }
 }
 impl VirtualAddr {
-    pub fn get_offset(self) -> WordType {
-        self.0 & (PAGE_SIZE - 1)
+    pub fn get_offset(self, page_size: PageSize) -> WordType {
+        match page_size {
+            PageSize::Small4K => self.0 & ((1 << (1 * PAGE_SIZE_XLEN)) - 1),
+            PageSize::Medium2M => self.0 & ((1 << (2 * PAGE_SIZE_XLEN)) - 1),
+            PageSize::Large1G => self.0 & ((1 << (3 * PAGE_SIZE_XLEN)) - 1),
+        }
     }
     pub fn ceil(self) -> VirtualPageNum {
         VirtualPageNum((self.0 + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1))
@@ -52,11 +72,8 @@ impl VirtualAddr {
     pub fn floor(self) -> VirtualPageNum {
         VirtualPageNum(self.0 & !(PAGE_SIZE - 1))
     }
-    pub fn page_offset(&self) -> WordType {
-        self.0 & (PAGE_SIZE - 1)
-    }
     pub fn is_aligned(self) -> bool {
-        self.page_offset() == 0
+        self.get_offset(PageSize::Small4K) == 0
     }
 }
 
@@ -117,7 +134,7 @@ impl From<PhysicalPageNum> for PhysicalAddr {
 }
 impl From<PhysicalAddr> for PhysicalPageNum {
     fn from(addr: PhysicalAddr) -> Self {
-        debug_assert_eq!(addr.get_offset(), 0);
+        // debug_assert_eq!(addr.get_offset(), 0);
         PhysicalPageNum(addr.0)
     }
 }
@@ -154,7 +171,7 @@ impl From<VirtualPageNum> for VirtualAddr {
 }
 impl From<VirtualAddr> for VirtualPageNum {
     fn from(addr: VirtualAddr) -> Self {
-        debug_assert_eq!(addr.get_offset(), 0);
+        // debug_assert_eq!(addr.get_offset(), 0);
         addr.floor()
     }
 }

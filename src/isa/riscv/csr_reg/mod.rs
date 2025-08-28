@@ -35,11 +35,6 @@ pub(crate) enum PrivilegeLevel {
     M = 3,
 }
 
-pub(crate) enum RWFlag {
-    RO,
-    RW,
-}
-
 #[rustfmt::skip]
 const CSR_PRIVILEGE_TABLE: &[(WordType, PrivilegeLevel)] = &[
     // READ WRITE.
