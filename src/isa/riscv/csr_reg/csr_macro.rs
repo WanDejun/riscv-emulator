@@ -223,7 +223,3 @@ gen_csr_regfile! {
     //     0, XLEN, medeleg,
     // ];
 }
-
-gen_csr_reg! {
-    UniversalCsr, 0x114514, []
-}

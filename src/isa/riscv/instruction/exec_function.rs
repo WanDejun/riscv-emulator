@@ -4,10 +4,7 @@ use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
     isa::riscv::{
-        csr_reg::{CsrReg, csr_index},
-        executor::RV32CPU,
-        instruction::RVInstrInfo,
-        trap::Exception,
+        csr_reg::csr_index, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
     },
     utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32, wrapping_add_as_signed},
 };
@@ -162,18 +159,13 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
             cpu.reg_file.read(rs1, rs1).0
         };
 
+        let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
         if rd != 0 || UIMM {
-            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
             cpu.reg_file.write(rd, value);
         }
 
-        let mut csr = cpu.csr.get(imm).ok_or(Exception::IllegalInstruction)?;
-
-        if SET {
-            csr.set_by_mask(rhs);
-        } else {
-            csr.clear_by_mask(rhs);
-        }
+        let data = if SET { value | rhs } else { value & !rhs };
+        cpu.csr.write(imm, data);
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);

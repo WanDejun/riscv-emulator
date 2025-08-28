@@ -144,7 +144,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        isa::riscv::cpu_tester::*,
+        isa::riscv::{cpu_tester::*, csr_reg::csr_index},
         ram_config,
         utils::{negative_of, sign_extend},
     };
@@ -353,6 +353,12 @@ mod tests {
                     .reg_f32(11, f32::INFINITY)
             },
             |checker| checker.csr(3, 0b10000),
+        );
+
+        run_test_exec_decode(
+            0x00102573, // frflags a0 => csrrs a0, fflags, x0 
+            |builder| builder.csr(csr_index::fcsr, 0b11011011),
+            |checker| checker.reg(10, 0b11011),
         );
     }
 }

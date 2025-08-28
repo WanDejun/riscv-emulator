@@ -2,10 +2,7 @@ pub mod csr_macro;
 
 use std::collections::HashMap;
 
-use crate::{
-    config::arch_config::WordType,
-    isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, UniversalCsr},
-};
+use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
 
 #[rustfmt::skip]
 #[allow(non_upper_case_globals)]
@@ -106,12 +103,19 @@ impl CsrRegFile {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
                 *fcsr = (*fcsr & !0b11100000) | ((data & 0b111) << 5);
             } // TODO: Raise error
-        }
-
-        if let Some(val) = self.table.get_mut(&addr) {
-            *val = data
+        } else if addr == csr_index::fcsr {
+            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+                // Quoted from RISC-V manual:
+                // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
+                // implementations shall ignore writes to these bits and supply a zero value when read."
+                *fcsr = data & 0xFF;
+            } // TODO: Raise error
         } else {
-            // TODO: Raise error
+            if let Some(val) = self.table.get_mut(&addr) {
+                *val = data
+            } else {
+                // TODO: Raise error
+            }
         }
     }
 
@@ -134,11 +138,6 @@ impl CsrRegFile {
     {
         let val = self.table.get_mut(&T::get_index())?;
         Some(T::from(val as *mut u64))
-    }
-
-    pub fn get<'a>(&'a mut self, addr: WordType) -> Option<UniversalCsr> {
-        let val = self.table.get_mut(&addr)?;
-        Some(UniversalCsr::from(val as *mut u64))
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {
