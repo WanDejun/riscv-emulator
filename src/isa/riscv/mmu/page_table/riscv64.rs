@@ -137,9 +137,9 @@ impl PageTable {
     pub fn updata(&mut self, satp: Satp) {
         self.mode = match satp.get_mode() {
             8 => VirtualMemoryMode::Page32bit,
-            9 => VirtualMemoryMode::Page32bit,
-            10 => VirtualMemoryMode::Page32bit,
-            11 => VirtualMemoryMode::Page32bit,
+            9 => VirtualMemoryMode::Page39bit,
+            10 => VirtualMemoryMode::Page48bit,
+            11 => VirtualMemoryMode::Page57bit,
             _ => VirtualMemoryMode::None,
         }
     }

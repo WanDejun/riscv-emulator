@@ -1,6 +1,6 @@
 pub mod csr_macro;
 
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
 
@@ -29,10 +29,91 @@ pub(crate) mod csr_index {
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 /// Only support machine_mode now.
 pub(crate) enum PrivilegeLevel {
-    // U = 0,
-    // S = 1,
-    // V = 2,
+    U = 0,
+    S = 1,
+    V = 2,
     M = 3,
+}
+
+pub(crate) enum RWFlag {
+    RO,
+    RW,
+}
+
+#[rustfmt::skip]
+const CSR_PRIVILEGE_TABLE: &[(WordType, PrivilegeLevel)] = &[
+    // READ WRITE.
+    (0x000, PrivilegeLevel::U), // 0x0FF
+    (0x100, PrivilegeLevel::S), // 0x1FF
+    (0x200, PrivilegeLevel::V), // 0x2FF
+    (0x300, PrivilegeLevel::M), // 0x3FF
+
+    (0x400, PrivilegeLevel::U), // 0x4FF
+    (0x500, PrivilegeLevel::S), // 0x57F
+    (0x580, PrivilegeLevel::S), // 0x5BF
+    (0x5C0, PrivilegeLevel::S), // 0x5FF (Custom)
+    (0x600, PrivilegeLevel::V), // 0x67F
+    (0x680, PrivilegeLevel::V), // 0x6BF
+    (0x6C0, PrivilegeLevel::V), // 0x6FF (Custom)
+    (0x700, PrivilegeLevel::M), // 0x77F
+    (0x780, PrivilegeLevel::M), // 0x7BF
+    (0x7A0, PrivilegeLevel::M), // 0x7FF
+    (0x7B0, PrivilegeLevel::M), // 0x7BF (Debug-mode-only)
+    (0x7C0, PrivilegeLevel::M), // 0x7FF (Custom)
+
+    (0x800, PrivilegeLevel::U), // 0x8FF (Custom)
+    (0x900, PrivilegeLevel::S), // 0x97F
+    (0x980, PrivilegeLevel::S), // 0x9BF
+    (0x9C0, PrivilegeLevel::S), // 0x9FF (Custom)
+    (0xA00, PrivilegeLevel::V), // 0xA7F
+    (0xA80, PrivilegeLevel::V), // 0xABF
+    (0xAC0, PrivilegeLevel::V), // 0xAFF (Custom)
+    (0xB00, PrivilegeLevel::M), // 0xB7F
+    (0xB80, PrivilegeLevel::M), // 0xBBF
+    (0xBC0, PrivilegeLevel::M), // 0xBFF (Custom)
+
+    // READ ONLY.
+    (0xC00, PrivilegeLevel::U), // 0xC7F
+    (0xC80, PrivilegeLevel::U), // 0xCBF
+    (0xCC0, PrivilegeLevel::U), // 0xCFF (Custom)
+    (0xD00, PrivilegeLevel::S), // 0xD7F
+    (0xD80, PrivilegeLevel::S), // 0xD8F
+    (0xDC0, PrivilegeLevel::S), // 0xDFF (Custom)
+    (0xE00, PrivilegeLevel::V), // 0xE7F
+    (0xE80, PrivilegeLevel::V), // 0xE8F
+    (0xEC0, PrivilegeLevel::V), // 0xEFF (Custom)
+    (0xF00, PrivilegeLevel::M), // 0xF7F
+    (0xF80, PrivilegeLevel::M), // 0xF8F
+    (0xFC0, PrivilegeLevel::M), // 0xFFF (Custom)
+];
+
+impl PrivilegeLevel {
+    /// true for legal.
+    /// false for illegal.
+    pub fn read_check_privilege(self, csr_addr: WordType) -> bool {
+        match CSR_PRIVILEGE_TABLE.binary_search_by(|&(k, _)| {
+            if k > csr_addr {
+                Ordering::Greater
+            } else if k == csr_addr {
+                Ordering::Equal
+            } else {
+                Ordering::Less
+            }
+        }) {
+            Ok(i) => self >= CSR_PRIVILEGE_TABLE[i].1,
+            Err(i) => self >= CSR_PRIVILEGE_TABLE[i - 1].1,
+        }
+    }
+
+    /// true for legal.
+    /// false for illegal.
+    pub fn write_check_privilege(self, csr_addr: WordType) -> bool {
+        if csr_addr >= 0xC00 {
+            false
+        } else {
+            self.read_check_privilege(csr_addr)
+        }
+    }
 }
 
 impl From<u8> for PrivilegeLevel {
@@ -77,23 +158,34 @@ impl CsrRegFile {
     }
 
     pub fn read(&self, addr: WordType) -> Option<WordType> {
-        // Special-case fflags and frm; they are subfields of fcsr
-        if addr == csr_index::fflags {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|x| x & 0b11111)
-        } else if addr == csr_index::frm {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|x| (x >> 5) & 0b111)
+        if !self.get_current_privileged().read_check_privilege(addr) {
+            return None;
+        }
+        self.read_uncheck_privilege(addr)
+    }
+
+    pub fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
+        if !self.get_current_privileged().write_check_privilege(addr) {
+            return None;
+        }
+        self.write_uncheck_privilege(addr, data);
+        Some(())
+    }
+
+    /// ONLY used in debugger. Read & write without side-effect.
+    pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
+        if let Some(val) = self.table.get_mut(&addr) {
+            let old = *val;
+            if let Some(new) = new_value {
+                *val = new;
+            }
+            Some(old)
         } else {
-            self.table.get(&addr).copied()
+            None
         }
     }
 
-    pub fn write(&mut self, addr: WordType, data: WordType) {
+    pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
         // Special-case fflags and frm; they are subfields of fcsr
         if addr == csr_index::fflags {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
@@ -119,16 +211,20 @@ impl CsrRegFile {
         }
     }
 
-    /// ONLY used in debugger. Read & write without side-effect.
-    pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
-        if let Some(val) = self.table.get_mut(&addr) {
-            let old = *val;
-            if let Some(new) = new_value {
-                *val = new;
-            }
-            Some(old)
+    pub fn read_uncheck_privilege(&self, addr: WordType) -> Option<WordType> {
+        // Special-case fflags and frm; they are subfields of fcsr
+        if addr == csr_index::fflags {
+            self.table
+                .get(&csr_index::fcsr)
+                .copied()
+                .map(|x| x & 0b11111)
+        } else if addr == csr_index::frm {
+            self.table
+                .get(&csr_index::fcsr)
+                .copied()
+                .map(|x| (x >> 5) & 0b111)
         } else {
-            None
+            self.table.get(&addr).copied()
         }
     }
 
@@ -151,7 +247,7 @@ impl CsrRegFile {
 
 #[cfg(test)]
 mod test {
-    use crate::isa::riscv::csr_reg::{CsrRegFile, csr_index, csr_macro::*};
+    use crate::isa::riscv::csr_reg::{CsrRegFile, PrivilegeLevel, csr_index, csr_macro::*};
 
     #[test]
     fn test_rw_by_addr() {
@@ -185,5 +281,23 @@ mod test {
         let mtvec = reg.get_by_type::<Mtvec>().unwrap();
         reg.write(csr_index::mtvec, 0x114514);
         assert_eq!(mtvec.get_base(), 0x114514 >> 2);
+    }
+
+    #[test]
+    fn test_read_privilege() {
+        let mut reg = CsrRegFile::new();
+        reg.set_current_privileged(PrivilegeLevel::M);
+        assert!(reg.write(csr_index::mcause, 0xFEFE).is_some());
+        assert_eq!(
+            reg.read_uncheck_privilege(csr_index::mcause).unwrap(),
+            0xFEFE
+        );
+
+        reg.set_current_privileged(PrivilegeLevel::S);
+        assert!(reg.write(csr_index::mcause, 0xFEFE).is_none());
+        assert_eq!(
+            reg.read_uncheck_privilege(csr_index::mcause).unwrap(),
+            0xFEFE
+        );
     }
 }

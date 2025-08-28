@@ -21,8 +21,10 @@ impl TrapController {
     // }
 
     pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
-        cpu.csr.write(csr_index::mcause, cause.into());
-        cpu.csr.write(csr_index::mepc, cpu.pc);
+        cpu.csr.set_current_privileged(PrivilegeLevel::M);
+        cpu.csr
+            .write_uncheck_privilege(csr_index::mcause, cause.into());
+        cpu.csr.write_uncheck_privilege(csr_index::mepc, cpu.pc);
 
         if matches!(
             cause, // TODO: Do we need to handle other exceptions?
@@ -35,13 +37,13 @@ impl TrapController {
         ) == false
         {
             // Addr has been stored to mtval in `exec_load`/`exec_store` on mem error
-            cpu.csr.write(csr_index::mtval, trap_value);
+            cpu.csr
+                .write_uncheck_privilege(csr_index::mtval, trap_value);
         }
 
         let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
         mstatus.set_mpie(mstatus.get_mie());
         mstatus.set_mie(0);
-        cpu.csr.set_current_privileged(PrivilegeLevel::M);
 
         let mtvec = cpu.csr.get_by_type::<Mtvec>().unwrap();
         if mtvec.get_mode() == 0 {
@@ -58,13 +60,13 @@ impl TrapController {
 
     pub fn mret(cpu: &mut RV32CPU) {
         let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
-        // TODO: Uncomment these two lines when U mode is supported.
-        // cpu.csr.set_current_privileged((mstatus.get_mpp() as u8).into());
-        // mstatus.set_mpp(0);
         mstatus.set_mie(mstatus.get_mpie());
         mstatus.set_mpie(1);
+        cpu.write_pc(cpu.csr.read_uncheck_privilege(csr_index::mepc).unwrap());
 
-        cpu.write_pc(cpu.csr.read(csr_index::mepc).unwrap());
+        cpu.csr
+            .set_current_privileged((mstatus.get_mpp() as u8).into());
+        mstatus.set_mpp(0);
     }
 }
 

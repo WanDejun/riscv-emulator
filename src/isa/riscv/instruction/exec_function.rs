@@ -87,7 +87,7 @@ where
                 cpu.reg_file.write(rd, data);
             }
             Err(err) => {
-                cpu.csr.write(csr_index::mtval, addr);
+                cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
                 return Err(Exception::from_memory_err(err));
             }
         }
@@ -109,7 +109,7 @@ where
 
         let ret = cpu.memory.write(addr, T::truncate_from(val2));
         if let Err(err) = ret {
-            cpu.csr.write(csr_index::mtval, addr);
+            cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
             return Err(Exception::from_memory_err(err));
         }
     } else {

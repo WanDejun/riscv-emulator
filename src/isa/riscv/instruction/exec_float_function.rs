@@ -65,7 +65,7 @@ where
                 cpu.fpu.store(rd, F::from_bits(data));
             }
             Err(err) => {
-                cpu.csr.write(csr_index::mtval, addr);
+                cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
                 return Err(Exception::from_memory_err(err));
             }
         }
@@ -88,7 +88,7 @@ where
 
         let ret = cpu.memory.write(addr, val2.to_bits());
         if let Err(err) = ret {
-            cpu.csr.write(csr_index::mtval, addr);
+            cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
             return Err(Exception::from_memory_err(err));
         }
     } else {

@@ -69,7 +69,7 @@ impl TestCPUBuilder {
     }
 
     pub(super) fn csr(mut self, csr_addr: WordType, value: WordType) -> Self {
-        self.cpu.csr.write(csr_addr, value);
+        self.cpu.csr.write_uncheck_privilege(csr_addr, value);
         self
     }
 
@@ -136,7 +136,7 @@ impl<'a> CPUChecker<'a> {
 
     pub(super) fn csr(self, addr: WordType, value: WordType) -> Self {
         assert_eq!(
-            self.cpu.csr.read(addr).unwrap(),
+            self.cpu.csr.read_uncheck_privilege(addr).unwrap(),
             value,
             "Csr value incorrect at addr {}",
             addr
