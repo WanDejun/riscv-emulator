@@ -1,7 +1,7 @@
-mod soft_float;
+pub mod soft_float;
 
 #[repr(C)]
-enum Classification {
+pub enum Classification {
     NegativeInfinity = 0x1,
     NormalNegative = 0x2,
     SubnormalNegative = 0x4,
@@ -12,4 +12,13 @@ enum Classification {
     PositiveInfinity = 0x80,
     SignalingNaN = 0x100,
     QuietNaN = 0x200,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Round {
+    NearestTiesToEven,
+    TowardPositive,
+    TowardNegative,
+    TowardZero,
+    NearestTiesToAway,
 }

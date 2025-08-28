@@ -182,6 +182,18 @@ gen_csr_regfile! {
         0, XLEN, mip,
     ];
 
+    Fcsr, "fcsr", 0x003, 0x00, [
+        0, 5, fflags,
+        0, 1, nx,
+        1, 1, uf,
+        2, 1, of,
+        3, 1, dz,
+        4, 1, nv,
+
+        // rounding  mode
+        5, 3, rm,
+    ];
+
     // TODO: Below are just stub to make riscv-tests executable, not fully implemented.
     Mhartid, "mhartid", 0xF14, 0x00, [
         0, XLEN, mhartid,

@@ -5,6 +5,7 @@ use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     device::{DeviceTrait, Mem},
+    fpu::soft_float::SoftFPU,
     isa::{
         DecoderTrait,
         icache::{ICache, SetICache},
@@ -27,7 +28,8 @@ pub struct RV32CPU {
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
     pub(super) icache: SetICache<RiscvTypes, 64, 8>,
-    pub icache_cnt: usize,
+    pub(super) fpu: SoftFPU,
+    pub icache_cnt: usize, // TODO: Remove this since Zicsr is done.
 }
 
 impl RV32CPU {
@@ -44,6 +46,7 @@ impl RV32CPU {
             decoder: Decoder::new(),
             csr: CsrRegFile::new(),
             icache: SetICache::new(),
+            fpu: SoftFPU::new(),
             icache_cnt: 0,
         }
     }
@@ -137,6 +140,8 @@ impl RV32CPU {
 
 #[cfg(test)]
 mod tests {
+    use std::f32;
+
     use super::*;
     use crate::{
         isa::riscv::cpu_tester::*,
@@ -310,6 +315,44 @@ mod tests {
             0x3043f6f3,
             |builder| builder.csr(0x304, 0x00FF).pc(0x1000),
             |checker| checker.reg(13, 0x00FF).csr(0x304, 0x00F8).pc(0x1004),
+        );
+    }
+
+    #[test]
+    fn test_rv_f() {
+        run_test_exec_decode(
+            0x001015f3, // fsflags a1,zero => csrrw a1, fflags, zero
+            |builder| builder.reg(1, 0).csr(3, 0b11011111),
+            |checker| {
+                checker
+                    .reg(1, 0)
+                    .reg(11, 0b11111)
+                    .csr(1, 0)
+                    .csr(2, 0b110)
+                    .csr(3, 0b11000000)
+            },
+        );
+
+        run_test_exec_decode(
+            0xe0068553, // fmv.x.w a0,fa3
+            |builder| builder.reg_f32(13, 3.5),
+            |checker| checker.reg(10, 0x40600000),
+        );
+
+        run_test_exec_decode(
+            0x00b576d3, // fadd.s fa3,fa0,fa1
+            |builder| builder.reg_f32(10, 3.14159265).reg_f32(11, 0.00000001),
+            |checker| checker.reg_f32(13, 3.14159265).csr(3, 0b00001),
+        );
+
+        run_test_exec_decode(
+            0x08b576d3, // fsub.s fa3,fa0,fa1
+            |builder| {
+                builder
+                    .reg_f32(10, f32::INFINITY)
+                    .reg_f32(11, f32::INFINITY)
+            },
+            |checker| checker.csr(3, 0b10000),
         );
     }
 }

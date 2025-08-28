@@ -33,6 +33,17 @@ impl TestCPUBuilder {
         self
     }
 
+    // Explicit float type in name to avoid deducing that may cause accidental error.
+    pub(super) fn reg_f32(mut self, idx: u8, value: f32) -> Self {
+        self.cpu.fpu.store(idx, value);
+        self
+    }
+
+    pub(super) fn reg_f64(mut self, idx: u8, value: f64) -> Self {
+        self.cpu.fpu.store(idx, value);
+        self
+    }
+
     pub(super) fn pc(mut self, value: WordType) -> Self {
         self.cpu.pc = value;
         self
@@ -86,6 +97,18 @@ impl<'a> CPUChecker<'a> {
         self
     }
 
+    pub(super) fn reg_f32(self, idx: u8, value: f32) -> Self {
+        let reg_val: f32 = self.cpu.fpu.load(idx);
+        assert_eq!(reg_val, value, "Float Register #{} incorrect", idx);
+        self
+    }
+
+    pub(super) fn reg_f64(self, idx: u8, value: f64) -> Self {
+        let reg_val: f64 = self.cpu.fpu.load(idx);
+        assert_eq!(reg_val, value, "Float Register #{} incorrect", idx);
+        self
+    }
+
     pub(super) fn pc(self, value: WordType) -> Self {
         assert_eq!(self.cpu.pc, value, "PC incorrect");
         self
@@ -112,7 +135,12 @@ impl<'a> CPUChecker<'a> {
     }
 
     pub(super) fn csr(self, addr: WordType, value: WordType) -> Self {
-        assert_eq!(self.cpu.csr.read(addr).unwrap(), value);
+        assert_eq!(
+            self.cpu.csr.read(addr).unwrap(),
+            value,
+            "Csr value incorrect at addr {}",
+            addr
+        );
         self
     }
 

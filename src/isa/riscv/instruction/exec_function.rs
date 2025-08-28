@@ -1,3 +1,5 @@
+pub(super) use super::exec_float_function::*;
+
 use crate::{
     config::arch_config::{SignedWordType, WordType},
     device::Mem,
@@ -7,7 +9,7 @@ use crate::{
         instruction::RVInstrInfo,
         trap::Exception,
     },
-    utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32},
+    utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32, wrapping_add_as_signed},
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
@@ -75,10 +77,7 @@ where
 {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         let val = cpu.reg_file.read(rs1, 0).0;
-        let addr = val
-            .cast_signed()
-            .wrapping_add(sign_extend(imm, 12).cast_signed())
-            .cast_unsigned();
+        let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
         let ret = cpu.memory.read::<T>(addr);
 
         match ret {
@@ -109,10 +108,7 @@ where
 {
     if let RVInstrInfo::S { rs1, rs2, imm } = info {
         let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-        let addr = val1
-            .cast_signed()
-            .wrapping_add(sign_extend(imm, 12).cast_signed())
-            .cast_unsigned();
+        let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
 
         let ret = cpu.memory.write(addr, T::truncate_from(val2));
         if let Err(err) = ret {

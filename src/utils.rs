@@ -4,7 +4,10 @@ use std::{
     usize,
 };
 
-use crate::config::arch_config::{SignedWordType, WordType, XLEN};
+use crate::{
+    config::arch_config::{SignedWordType, WordType, XLEN},
+    fpu::soft_float::APFloatOf,
+};
 
 fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
 where
@@ -31,6 +34,12 @@ pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
 
 pub fn sign_extend_u32(value: u32) -> u64 {
     sign_extend(value as WordType, 32)
+}
+
+pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
+    lhs.cast_signed()
+        .wrapping_add(rhs.cast_signed())
+        .cast_unsigned()
 }
 
 /// get the negative of given number of [`WordType`] in 2's complement.
@@ -192,10 +201,23 @@ macro_rules! impl_truncate_to {
     };
 }
 
-impl_truncate_from!(WordType, u8);
-impl_truncate_from!(WordType, u16);
-impl_truncate_from!(WordType, u32);
-impl_truncate_from!(WordType, u64);
+impl_truncate_from!(u32, u8);
+impl_truncate_from!(u32, u16);
+impl_truncate_from!(u32, u32);
+impl_truncate_from!(u32, u64);
+impl_truncate_from!(u32, u128);
+
+impl_truncate_from!(u64, u8);
+impl_truncate_from!(u64, u16);
+impl_truncate_from!(u64, u32);
+impl_truncate_from!(u64, u64);
+impl_truncate_from!(u64, u128);
+
+impl_truncate_from!(u128, u8);
+impl_truncate_from!(u128, u16);
+impl_truncate_from!(u128, u32);
+impl_truncate_from!(u128, u64);
+impl_truncate_from!(u128, u128);
 
 impl_truncate_to!(u8);
 impl_truncate_to!(u16);
@@ -236,12 +258,81 @@ pub trait UnsignedInteger:
     + Debug
     + Display
     + TruncateFrom<WordType>
+    + TruncateFrom<u128>
 {
 }
+
 impl UnsignedInteger for u8 {}
 impl UnsignedInteger for u16 {}
 impl UnsignedInteger for u32 {}
 impl UnsignedInteger for u64 {}
+
+pub trait InBits<U> {
+    fn from_bits(x: U) -> Self;
+    fn to_bits(self) -> U;
+}
+
+pub trait FloatPoint:
+    Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + PartialEq
+    + PartialOrd
+    + Copy
+    + From<f32>
+    + Into<f64>
+    + Debug
+    + Display
+    + InBits<Self::BitsType>
+    + APFloatOf
+{
+    type BitsType: UnsignedInteger;
+}
+
+impl InBits<u32> for f32 {
+    #[inline]
+    fn from_bits(x: u32) -> Self {
+        f32::from_bits(x)
+    }
+
+    #[inline]
+    fn to_bits(self) -> u32 {
+        self.to_bits()
+    }
+}
+impl InBits<u64> for f64 {
+    #[inline]
+    fn from_bits(x: u64) -> Self {
+        f64::from_bits(x)
+    }
+
+    #[inline]
+    fn to_bits(self) -> u64 {
+        self.to_bits()
+    }
+}
+
+impl FloatPoint for f32 {
+    type BitsType = u32;
+}
+impl FloatPoint for f64 {
+    type BitsType = u64;
+}
+
+pub trait InFloat {
+    type Float;
+}
+
+impl InFloat for u32 {
+    type Float = f32;
+}
+
+impl InFloat for u64 {
+    type Float = f64;
+}
+
+pub type FloatOf<T> = <T as InFloat>::Float;
 
 #[allow(unused)]
 pub fn set_bit<T>(data: &mut T, idx: u32)

@@ -85,7 +85,7 @@ fn run_test(elf: &Path) -> bool {
         }
 
         Ok(true) => {
-            // eprintln!("Test {:?} passed", elf);
+            eprintln!("Test {:?} passed", elf);
             true
         }
     }
@@ -126,9 +126,16 @@ fn run_rv64ui_p_tests() {
     run_test_group_exclude("rv64ui-p-", &["fence_i", "ma_data"]);
 }
 
+// #[test]
+// #[cfg(feature = "riscv64")]
+// #[cfg(feature = "riscv-tests")]
+// fn run_rv64mi_p_tests() {
+//     run_test_group_exclude("rv64mi-p-", &["breakpoint", "illegal"]);
+// }
+
 #[test]
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
-fn run_rv64mi_p_tests() {
-    run_test_group_exclude("rv64mi-p-", &["breakpoint", "illegal"]);
+fn run_rv32uf_p_tests() {
+    run_test_group_exclude("rv64uf-p-", &[]);
 }

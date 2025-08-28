@@ -1,16 +1,45 @@
 use std::hint::{cold_path, unreachable_unchecked};
 
 use rustc_apfloat::{
-    Float, FloatConvert, Round, Status, StatusAnd,
+    Float, FloatConvert, Status, StatusAnd,
     ieee::{Double, Single},
 };
 
-use crate::fpu::Classification;
+use rustc_apfloat::Round as APFloatRound;
+
+use crate::{
+    fpu::{Classification, Round},
+    utils::{FloatPoint, TruncateFrom},
+};
+
+impl Into<APFloatRound> for Round {
+    fn into(self) -> APFloatRound {
+        match self {
+            Round::NearestTiesToEven => APFloatRound::NearestTiesToEven,
+            Round::TowardPositive => APFloatRound::TowardPositive,
+            Round::TowardNegative => APFloatRound::TowardNegative,
+            Round::TowardZero => APFloatRound::TowardZero,
+            Round::NearestTiesToAway => APFloatRound::NearestTiesToAway,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum APFloat {
     Single(Single),
     Double(Double),
+}
+
+impl Into<APFloat> for f32 {
+    fn into(self) -> APFloat {
+        APFloat::Single(Single::from_bits(self.to_bits() as u128))
+    }
+}
+
+impl Into<APFloat> for f64 {
+    fn into(self) -> APFloat {
+        APFloat::Double(Double::from_bits(self.to_bits() as u128))
+    }
 }
 
 // Reinterpret to given type of soft float.
@@ -45,7 +74,7 @@ impl Into<APFloat> for Double {
 }
 
 /// Map a Rust primitive float type to its `rustc_apfloat` representation.
-pub trait APFloatOf {
+pub trait APFloatOf: Into<APFloat> {
     type Float: Float + Into<APFloat> + From<APFloat>;
 }
 
@@ -73,6 +102,10 @@ pub trait TernaryOpWithRound<F> {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F>;
 }
 
+pub trait CmpOp<F> {
+    fn apply(a: F, b: F) -> StatusAnd<bool>;
+}
+
 // Implementation of operations:
 
 macro_rules! define_binary_op {
@@ -91,7 +124,7 @@ macro_rules! define_binary_op_r {
         pub struct $struct_name;
         impl<F: Float> BinaryOpWithRound<F> for $struct_name {
             fn apply(a: F, b: F, round: Round) -> StatusAnd<F> {
-                a.$method_name(b, round)
+                a.$method_name(b, round.into())
             }
         }
     };
@@ -107,28 +140,28 @@ define_binary_op_r!(DivOp, div_r);
 pub struct MulAddOp;
 impl<F: Float> TernaryOpWithRound<F> for MulAddOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        a.mul_add_r(b, c, round)
+        a.mul_add_r(b, c, round.into())
     }
 }
 
 pub struct MulSubOp;
 impl<F: Float> TernaryOpWithRound<F> for MulSubOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        a.mul_add_r(b, -c, round)
+        a.mul_add_r(b, -c, round.into())
     }
 }
 
 pub struct NegMulAddOp;
 impl<F: Float> TernaryOpWithRound<F> for NegMulAddOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        (-a).mul_add_r(b, c, round)
+        (-a).mul_add_r(b, c, round.into())
     }
 }
 
 pub struct NegMulSubOp;
 impl<F: Float> TernaryOpWithRound<F> for NegMulSubOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        (-a).mul_add_r(b, -c, round)
+        (-a).mul_add_r(b, -c, round.into())
     }
 }
 
@@ -212,6 +245,45 @@ fn classify<F: Float>(f: F) -> Classification {
     }
 }
 
+// Compare
+pub struct EqOp;
+impl<F: Float> CmpOp<F> for EqOp {
+    fn apply(a: F, b: F) -> StatusAnd<bool> {
+        // `feq` do "quiet comparison", according to RISC-V manual 2025-08-05,
+        // which means only sets the invalid op if either input is a signaling NaN.
+        if a.is_signaling() || b.is_signaling() {
+            Status::INVALID_OP.and(false)
+        } else {
+            Status::OK.and(a == b)
+        }
+    }
+}
+
+pub struct LtOp;
+impl<F: Float> CmpOp<F> for LtOp {
+    fn apply(a: F, b: F) -> StatusAnd<bool> {
+        // Unlike `feq`, `flt` do "signaling comparison",
+        // that means set the invalid operation exception flag if either input is NaN.
+        if a.is_nan() || b.is_nan() {
+            Status::INVALID_OP.and(false)
+        } else {
+            Status::OK.and(a < b)
+        }
+    }
+}
+
+pub struct LeOp;
+impl<F: Float> CmpOp<F> for LeOp {
+    fn apply(a: F, b: F) -> StatusAnd<bool> {
+        // Same with `flt`
+        if a.is_nan() || b.is_nan() {
+            Status::INVALID_OP.and(false)
+        } else {
+            Status::OK.and(a <= b)
+        }
+    }
+}
+
 pub struct SoftFPU {
     last_status: std::cell::Cell<Status>,
     reg_file: [APFloat; 32],
@@ -259,11 +331,36 @@ impl SoftFPU {
         self.reg_file[index as usize] = APFloat::Double(Double::from_bits(value.to_bits() as u128));
     }
 
-    fn get_and_cvt_unsigned<F: APFloatOf>(&mut self, index: u8, round: Round) -> u128 {
+    pub fn load<F: FloatPoint>(&self, index: u8) -> F {
+        let f: <F as APFloatOf>::Float = self.reg_file[index as usize].into();
+        F::from_bits(F::BitsType::truncate_from(f.to_bits()))
+    }
+
+    pub fn store<F: Into<APFloat>>(&mut self, index: u8, value: F) {
+        self.reg_file[index as usize] = value.into();
+    }
+
+    pub fn store_from_bits<F: APFloatOf>(&mut self, index: u8, value: u128) {
+        self.reg_file[index as usize] = F::Float::from_bits(value).into();
+    }
+
+    pub fn cvt_u_to_f_and_store<F: FloatPoint>(&mut self, index: u8, value: u128, round: Round) {
+        let rst = <F as APFloatOf>::Float::from_u128_r(value, round.into());
+        let val = self.save_and_unwrap(rst);
+        self.reg_file[index as usize] = val.into();
+    }
+
+    pub fn cvt_s_to_f_and_store<F: FloatPoint>(&mut self, index: u8, value: i128, round: Round) {
+        let rst = <F as APFloatOf>::Float::from_i128_r(value, round.into());
+        let val = self.save_and_unwrap(rst);
+        self.reg_file[index as usize] = val.into();
+    }
+
+    pub fn get_and_cvt_unsigned<F: APFloatOf>(&mut self, index: u8, round: Round) -> u128 {
         let mut in_exact = true;
         let f: F::Float = self.reg_file[index as usize].into();
 
-        let StatusAnd::<_> { mut status, value } = f.to_u128_r(32, round, &mut in_exact);
+        let StatusAnd::<_> { mut status, value } = f.to_u128_r(32, round.into(), &mut in_exact);
 
         if in_exact {
             status |= Status::INEXACT;
@@ -272,19 +369,11 @@ impl SoftFPU {
         value
     }
 
-    pub fn get_and_cvt_u64<F: APFloatOf>(&mut self, index: u8, round: Round) -> u64 {
-        self.get_and_cvt_unsigned::<F>(index, round) as u64
-    }
-
-    pub fn get_and_cvt_u32<F: APFloatOf>(&mut self, index: u8, round: Round) -> u32 {
-        self.get_and_cvt_unsigned::<F>(index, round) as u32
-    }
-
-    fn get_and_cvt_signed<F: APFloatOf>(&mut self, index: u8, round: Round) -> i128 {
+    pub fn get_and_cvt_signed<F: APFloatOf>(&mut self, index: u8, round: Round) -> i128 {
         let mut in_exact = true;
         let f: F::Float = self.reg_file[index as usize].into();
 
-        let StatusAnd::<_> { mut status, value } = f.to_i128_r(32, round, &mut in_exact);
+        let StatusAnd::<_> { mut status, value } = f.to_i128_r(32, round.into(), &mut in_exact);
 
         if in_exact {
             status |= Status::INEXACT;
@@ -310,7 +399,7 @@ impl SoftFPU {
     {
         let mut _loses_info = true;
         let f: F::Float = self.reg_file[index as usize].into();
-        self.save_and_unwrap(f.convert_r(round, &mut _loses_info))
+        self.save_and_unwrap(f.convert_r(round.into(), &mut _loses_info))
     }
 
     pub fn classify<T: APFloatOf>(&self, rs: u8) -> Classification {
@@ -318,16 +407,39 @@ impl SoftFPU {
         classify(f)
     }
 
-    pub fn exec_binary_r<Op, T: APFloatOf>(&mut self, rs1: u8, rs2: u8, rd: u8, round: Round)
+    pub fn compare<Op: CmpOp<T::Float>, T: FloatPoint>(&mut self, rs1: u8, rs2: u8) -> bool {
+        let a: T::Float = self.reg_file[rs1 as usize].into();
+        let b: T::Float = self.reg_file[rs2 as usize].into();
+        self.save_and_unwrap(Op::apply(a, b))
+    }
+
+    pub fn exec_unary<Op, T: FloatPoint>(&mut self, rs1: u8, rd: u8)
     where
-        Op: BinaryOpWithRound<T::Float>,
+        Op: UnaryOp<T::Float>,
+    {
+        let a: T::Float = self.reg_file[rs1 as usize].into();
+        self.reg_file[rd as usize] = Op::apply(a).into();
+    }
+
+    pub fn exec_binary<Op, T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8)
+    where
+        Op: BinaryOp<T::Float>,
+    {
+        let a: T::Float = self.reg_file[rs1 as usize].into();
+        let b: T::Float = self.reg_file[rs2 as usize].into();
+        self.reg_file[rd as usize] = Op::apply(a, b).into();
+    }
+
+    pub fn exec_binary_r<Op, T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8, round: Round)
+    where
+        Op: BinaryOpWithRound<<T as APFloatOf>::Float>,
     {
         let a: T::Float = self.reg_file[rs1 as usize].into();
         let b: T::Float = self.reg_file[rs2 as usize].into();
         self.reg_file[rd as usize] = self.save_and_unwrap(Op::apply(a, b, round)).into();
     }
 
-    pub fn exec_ternary_r<Op, T: APFloatOf>(
+    pub fn exec_ternary_r<Op, T: FloatPoint>(
         &mut self,
         rs1: u8,
         rs2: u8,
@@ -347,7 +459,6 @@ impl SoftFPU {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_apfloat::Round;
 
     #[test]
     fn test_simple_arith() {
@@ -489,5 +600,40 @@ mod tests {
 
         let as_u64 = d.to_bits() as u64;
         assert_eq!(as_u64, f64::from(1.5f32).to_bits());
+    }
+
+    #[test]
+    fn test_float_cmp() {
+        let mut fpu = SoftFPU::new();
+
+        fpu.store::<f32>(1, 3.0);
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<EqOp, f32>(1, 2));
+        assert!(fpu.last_status() == Status::OK);
+
+        fpu.store::<f32>(1, f32::NAN);
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<EqOp, f32>(1, 2) == false);
+        assert!(fpu.last_status() == Status::OK);
+
+        fpu.store_from_bits::<f32>(1, Single::snan(None).to_bits());
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<EqOp, f32>(1, 2) == false);
+        assert!(fpu.last_status() == Status::INVALID_OP);
+
+        fpu.store::<f32>(1, 1.5);
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<LtOp, f32>(1, 2));
+        assert!(fpu.last_status() == Status::OK);
+
+        fpu.store::<f32>(1, f32::NAN);
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<LtOp, f32>(1, 2) == false);
+        assert!(fpu.last_status() == Status::INVALID_OP);
+
+        fpu.store_from_bits::<f32>(1, Single::snan(None).to_bits());
+        fpu.store::<f32>(2, 3.0);
+        assert!(fpu.compare::<LtOp, f32>(1, 2) == false);
+        assert!(fpu.last_status() == Status::INVALID_OP);
     }
 }
