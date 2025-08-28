@@ -9,7 +9,7 @@ use rustc_apfloat::Round as APFloatRound;
 
 use crate::{
     fpu::{Classification, Round},
-    utils::{FloatPoint, TruncateFrom},
+    utils::{FloatPoint, SignedInteger, TruncateFrom, WordTrait},
 };
 
 impl Into<APFloatRound> for Round {
@@ -174,9 +174,6 @@ impl<F: Float> UnaryOp<F> for SqrtOp {
     }
 }
 
-define_binary_op!(MinOp, min);
-define_binary_op!(MaxOp, max);
-
 // Sign injection
 
 define_binary_op!(SignInjectOp, copy_sign);
@@ -301,6 +298,10 @@ impl SoftFPU {
         self.last_status.get()
     }
 
+    pub fn set_status(&self, status: Status) {
+        self.last_status.set(status);
+    }
+
     fn save_and_unwrap<T>(&mut self, status_and: StatusAnd<T>) -> T {
         self.last_status.set(status_and.status);
         status_and.value
@@ -356,37 +357,40 @@ impl SoftFPU {
         self.reg_file[index as usize] = val.into();
     }
 
-    pub fn get_and_cvt_unsigned<F: APFloatOf>(&mut self, index: u8, round: Round) -> u128 {
-        let mut in_exact = true;
+    pub fn get_and_cvt_unsigned<F: APFloatOf, U: WordTrait>(
+        &mut self,
+        index: u8,
+        round: Round,
+    ) -> u128 {
         let f: F::Float = self.reg_file[index as usize].into();
 
-        let StatusAnd::<_> { mut status, value } = f.to_u128_r(32, round.into(), &mut in_exact);
-
-        if in_exact {
-            status |= Status::INEXACT;
+        if f.is_nan() {
+            return U::MAX.into();
         }
+
+        let mut _is_exact = true;
+        let StatusAnd::<_> { status, value } = f.to_u128_r(U::BITS, round.into(), &mut _is_exact);
+
         self.last_status.set(status);
         value
     }
 
-    pub fn get_and_cvt_signed<F: APFloatOf>(&mut self, index: u8, round: Round) -> i128 {
-        let mut in_exact = true;
+    pub fn get_and_cvt_signed<F: APFloatOf, U: WordTrait>(
+        &mut self,
+        index: u8,
+        round: Round,
+    ) -> i128 {
         let f: F::Float = self.reg_file[index as usize].into();
 
-        let StatusAnd::<_> { mut status, value } = f.to_i128_r(32, round.into(), &mut in_exact);
-
-        if in_exact {
-            status |= Status::INEXACT;
+        if f.is_nan() {
+            return U::SignedType::MAX.into();
         }
+
+        let mut _is_exact = true;
+        let StatusAnd::<_> { status, value } = f.to_i128_r(U::BITS, round.into(), &mut _is_exact);
+
         self.last_status.set(status);
         value
-    }
-    pub fn get_and_cvt_i64<F: APFloatOf>(&mut self, index: u8, round: Round) -> i64 {
-        self.get_and_cvt_signed::<F>(index, round) as i64
-    }
-
-    pub fn get_and_cvt_i32<F: APFloatOf>(&mut self, index: u8, round: Round) -> i32 {
-        self.get_and_cvt_signed::<F>(index, round) as i32
     }
 
     pub fn float_convert_r<F: APFloatOf, T: APFloatOf>(
@@ -411,6 +415,28 @@ impl SoftFPU {
         let a: T::Float = self.reg_file[rs1 as usize].into();
         let b: T::Float = self.reg_file[rs2 as usize].into();
         self.save_and_unwrap(Op::apply(a, b))
+    }
+
+    pub fn min_num<T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8) {
+        let a: T::Float = self.reg_file[rs1 as usize].into();
+        let b: T::Float = self.reg_file[rs2 as usize].into();
+
+        if a.is_signaling() || b.is_signaling() {
+            self.last_status.set(Status::INVALID_OP);
+        }
+
+        self.reg_file[rd as usize] = a.min(b).into();
+    }
+
+    pub fn max_num<T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8) {
+        let a: T::Float = self.reg_file[rs1 as usize].into();
+        let b: T::Float = self.reg_file[rs2 as usize].into();
+
+        if a.is_signaling() || b.is_signaling() {
+            self.last_status.set(Status::INVALID_OP);
+        }
+
+        self.reg_file[rd as usize] = a.max(b).into();
     }
 
     pub fn exec_unary<Op, T: FloatPoint>(&mut self, rs1: u8, rd: u8)
@@ -547,31 +573,6 @@ mod tests {
             fpu.classify::<f32>(1),
             Classification::SubnormalNegative
         ));
-    }
-
-    #[test]
-    fn test_convert_r_i32() {
-        use rustc_apfloat::Status;
-
-        let mut fpu = SoftFPU::new();
-
-        fpu.set_f32(1, 1.9f32);
-
-        let n = fpu.get_and_cvt_i32::<f32>(1, Round::NearestTiesToEven);
-        assert_eq!(n, 2);
-
-        let z = fpu.get_and_cvt_i32::<f32>(1, Round::TowardZero);
-        assert_eq!(z, 1);
-
-        fpu.set_f32(2, -1.9f32);
-        let nz = fpu.get_and_cvt_i32::<f32>(2, Round::TowardZero);
-        assert_eq!(nz, -1);
-        let nd = fpu.get_and_cvt_i32::<f32>(2, Round::TowardNegative);
-        assert_eq!(nd, -2);
-
-        fpu.set_f32(3, 1.0f32 / 3.0f32);
-        let _ = fpu.get_and_cvt_i32::<f32>(3, Round::NearestTiesToEven);
-        assert!(fpu.last_status.get().contains(Status::INEXACT));
     }
 
     #[test]

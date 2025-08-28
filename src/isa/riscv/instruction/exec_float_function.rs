@@ -10,7 +10,7 @@ use crate::{
         instruction::RVInstrInfo,
         trap::Exception,
     },
-    utils::{FloatPoint, TruncateTo, UnsignedInteger, sign_extend, wrapping_add_as_signed},
+    utils::{FloatPoint, TruncateTo, WordTrait, sign_extend, wrapping_add_as_signed},
 };
 
 fn rm_to_round(cpu: &mut RV32CPU, rm: u8) -> Round {
@@ -190,7 +190,7 @@ where
 pub(super) fn exec_cvt_u_from_f<F, U>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     F: FloatPoint,
-    U: UnsignedInteger,
+    U: WordTrait,
 {
     if let RVInstrInfo::R_rm {
         rs1,
@@ -200,7 +200,8 @@ where
     } = info
     {
         let rm = rm_to_round(cpu, rm);
-        let data = U::truncate_from(cpu.fpu.get_and_cvt_unsigned::<F>(rs1, rm));
+        let data = U::truncate_from(cpu.fpu.get_and_cvt_unsigned::<F, U>(rs1, rm));
+        let data = data.sign_extend_to_wordtype(); // fcvt.wu.[s/d] also needs sign extension
         save_fflags_to_cpu(cpu);
         cpu.reg_file.write(rd, data.into());
     } else {
@@ -214,7 +215,7 @@ where
 pub(super) fn exec_cvt_i_from_f<F, U>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     F: FloatPoint,
-    U: UnsignedInteger,
+    U: WordTrait,
 {
     if let RVInstrInfo::R_rm {
         rs1,
@@ -224,7 +225,8 @@ where
     } = info
     {
         let rm = rm_to_round(cpu, rm);
-        let data = U::truncate_from(cpu.fpu.get_and_cvt_signed::<F>(rs1, rm) as u128);
+        let data = U::truncate_from(cpu.fpu.get_and_cvt_signed::<F, U>(rs1, rm) as u128);
+        let data = data.sign_extend_to_wordtype();
         save_fflags_to_cpu(cpu);
         cpu.reg_file.write(rd, data.into());
     } else {
@@ -279,7 +281,7 @@ where
         let val = cpu.reg_file.read(rs1, 0).0;
         let rm = rm_to_round(cpu, rm);
         cpu.fpu
-            .cvt_s_to_f_and_store::<F>(rd, val.truncate_to(BITS) as i128, rm);
+            .cvt_s_to_f_and_store::<F>(rd, val.cast_signed() as i128, rm);
         save_fflags_to_cpu(cpu);
     } else {
         std::unreachable!();
@@ -367,6 +369,36 @@ where
     if let RVInstrInfo::R { rs1, rs2: _, rd } = info {
         let rst = cpu.reg_file.read(rs1, 0).0;
         cpu.fpu.store_from_bits::<F>(rd, rst as u128);
+    } else {
+        std::unreachable!();
+    }
+
+    cpu.pc = cpu.pc.wrapping_add(4);
+    Ok(())
+}
+
+pub(super) fn exec_float_min<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+where
+    F: FloatPoint,
+{
+    if let RVInstrInfo::R { rs1, rs2, rd } = info {
+        cpu.fpu.min_num::<F>(rs1, rs2, rd);
+        save_fflags_to_cpu(cpu);
+    } else {
+        std::unreachable!();
+    }
+
+    cpu.pc = cpu.pc.wrapping_add(4);
+    Ok(())
+}
+
+pub(super) fn exec_float_max<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+where
+    F: FloatPoint,
+{
+    if let RVInstrInfo::R { rs1, rs2, rd } = info {
+        cpu.fpu.max_num::<F>(rs1, rs2, rd);
+        save_fflags_to_cpu(cpu);
     } else {
         std::unreachable!();
     }

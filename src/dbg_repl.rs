@@ -4,7 +4,7 @@ use crossterm::style::Stylize;
 use lazy_static::lazy_static;
 use riscv_emulator::{
     cli_coordinator::CliCoordinator,
-    config::arch_config::{REG_NAME, WordType},
+    config::arch_config::{FLOAT_REG_NAME, REG_NAME, WordType},
     isa::{
         ISATypes, InstrLen,
         riscv::{
@@ -82,6 +82,9 @@ enum PrintCmd {
     Csr {
         addr: String,
     },
+    FReg {
+        reg: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -98,6 +101,7 @@ enum PrintObject {
     Reg(u8),
     Mem(WordType, u32),
     CSR(WordType),
+    FReg(u8),
 }
 
 pub struct DebugREPL<I: ISATypes> {
@@ -189,6 +193,7 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 PrintObject::Reg(idx) => self.print_reg(idx)?,
                 PrintObject::Mem(addr, len) => self.print_mem(addr, len),
                 PrintObject::CSR(addr) => self.print_csr(addr),
+                PrintObject::FReg(idx) => self.print_float_reg(idx)?,
             }
         }
 
@@ -204,7 +209,8 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 self.print_pc();
             }
             Cli::Print(PrintCmd::Reg { reg }) => {
-                self.print_reg(parse_reg(&reg)?)?;
+                // TODO: unify handling of reg, csr, and freg
+                self.print_reg(parse_common_reg(&reg)?)?;
             }
             Cli::Print(PrintCmd::Mem { addr, len }) => {
                 self.print_mem(parse_u64(&addr)?, len);
@@ -212,12 +218,16 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             Cli::Print(PrintCmd::Csr { addr }) => {
                 self.print_csr(parse_csr(&addr)?);
             }
+            Cli::Print(PrintCmd::FReg { reg }) => {
+                self.print_float_reg(parse_float_reg(&reg)?)?;
+            }
 
             Cli::Display(PrintCmd::Pc) => {
                 self.watch_list.push(PrintObject::Pc);
             }
             Cli::Display(PrintCmd::Reg { reg }) => {
-                self.watch_list.push(PrintObject::Reg(parse_reg(&reg)?));
+                self.watch_list
+                    .push(PrintObject::Reg(parse_common_reg(&reg)?));
             }
             Cli::Display(PrintCmd::Mem { addr, len }) => {
                 self.watch_list
@@ -226,12 +236,16 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             Cli::Display(PrintCmd::Csr { addr }) => {
                 self.watch_list.push(PrintObject::CSR(parse_csr(&addr)?));
             }
+            Cli::Display(PrintCmd::FReg { reg }) => {
+                self.watch_list
+                    .push(PrintObject::FReg(parse_float_reg(&reg)?));
+            }
 
             Cli::Undisplay(PrintCmd::Pc) => {
                 self.watch_list.retain(|&item| item != PrintObject::Pc);
             }
             Cli::Undisplay(PrintCmd::Reg { reg }) => {
-                let reg_idx = parse_reg(&reg)?;
+                let reg_idx = parse_common_reg(&reg)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::Reg(reg_idx));
             }
@@ -244,6 +258,11 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
                 let csr_addr = parse_csr(&addr)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::CSR(csr_addr));
+            }
+            Cli::Undisplay(PrintCmd::FReg { reg }) => {
+                let reg_idx = parse_float_reg(&reg)?;
+                self.watch_list
+                    .retain(|&item| item != PrintObject::FReg(reg_idx));
             }
 
             Cli::History => {
@@ -348,6 +367,12 @@ impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
             palette.reg(REG_NAME[idx as usize]),
             format_data(val)
         );
+        Ok(())
+    }
+
+    fn print_float_reg(&self, idx: u8) -> Result<(), String> {
+        let val = self.dbg.read_float_reg(idx);
+        println!("{} = {:.4}", palette.reg(FLOAT_REG_NAME[idx as usize]), val);
         Ok(())
     }
 
@@ -470,13 +495,13 @@ fn parse_word(s: &str) -> Result<WordType, String> {
     parse_u64(s).map(|v| v as WordType)
 }
 
-fn parse_reg(s: &str) -> Result<u8, String> {
+fn parse_reg(s: &str, reg_list: &[&str], prefix: char) -> Result<u8, String> {
     let t = s.trim();
-    if let Some(index) = REG_NAME.iter().position(|s| s.split("/").any(|r| r == t)) {
+    if let Some(index) = reg_list.iter().position(|s| s.split("/").any(|r| r == t)) {
         return Ok(index as u8);
     }
 
-    if let Some(rest) = t.strip_prefix('x') {
+    if let Some(rest) = t.strip_prefix(prefix) {
         if let Ok(n) = rest.parse::<u8>() {
             if n < 32 {
                 return Ok(n);
@@ -485,6 +510,14 @@ fn parse_reg(s: &str) -> Result<u8, String> {
     }
 
     Err(format!("invalid register: {}", s))
+}
+
+fn parse_common_reg(s: &str) -> Result<u8, String> {
+    parse_reg(s, &REG_NAME, 'x')
+}
+
+fn parse_float_reg(s: &str) -> Result<u8, String> {
+    parse_reg(s, &FLOAT_REG_NAME, 'f')
 }
 
 fn parse_csr(s: &str) -> Result<WordType, String> {
@@ -531,6 +564,8 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
         }
         let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
         match info {
+            // TODO: Cannot tell float register and common register.
+            // Implement a disassembler for this.
             RVInstrInfo::I { rd, rs1, imm } => {
                 format!(
                     "{} {},{},{} - type I",
@@ -548,6 +583,35 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                     palette.reg(REG_NAME[rd as usize]),
                     palette.reg(REG_NAME[rs1 as usize]),
                     palette.reg(REG_NAME[rs2 as usize])
+                )
+            }
+
+            RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
+                format!(
+                    "{} {},{},{} rm={} - type R",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    rm,
+                )
+            }
+
+            RVInstrInfo::R4_rm {
+                rs1,
+                rs2,
+                rs3,
+                rd,
+                rm,
+            } => {
+                format!(
+                    "{} {},{},{},{} rm={} - type R4",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rs1 as usize]),
+                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.reg(REG_NAME[rs3 as usize]),
+                    rm
                 )
             }
 
@@ -602,12 +666,12 @@ mod test {
     #[test]
     #[cfg(feature = "riscv64")]
     fn test_parse_reg_riscv64() {
-        assert_eq!(parse_reg("x0"), Ok(0));
-        assert_eq!(parse_reg("a5"), Ok(15));
-        assert_eq!(parse_reg("x31"), Ok(31));
-        assert!(matches!(parse_reg("x32"), Err(_)));
+        assert_eq!(parse_common_reg("x0"), Ok(0));
+        assert_eq!(parse_common_reg("a5"), Ok(15));
+        assert_eq!(parse_common_reg("x31"), Ok(31));
+        assert!(matches!(parse_common_reg("x32"), Err(_)));
 
-        assert!(REG_NAME[parse_reg("s0").unwrap() as usize] == "s0/fp");
-        assert!(REG_NAME[parse_reg("fp").unwrap() as usize] == "s0/fp");
+        assert!(REG_NAME[parse_common_reg("s0").unwrap() as usize] == "s0/fp");
+        assert!(REG_NAME[parse_common_reg("fp").unwrap() as usize] == "s0/fp");
     }
 }

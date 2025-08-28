@@ -195,7 +195,11 @@ macro_rules! impl_truncate_to {
     ($T:ty) => {
         impl TruncateTo<$T> for $T {
             fn truncate_to(self, bits: u32) -> Self {
-                self & ((1 << bits) - 1)
+                if bits >= 64 {
+                    self
+                } else {
+                    ((self as u64) & ((1u64.wrapping_shl(bits)) - 1)) as Self
+                }
             }
         }
     };
@@ -260,12 +264,124 @@ pub trait UnsignedInteger:
     + TruncateFrom<WordType>
     + TruncateFrom<u128>
 {
+    const MAX: Self;
+    const MIN: Self;
+
+    const BITS: usize;
 }
 
-impl UnsignedInteger for u8 {}
-impl UnsignedInteger for u16 {}
-impl UnsignedInteger for u32 {}
-impl UnsignedInteger for u64 {}
+impl UnsignedInteger for u8 {
+    const MAX: u8 = u8::MAX;
+    const MIN: u8 = u8::MIN;
+    const BITS: usize = 8;
+}
+impl UnsignedInteger for u16 {
+    const MAX: u16 = u16::MAX;
+    const MIN: u16 = u16::MIN;
+    const BITS: usize = 16;
+}
+impl UnsignedInteger for u32 {
+    const MAX: u32 = u32::MAX;
+    const MIN: u32 = u32::MIN;
+    const BITS: usize = 32;
+}
+impl UnsignedInteger for u64 {
+    const MAX: u64 = u64::MAX;
+    const MIN: u64 = u64::MIN;
+    const BITS: usize = 64;
+}
+
+pub trait SignedInteger:
+    Copy
+    + Sized
+    + From<i8>
+    + Into<i64>
+    // 算术运算符
+    + Add<Output = Self>
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + Mul<Output = Self>
+    + MulAssign
+    + Div<Output = Self>
+    + DivAssign
+    // 位运算符
+    + BitAnd<Output = Self>
+    + BitAndAssign
+    + BitOr<Output = Self>
+    + BitOrAssign
+    + BitXor<Output = Self>
+    + BitXorAssign
+    + Not<Output = Self>
+    // 位移操作
+    + Shl<u32, Output = Self>
+    + ShlAssign<u32>
+    + Shr<u32, Output = Self>
+    + ShrAssign<u32>
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + Debug
+    + Display
+{
+    const MAX: Self;
+    const MIN: Self;
+
+    const BITS: usize;
+}
+
+impl SignedInteger for i8 {
+    const MAX: i8 = i8::MAX;
+    const MIN: i8 = i8::MIN;
+    const BITS: usize = 8;
+}
+
+impl SignedInteger for i16 {
+    const MAX: i16 = i16::MAX;
+    const MIN: i16 = i16::MIN;
+    const BITS: usize = 16;
+}
+
+impl SignedInteger for i32 {
+    const MAX: i32 = i32::MAX;
+    const MIN: i32 = i32::MIN;
+    const BITS: usize = 32;
+}
+
+impl SignedInteger for i64 {
+    const MAX: i64 = i64::MAX;
+    const MIN: i64 = i64::MIN;
+    const BITS: usize = 64;
+}
+
+pub trait WordTrait: UnsignedInteger + Into<u128> {
+    type SignedType: SignedInteger + Into<i128>;
+    fn sign_extend_to_wordtype(self) -> WordType;
+}
+
+impl WordTrait for u32 {
+    type SignedType = i32;
+
+    #[cfg(feature = "riscv32")]
+    fn sign_extend_to_wordtype(self) -> WordType {
+        self
+    }
+
+    #[cfg(feature = "riscv64")]
+    fn sign_extend_to_wordtype(self) -> WordType {
+        sign_extend_u32(self)
+    }
+}
+
+#[cfg(feature = "riscv64")]
+impl WordTrait for u64 {
+    type SignedType = i64;
+
+    fn sign_extend_to_wordtype(self) -> WordType {
+        self
+    }
+}
 
 pub trait InBits<U> {
     fn from_bits(x: U) -> Self;
@@ -387,5 +503,12 @@ mod test {
     fn test_negative_of() {
         assert_eq!(negative_of(1 as WordType), (!0) as WordType);
         assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
+    }
+
+    #[test]
+    fn test_truncate() {
+        assert_eq!(u8::truncate_from(0x1234u32), 0x34u8);
+        assert_eq!(0x1234567812345678u64.truncate_to(32), 0x12345678u64);
+        assert_eq!(0x1234567812345678u64.truncate_to(64), 0x1234567812345678u64);
     }
 }

@@ -155,8 +155,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FMSUB_S => exec_float_arith_r4_rm::<f32, MulSubOp>,
         RiscvInstr::FNMSUB_S => exec_float_arith_r4_rm::<f32, NegMulSubOp>,
         RiscvInstr::FSQRT_S => exec_float_unary::<f32, SqrtOp>,
-        RiscvInstr::FMIN_S => exec_float_arith_r::<f32, MinOp>,
-        RiscvInstr::FMAX_S => exec_float_arith_r::<f32, MaxOp>,
+        RiscvInstr::FMIN_S => exec_float_min::<f32>,
+        RiscvInstr::FMAX_S => exec_float_max::<f32>,
 
         // Sign injection
         RiscvInstr::FSGNJ_S => exec_float_arith_r::<f32, SignInjectOp>,

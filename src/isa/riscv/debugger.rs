@@ -74,6 +74,10 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
         self.memory.write::<T>(addr, data)
     }
 
+    fn read_float_reg(&self, idx: u8) -> f64 {
+        self.fpu.load::<f32>(idx) as f64 // TODO: Support debugging f64 (which needs to implement NAN boxing).
+    }
+
     /// match input {
     ///     Some() => `Read Write`,
     ///     None => `Read Only`,
@@ -102,7 +106,7 @@ impl Breakpoint {
     }
 }
 
-const SAVE_PC_CNT: usize = 10;
+const SAVE_PC_CNT: usize = 20;
 
 pub struct Debugger<I: ISATypes> {
     breakpoints: BTreeMap<Breakpoint, I::RawInstr>,
@@ -237,6 +241,10 @@ impl<I: ISATypes> Debugger<I> {
 
     pub fn write_pc(&mut self, val: WordType) {
         self.target.write_pc(val)
+    }
+
+    pub fn read_float_reg(&self, idx: u8) -> f64 {
+        self.target.read_float_reg(idx)
     }
 
     pub fn read_mem<V: UnsignedInteger>(&mut self, addr: WordType) -> Result<V, MemError> {

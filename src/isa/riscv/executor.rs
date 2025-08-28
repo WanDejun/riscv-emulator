@@ -356,9 +356,51 @@ mod tests {
         );
 
         run_test_exec_decode(
-            0x00102573, // frflags a0 => csrrs a0, fflags, x0 
+            0x00102573, // frflags a0 => csrrs a0, fflags, x0
             |builder| builder.csr(csr_index::fcsr, 0b11011011),
             |checker| checker.reg(10, 0b11011),
+        );
+
+        run_test_exec_decode(
+            0xd0057553, // fcvt.s.w fa0,a0
+            |builder| builder.reg(10, negative_of(2)),
+            |checker| checker.reg_f32(10, -2.0),
+        );
+
+        run_test_exec_decode(
+            0xd0357553, // fcvt.s.lu fa0,a0
+            |builder| builder.reg(10, 2),
+            |checker| checker.reg_f32(10, 2.0),
+        );
+
+        run_test_exec_decode(
+            0xc0051553, // fcvt.w.s a0,fa0,rtz
+            |builder| builder.reg_f32(10, -1.1),
+            |checker| checker.reg(10, negative_of(1)).csr(csr_index::fflags, 1),
+        );
+
+        run_test_exec_decode(
+            0xc0051553, // fcvt.w.s a0,fa0,rtz
+            |builder| builder.reg_f32(10, -1.0),
+            |checker| checker.reg(10, negative_of(1)).csr(csr_index::fflags, 0),
+        );
+
+        // Cannot represent in dest format.
+        run_test_exec_decode(
+            0xc0051553, // fcvt.w.s a0,fa0,rtz
+            |builder| builder.reg_f32(10, -3e9),
+            |checker| {
+                checker
+                    .reg(10, negative_of(1).wrapping_shl(31))
+                    .csr(csr_index::fflags, 0x10)
+            },
+        );
+
+        // fcvt.w.s `-NAN`, should give i32::MAX
+        run_test_exec_decode(
+            0xc0051553, // fcvt.w.s a0,fa0,rtz
+            |builder| builder.reg_f32(10, f32::from_bits(0xffffffff)),
+            |checker| checker.reg(10, i32::MAX as WordType),
         );
     }
 }
