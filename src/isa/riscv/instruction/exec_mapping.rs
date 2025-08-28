@@ -1,5 +1,6 @@
 use crate::{
     config::arch_config::WordType,
+    fpu::soft_float::*,
     isa::riscv::{
         executor::RV32CPU,
         instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
@@ -12,6 +13,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
     instr: RiscvInstr,
 ) -> fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception> {
     match instr {
+        //---------------------------------------
+        // RV_I
+        //---------------------------------------
+
         // Arith
         RiscvInstr::ADD | RiscvInstr::ADDI => exec_arith::<ExecAdd>,
         RiscvInstr::ADDW | RiscvInstr::ADDIW => exec_arith::<ExecAddw>,
@@ -135,5 +140,55 @@ pub(in crate::isa::riscv) fn get_exec_func(
             Ok(())
         },
         RiscvInstr::WFI => exec_nop,
+
+        //---------------------------------------
+        // RV_F
+        //---------------------------------------
+
+        // Arith
+        RiscvInstr::FADD_S => exec_float_arith_r_rm::<f32, AddOp>,
+        RiscvInstr::FSUB_S => exec_float_arith_r_rm::<f32, SubOp>,
+        RiscvInstr::FMUL_S => exec_float_arith_r_rm::<f32, MulOp>,
+        RiscvInstr::FDIV_S => exec_float_arith_r_rm::<f32, DivOp>,
+        RiscvInstr::FMADD_S => exec_float_arith_r4_rm::<f32, MulAddOp>,
+        RiscvInstr::FNMADD_S => exec_float_arith_r4_rm::<f32, NegMulAddOp>,
+        RiscvInstr::FMSUB_S => exec_float_arith_r4_rm::<f32, MulSubOp>,
+        RiscvInstr::FNMSUB_S => exec_float_arith_r4_rm::<f32, NegMulSubOp>,
+        RiscvInstr::FSQRT_S => exec_float_unary::<f32, SqrtOp>,
+        RiscvInstr::FMIN_S => exec_float_min::<f32>,
+        RiscvInstr::FMAX_S => exec_float_max::<f32>,
+
+        // Sign injection
+        RiscvInstr::FSGNJ_S => exec_float_arith_r::<f32, SignInjectOp>,
+        RiscvInstr::FSGNJN_S => exec_float_arith_r::<f32, SignInjectNegOp>,
+        RiscvInstr::FSGNJX_S => exec_float_arith_r::<f32, SignInjectXorOp>,
+
+        // Convert (RV32F)
+        RiscvInstr::FCVT_W_S => exec_cvt_i_from_f::<f32, u32>,
+        RiscvInstr::FCVT_WU_S => exec_cvt_u_from_f::<f32, u32>,
+        RiscvInstr::FCVT_S_W => exec_cvt_f_from_i::<f32, 32>,
+        RiscvInstr::FCVT_S_WU => exec_cvt_f_from_u::<f32, 32>,
+
+        // Convert (RV64F)
+        RiscvInstr::FCVT_L_S => exec_cvt_i_from_f::<f32, u64>,
+        RiscvInstr::FCVT_LU_S => exec_cvt_u_from_f::<f32, u64>,
+        RiscvInstr::FCVT_S_L => exec_cvt_f_from_i::<f32, 64>,
+        RiscvInstr::FCVT_S_LU => exec_cvt_f_from_u::<f32, 64>,
+
+        // Float Compare
+        RiscvInstr::FEQ_S => exec_float_compare::<EqOp, f32>,
+        RiscvInstr::FLT_S => exec_float_compare::<LtOp, f32>,
+        RiscvInstr::FLE_S => exec_float_compare::<LeOp, f32>,
+
+        // Store/Load
+        RiscvInstr::FLW => exec_float_load::<f32>,
+        RiscvInstr::FSW => exec_float_store::<f32>,
+
+        // Move
+        RiscvInstr::FMV_X_W => exec_mv_x_from_f::<f32, true>,
+        RiscvInstr::FMV_W_X => exec_mv_f_from_x::<f32>,
+
+        // Classify
+        RiscvInstr::FCLASS_S => exec_float_classify::<f32>,
     }
 }

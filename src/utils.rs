@@ -4,7 +4,10 @@ use std::{
     usize,
 };
 
-use crate::config::arch_config::{SignedWordType, WordType, XLEN};
+use crate::{
+    config::arch_config::{SignedWordType, WordType, XLEN},
+    fpu::soft_float::APFloatOf,
+};
 
 fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
 where
@@ -31,6 +34,12 @@ pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
 
 pub fn sign_extend_u32(value: u32) -> u64 {
     sign_extend(value as WordType, 32)
+}
+
+pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
+    lhs.cast_signed()
+        .wrapping_add(rhs.cast_signed())
+        .cast_unsigned()
 }
 
 /// get the negative of given number of [`WordType`] in 2's complement.
@@ -186,16 +195,33 @@ macro_rules! impl_truncate_to {
     ($T:ty) => {
         impl TruncateTo<$T> for $T {
             fn truncate_to(self, bits: u32) -> Self {
-                self & ((1 << bits) - 1)
+                if bits >= 64 {
+                    self
+                } else {
+                    ((self as u64) & ((1u64.wrapping_shl(bits)) - 1)) as Self
+                }
             }
         }
     };
 }
 
-impl_truncate_from!(WordType, u8);
-impl_truncate_from!(WordType, u16);
-impl_truncate_from!(WordType, u32);
-impl_truncate_from!(WordType, u64);
+impl_truncate_from!(u32, u8);
+impl_truncate_from!(u32, u16);
+impl_truncate_from!(u32, u32);
+impl_truncate_from!(u32, u64);
+impl_truncate_from!(u32, u128);
+
+impl_truncate_from!(u64, u8);
+impl_truncate_from!(u64, u16);
+impl_truncate_from!(u64, u32);
+impl_truncate_from!(u64, u64);
+impl_truncate_from!(u64, u128);
+
+impl_truncate_from!(u128, u8);
+impl_truncate_from!(u128, u16);
+impl_truncate_from!(u128, u32);
+impl_truncate_from!(u128, u64);
+impl_truncate_from!(u128, u128);
 
 impl_truncate_to!(u8);
 impl_truncate_to!(u16);
@@ -236,12 +262,193 @@ pub trait UnsignedInteger:
     + Debug
     + Display
     + TruncateFrom<WordType>
+    + TruncateFrom<u128>
 {
+    const MAX: Self;
+    const MIN: Self;
+
+    const BITS: usize;
 }
-impl UnsignedInteger for u8 {}
-impl UnsignedInteger for u16 {}
-impl UnsignedInteger for u32 {}
-impl UnsignedInteger for u64 {}
+
+impl UnsignedInteger for u8 {
+    const MAX: u8 = u8::MAX;
+    const MIN: u8 = u8::MIN;
+    const BITS: usize = 8;
+}
+impl UnsignedInteger for u16 {
+    const MAX: u16 = u16::MAX;
+    const MIN: u16 = u16::MIN;
+    const BITS: usize = 16;
+}
+impl UnsignedInteger for u32 {
+    const MAX: u32 = u32::MAX;
+    const MIN: u32 = u32::MIN;
+    const BITS: usize = 32;
+}
+impl UnsignedInteger for u64 {
+    const MAX: u64 = u64::MAX;
+    const MIN: u64 = u64::MIN;
+    const BITS: usize = 64;
+}
+
+pub trait SignedInteger:
+    Copy
+    + Sized
+    + From<i8>
+    + Into<i64>
+    // 算术运算符
+    + Add<Output = Self>
+    + AddAssign
+    + Sub<Output = Self>
+    + SubAssign
+    + Mul<Output = Self>
+    + MulAssign
+    + Div<Output = Self>
+    + DivAssign
+    // 位运算符
+    + BitAnd<Output = Self>
+    + BitAndAssign
+    + BitOr<Output = Self>
+    + BitOrAssign
+    + BitXor<Output = Self>
+    + BitXorAssign
+    + Not<Output = Self>
+    // 位移操作
+    + Shl<u32, Output = Self>
+    + ShlAssign<u32>
+    + Shr<u32, Output = Self>
+    + ShrAssign<u32>
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + Debug
+    + Display
+{
+    const MAX: Self;
+    const MIN: Self;
+
+    const BITS: usize;
+}
+
+impl SignedInteger for i8 {
+    const MAX: i8 = i8::MAX;
+    const MIN: i8 = i8::MIN;
+    const BITS: usize = 8;
+}
+
+impl SignedInteger for i16 {
+    const MAX: i16 = i16::MAX;
+    const MIN: i16 = i16::MIN;
+    const BITS: usize = 16;
+}
+
+impl SignedInteger for i32 {
+    const MAX: i32 = i32::MAX;
+    const MIN: i32 = i32::MIN;
+    const BITS: usize = 32;
+}
+
+impl SignedInteger for i64 {
+    const MAX: i64 = i64::MAX;
+    const MIN: i64 = i64::MIN;
+    const BITS: usize = 64;
+}
+
+pub trait WordTrait: UnsignedInteger + Into<u128> {
+    type SignedType: SignedInteger + Into<i128>;
+    fn sign_extend_to_wordtype(self) -> WordType;
+}
+
+impl WordTrait for u32 {
+    type SignedType = i32;
+
+    #[cfg(feature = "riscv32")]
+    fn sign_extend_to_wordtype(self) -> WordType {
+        self
+    }
+
+    #[cfg(feature = "riscv64")]
+    fn sign_extend_to_wordtype(self) -> WordType {
+        sign_extend_u32(self)
+    }
+}
+
+#[cfg(feature = "riscv64")]
+impl WordTrait for u64 {
+    type SignedType = i64;
+
+    fn sign_extend_to_wordtype(self) -> WordType {
+        self
+    }
+}
+
+pub trait InBits<U> {
+    fn from_bits(x: U) -> Self;
+    fn to_bits(self) -> U;
+}
+
+pub trait FloatPoint:
+    Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
+    + PartialEq
+    + PartialOrd
+    + Copy
+    + From<f32>
+    + Into<f64>
+    + Debug
+    + Display
+    + InBits<Self::BitsType>
+    + APFloatOf
+{
+    type BitsType: UnsignedInteger;
+}
+
+impl InBits<u32> for f32 {
+    #[inline]
+    fn from_bits(x: u32) -> Self {
+        f32::from_bits(x)
+    }
+
+    #[inline]
+    fn to_bits(self) -> u32 {
+        self.to_bits()
+    }
+}
+impl InBits<u64> for f64 {
+    #[inline]
+    fn from_bits(x: u64) -> Self {
+        f64::from_bits(x)
+    }
+
+    #[inline]
+    fn to_bits(self) -> u64 {
+        self.to_bits()
+    }
+}
+
+impl FloatPoint for f32 {
+    type BitsType = u32;
+}
+impl FloatPoint for f64 {
+    type BitsType = u64;
+}
+
+pub trait InFloat {
+    type Float;
+}
+
+impl InFloat for u32 {
+    type Float = f32;
+}
+
+impl InFloat for u64 {
+    type Float = f64;
+}
+
+pub type FloatOf<T> = <T as InFloat>::Float;
 
 #[allow(unused)]
 pub fn set_bit<T>(data: &mut T, idx: u32)
@@ -296,5 +503,12 @@ mod test {
     fn test_negative_of() {
         assert_eq!(negative_of(1 as WordType), (!0) as WordType);
         assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
+    }
+
+    #[test]
+    fn test_truncate() {
+        assert_eq!(u8::truncate_from(0x1234u32), 0x34u8);
+        assert_eq!(0x1234567812345678u64.truncate_to(32), 0x12345678u64);
+        assert_eq!(0x1234567812345678u64.truncate_to(64), 0x1234567812345678u64);
     }
 }

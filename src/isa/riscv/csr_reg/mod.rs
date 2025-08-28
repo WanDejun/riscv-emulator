@@ -2,16 +2,12 @@ pub mod csr_macro;
 
 use std::collections::HashMap;
 
-use crate::{
-    config::arch_config::WordType,
-    isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, UniversalCsr},
-};
+use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
 
 #[rustfmt::skip]
 #[allow(non_upper_case_globals, unused)]
 pub(crate) mod csr_index {
     use crate::config::arch_config::WordType;
-
     pub const mstatus   : WordType  = 0x300;    // CPU 状态寄存器，控制中断使能、特权级别
     pub const misa      : WordType  = 0x301;    // ISA 特性寄存器，标明 CPU 支持的指令集扩展
     pub const mie       : WordType  = 0x304;    // 机器中断使能寄存器
@@ -22,6 +18,11 @@ pub(crate) mod csr_index {
     pub const mtval     : WordType  = 0x343;    // 异常附加信息（例如非法访问地址）
     pub const mip       : WordType  = 0x344;    // 中断挂起寄存器
     // pub const mhartid   : WordType  = 0xF14;    // CPU hart ID（多核情况下）
+
+    // Floating-Point CSR
+    pub const fflags    : WordType  = 0x001;
+    pub const frm       : WordType  = 0x002;
+    pub const fcsr      : WordType  = 0x003;
 }
 
 #[repr(u8)]
@@ -76,14 +77,45 @@ impl CsrRegFile {
     }
 
     pub fn read(&self, addr: WordType) -> Option<WordType> {
-        self.table.get(&addr).copied()
+        // Special-case fflags and frm; they are subfields of fcsr
+        if addr == csr_index::fflags {
+            self.table
+                .get(&csr_index::fcsr)
+                .copied()
+                .map(|x| x & 0b11111)
+        } else if addr == csr_index::frm {
+            self.table
+                .get(&csr_index::fcsr)
+                .copied()
+                .map(|x| (x >> 5) & 0b111)
+        } else {
+            self.table.get(&addr).copied()
+        }
     }
 
     pub fn write(&mut self, addr: WordType, data: WordType) {
-        if let Some(val) = self.table.get_mut(&addr) {
-            *val = data
+        // Special-case fflags and frm; they are subfields of fcsr
+        if addr == csr_index::fflags {
+            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+                *fcsr = (*fcsr & !0b11111) | (data & 0b11111);
+            } // TODO: Raise error
+        } else if addr == csr_index::frm {
+            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+                *fcsr = (*fcsr & !0b11100000) | ((data & 0b111) << 5);
+            } // TODO: Raise error
+        } else if addr == csr_index::fcsr {
+            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+                // Quoted from RISC-V manual:
+                // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
+                // implementations shall ignore writes to these bits and supply a zero value when read."
+                *fcsr = data & 0xFF;
+            } // TODO: Raise error
         } else {
-            // TODO: Raise error
+            if let Some(val) = self.table.get_mut(&addr) {
+                *val = data
+            } else {
+                // TODO: Raise error
+            }
         }
     }
 
@@ -106,11 +138,6 @@ impl CsrRegFile {
     {
         let val = self.table.get_mut(&T::get_index())?;
         Some(T::from(val as *mut u64))
-    }
-
-    pub fn get<'a>(&'a mut self, addr: WordType) -> Option<UniversalCsr> {
-        let val = self.table.get_mut(&addr)?;
-        Some(UniversalCsr::from(val as *mut u64))
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {

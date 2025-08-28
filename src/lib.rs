@@ -7,6 +7,7 @@
 #![feature(unsafe_cell_access)]
 
 mod cpu;
+mod fpu;
 mod ram;
 mod utils;
 

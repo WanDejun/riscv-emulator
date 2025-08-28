@@ -38,6 +38,8 @@ impl Decoder {
             .add(TABLE_RV64M)
             .add(TABLE_RVZICSR)
             .add(TABLE_RVSYSTEM)
+            .add(TABLE_RV32F)
+            .add(TABLE_RV64F)
             .build();
         Self {
             funct3_decoder: funct_decoder::Decoder::from_isa(&isa),
@@ -64,9 +66,23 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
     let rd = ((raw_instr >> 7) & 0b11111) as u8;
     let rs1 = ((raw_instr >> 15) & 0b11111) as u8;
     let rs2 = ((raw_instr >> 20) & 0b11111) as u8;
+    let f3 = ((raw_instr >> 12) & 0b111) as u8;
 
     match fmt {
         InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },
+        InstrFormat::R_rm => RVInstrInfo::R_rm {
+            rs1,
+            rs2,
+            rd,
+            rm: f3,
+        },
+        InstrFormat::R4_rm => RVInstrInfo::R4_rm {
+            rd,
+            rs1,
+            rs2,
+            rs3: ((raw_instr >> 27) & 0b11111) as u8,
+            rm: f3,
+        },
         InstrFormat::I => {
             let mut imm = ((raw_instr >> 20) & 0xFFF) as WordType;
 
@@ -127,7 +143,10 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
 mod tests {
     use crate::{
         config::arch_config::WordType,
-        isa::riscv::instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+        isa::riscv::{
+            csr_reg::csr_index,
+            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+        },
         utils::{TruncateTo, negative_of},
     };
 
@@ -409,6 +428,47 @@ mod tests {
                 rs1: 15,
                 rd: 15,
                 imm: 2,
+            },
+        );
+    }
+
+    #[test]
+    fn test_decoder_rv64f() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            0x00b576d3, // fadd.s fa3,fa0,fa1
+            RiscvInstr::FADD_S,
+            RVInstrInfo::R_rm {
+                rd: 13,
+                rs1: 10,
+                rs2: 11,
+                rm: 7,
+            },
+        );
+    }
+
+    #[test]
+    fn test_deocder_csr() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            0x001015f3, // fsflags a1,zero => csrrw a1, fflags, zero
+            RiscvInstr::CSRRW,
+            RVInstrInfo::I {
+                rs1: 0,
+                rd: 11,
+                imm: csr_index::fflags,
+            },
+        );
+
+        checker.check(
+            0xe0068553, // fmv.x.w a0,fa3
+            RiscvInstr::FMV_X_W,
+            RVInstrInfo::R {
+                rs1: 13,
+                rs2: 0,
+                rd: 10,
             },
         );
     }

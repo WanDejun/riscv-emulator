@@ -1,3 +1,5 @@
+mod exec_float_function;
+
 pub(super) mod exec_function;
 pub mod exec_mapping;
 pub mod rv32i_table;
@@ -9,17 +11,54 @@ use crate::config::arch_config::WordType;
 /// Type B: 1
 /// Type U: 12
 /// Type J: 12
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RVInstrInfo {
     None,
-    R { rs1: u8, rs2: u8, rd: u8 },
-    I { rs1: u8, rd: u8, imm: WordType },
-    S { rs1: u8, rs2: u8, imm: WordType },
-    B { rs1: u8, rs2: u8, imm: WordType },
-    U { rd: u8, imm: WordType },
-    J { rd: u8, imm: WordType },
+    R {
+        rs1: u8,
+        rs2: u8,
+        rd: u8,
+    },
+    R_rm {
+        rs1: u8,
+        rs2: u8,
+        rd: u8,
+        rm: u8,
+    },
+    R4_rm {
+        rs1: u8,
+        rs2: u8,
+        rs3: u8,
+        rd: u8,
+        rm: u8,
+    },
+    I {
+        rs1: u8,
+        rd: u8,
+        imm: WordType,
+    },
+    S {
+        rs1: u8,
+        rs2: u8,
+        imm: WordType,
+    },
+    B {
+        rs1: u8,
+        rs2: u8,
+        imm: WordType,
+    },
+    U {
+        rd: u8,
+        imm: WordType,
+    },
+    J {
+        rd: u8,
+        imm: WordType,
+    },
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum InstrFormat {
     U,
@@ -28,6 +67,8 @@ pub enum InstrFormat {
     I,
     S,
     R,
+    R_rm,
+    R4_rm,
     None,
 }
 
