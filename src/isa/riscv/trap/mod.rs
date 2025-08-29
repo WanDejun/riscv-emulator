@@ -112,6 +112,8 @@ impl Exception {
             MemError::LoadFault => Exception::LoadFault,
             MemError::StoreMisaligned => Exception::StoreMisaligned,
             MemError::StoreFault => Exception::StoreFault,
+            MemError::LoadPageFault => Exception::LoadPageFault,
+            MemError::StorePageFault => Exception::StorePageFault,
         }
     }
 

@@ -2,7 +2,6 @@ pub(super) use super::exec_float_function::*;
 
 use crate::{
     config::arch_config::{SignedWordType, WordType},
-    device::Mem,
     isa::riscv::{
         csr_reg::csr_index, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
     },

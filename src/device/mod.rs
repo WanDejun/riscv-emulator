@@ -9,8 +9,10 @@ pub mod power_manager;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MemError {
+    LoadPageFault,
     LoadMisaligned,
     LoadFault,
+    StorePageFault,
     StoreMisaligned,
     StoreFault,
 }

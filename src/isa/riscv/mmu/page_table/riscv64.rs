@@ -119,10 +119,11 @@ impl PageTableEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PageTableError {
     AlignFault,
     PageFault,
+    PrivilegeFault,
 }
 
 pub struct PageTable {
@@ -147,12 +148,22 @@ impl PageTable {
     }
 
     // TODO: Maybe we need to take shared owership in virtual memory manager to avoid intermediate overhead
+    // TODO: Read/Write/Execute check.
+    // TODO: Privilege check.
     pub fn translate_addr(
         &self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
+        flag: PTEFlags,
     ) -> Result<PhysicalAddr, PageTableError> {
+        if self.mode == VirtualMemoryMode::None {
+            return Ok(vaddr.0.into());
+        }
+
         let target_pte = self.find_pte(mem, vaddr.floor())?;
+        if !target_pte.0.check_flag(flag) {
+            return Err(PageTableError::PrivilegeFault);
+        }
         let ppn = target_pte.0.ppn();
         let paddr = match target_pte.1 {
             PageSize::Small4K => ppn.0 | (vaddr.0 & ((1 << (1 * PAGE_SIZE_XLEN as WordType)) - 1)),
@@ -225,7 +236,7 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr(&mut ram, 0x0000_0123.into())
+            .translate_addr(&mut ram, 0x0000_0123.into(), PTEFlags::R)
             .unwrap();
         assert_eq!(paddr.0, data_page | 0x123);
     }
@@ -256,8 +267,42 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr(&mut ram, 0x0011_4514.into())
+            .translate_addr(&mut ram, 0x0011_4514.into(), PTEFlags::W)
             .unwrap();
         assert_eq!(paddr.0, 0x8111_4514);
+    }
+
+    #[test]
+    fn rwx_authority_test() {
+        let mut ram: Ram = Ram::new();
+        let ppn0 = 0x8000_1000u64;
+        let ppn1 = 0x8000_2000u64;
+        let ppn2 = 0x8000_3000u64;
+        let data_page = 0x8000_4000u64;
+
+        let mut pte = PageTableEntry::empty();
+        pte.set_vaild();
+
+        // level 0
+        pte.set_ppn(ppn1.into());
+        ram.write(ppn0 - ram_config::BASE_ADDR, pte.bits).unwrap();
+
+        // level 1
+        pte.set_ppn(ppn2.into());
+        ram.write(ppn1 - ram_config::BASE_ADDR, pte.bits).unwrap();
+
+        // level 2
+        pte.set_ppn(data_page.into());
+        pte.set_readable();
+        pte.set_writeable();
+        ram.write(ppn2 - ram_config::BASE_ADDR, pte.bits).unwrap();
+
+        let page_table = PageTable::new(ppn0.into(), VirtualMemoryMode::Page39bit);
+
+        // try get instr, without X authority.
+        let err = page_table
+            .translate_addr(&mut ram, 0x0000_0010.into(), PTEFlags::X)
+            .unwrap_err();
+        assert_eq!(err, PageTableError::PrivilegeFault);
     }
 }

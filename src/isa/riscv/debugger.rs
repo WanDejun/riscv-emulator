@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     config::arch_config::WordType,
-    device::{Mem, MemError},
+    device::MemError,
     isa::{
         DebugTarget, DecoderTrait, HasBreakpointException, ISATypes,
         icache::ICache,

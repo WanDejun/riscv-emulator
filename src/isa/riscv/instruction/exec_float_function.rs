@@ -2,7 +2,6 @@ use rustc_apfloat::Status;
 
 use crate::{
     config::arch_config::WordType,
-    device::Mem,
     fpu::{Round, soft_float::*},
     isa::riscv::{
         csr_reg::{csr_index, csr_macro::Fcsr},
