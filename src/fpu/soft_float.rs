@@ -9,7 +9,7 @@ use rustc_apfloat::Round as APFloatRound;
 
 use crate::{
     fpu::{Classification, Round},
-    utils::{FloatPoint, SignedInteger, TruncateFrom, WordTrait},
+    utils::{FloatPoint, InFloat, SignedInteger, TruncateFrom, WordTrait},
 };
 
 impl Into<APFloatRound> for Round {
@@ -84,6 +84,30 @@ impl APFloatOf for f32 {
 
 impl APFloatOf for f64 {
     type Float = Double;
+}
+
+impl InFloat for Single {
+    type Float = f32;
+
+    fn into_float(self) -> f32 {
+        f32::from_bits(self.to_bits() as u32)
+    }
+
+    fn from_float(f: Self::Float) -> Self {
+        Self::from_bits(f.to_bits() as u128)
+    }
+}
+
+impl InFloat for Double {
+    type Float = f64;
+
+    fn into_float(self) -> f64 {
+        f64::from_bits(self.to_bits() as u64)
+    }
+
+    fn from_float(f: Self::Float) -> Self {
+        Self::from_bits(f.to_bits() as u128)
+    }
 }
 
 pub trait UnaryOp<F> {
@@ -166,11 +190,14 @@ impl<F: Float> TernaryOpWithRound<F> for NegMulSubOp {
 }
 
 pub struct SqrtOp;
-impl<F: Float> UnaryOp<F> for SqrtOp {
+impl<F: Float> UnaryOp<F> for SqrtOp
+where
+    F: Into<APFloat> + InFloat,
+{
     fn apply(a: F) -> F {
         // TODO: rustc_apfloat doesn't provide sqrt;
-        // current implementation may not comply with IEEE 754.
-        F::from_bits(f64::from_bits(a.to_bits() as u64).sqrt().to_bits() as u128)
+        // current implementation is not comply with IEEE 754.
+        F::from_float(a.into_float().sqrt())
     }
 }
 

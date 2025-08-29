@@ -114,9 +114,9 @@ impl PrivilegeLevel {
 impl From<u8> for PrivilegeLevel {
     fn from(value: u8) -> PrivilegeLevel {
         match value {
-            // 0 => PrivilegeLevel::U,
-            // 1 => PrivilegeLevel::S,
-            // 2 => PrivilegeLevel::V,
+            0 => PrivilegeLevel::U,
+            1 => PrivilegeLevel::S,
+            2 => PrivilegeLevel::V,
             3 => PrivilegeLevel::M,
             _ => unreachable!("Invalid privilege level: {}", value),
         }

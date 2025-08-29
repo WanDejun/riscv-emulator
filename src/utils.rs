@@ -404,6 +404,8 @@ pub trait FloatPoint:
     + APFloatOf
 {
     type BitsType: UnsignedInteger;
+
+    fn sqrt(self) -> Self;
 }
 
 impl InBits<u32> for f32 {
@@ -431,21 +433,49 @@ impl InBits<u64> for f64 {
 
 impl FloatPoint for f32 {
     type BitsType = u32;
+
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
 }
 impl FloatPoint for f64 {
     type BitsType = u64;
+
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
 }
 
 pub trait InFloat {
-    type Float;
+    type Float: FloatPoint;
+
+    fn into_float(self) -> Self::Float;
+
+    fn from_float(f: Self::Float) -> Self;
 }
 
 impl InFloat for u32 {
     type Float = f32;
+
+    fn into_float(self) -> f32 {
+        self as f32
+    }
+
+    fn from_float(f: Self::Float) -> Self {
+        f as u32
+    }
 }
 
 impl InFloat for u64 {
     type Float = f64;
+
+    fn into_float(self) -> f64 {
+        self as f64
+    }
+
+    fn from_float(f: Self::Float) -> Self {
+        f as u64
+    }
 }
 
 pub type FloatOf<T> = <T as InFloat>::Float;
