@@ -4,7 +4,6 @@ use crossterm::terminal::disable_raw_mode;
 use crate::{
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
-    device::{DeviceTrait, Mem},
     fpu::soft_float::SoftFPU,
     isa::{
         DecoderTrait,

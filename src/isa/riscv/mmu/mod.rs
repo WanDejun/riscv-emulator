@@ -6,11 +6,13 @@ use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
     device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
+    isa::riscv::mmu::page_table::{PTEFlags, PageTable},
     ram::Ram,
 };
 
 pub struct VirtAddrManager {
     mmio: MemoryMapIO,
+    page_table: PageTable,
     ram: Rc<UnsafeCell<Ram>>,
 }
 
@@ -23,20 +25,26 @@ impl VirtAddrManager {
         let ram_ref = Rc::new(UnsafeCell::new(ram));
         Self {
             mmio: MemoryMapIO::from_ram(ram_ref.clone()),
+            page_table: PageTable::new(0.into(), config::VirtualMemoryMode::None),
             ram: ram_ref,
         }
     }
-}
-
-impl Mem for VirtAddrManager {
-    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
+    pub fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
-        self.mmio.read(addr)
+        if let Ok(paddr) = self.page_table.translate_addr(
+            unsafe { self.ram.as_mut_unchecked() },
+            addr.into(),
+            PTEFlags::R,
+        ) {
+            self.mmio.read(paddr.into())
+        } else {
+            Err(MemError::LoadPageFault)
+        }
     }
 
-    fn write<T>(
+    pub fn write<T>(
         &mut self,
         addr: crate::config::arch_config::WordType,
         data: T,
@@ -44,12 +52,37 @@ impl Mem for VirtAddrManager {
     where
         T: crate::utils::UnsignedInteger,
     {
-        self.mmio.write(addr, data)
+        if let Ok(paddr) = self.page_table.translate_addr(
+            unsafe { self.ram.as_mut_unchecked() },
+            addr.into(),
+            PTEFlags::W,
+        ) {
+            self.mmio.write(paddr.into(), data)
+        } else {
+            Err(MemError::StorePageFault)
+        }
     }
-}
 
-impl DeviceTrait for VirtAddrManager {
-    fn sync(&mut self) {
+    pub fn get_instr_code<T>(
+        &mut self,
+        addr: crate::config::arch_config::WordType,
+        data: T,
+    ) -> Result<(), MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        if let Ok(paddr) = self.page_table.translate_addr(
+            unsafe { self.ram.as_mut_unchecked() },
+            addr.into(),
+            PTEFlags::X,
+        ) {
+            self.mmio.write(paddr.into(), data)
+        } else {
+            Err(MemError::StorePageFault)
+        }
+    }
+
+    pub fn sync(&mut self) {
         self.mmio.sync();
     }
 }

@@ -4,7 +4,6 @@ use rand_chacha::ChaCha12Rng;
 
 use crate::{
     config::arch_config::{REGFILE_CNT, WordType},
-    device::Mem,
     isa::{
         DecoderTrait,
         riscv::{
