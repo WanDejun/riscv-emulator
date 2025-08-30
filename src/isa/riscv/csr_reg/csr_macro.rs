@@ -98,6 +98,95 @@ macro_rules! gen_csr_regfile {
 // gen_csr_name_hashmap!(("mstatus", 0x300),);
 
 gen_csr_regfile! {
+    // ==================================
+    //            U-Mode CSR
+    // ==================================
+    Fcsr, "fcsr", 0x003, 0x00, [
+        0, 5, fflags,
+        0, 1, nx,
+        1, 1, uf,
+        2, 1, of,
+        3, 1, dz,
+        4, 1, nv,
+
+        // rounding  mode
+        5, 3, rm,
+    ];
+
+    // ==================================
+    //            S-Mode CSR
+    // ==================================
+    Sstatus, "sstatus", 0x100, 0x00, [
+        1,  1, sie,
+        5,  1, spie,
+        6,  1, ube,
+        8,  1, spp,
+        9,  2, vs,
+        13, 2, fs,
+        15, 2, xs,
+        18, 1, sum,
+        19, 1, mxr,
+        23, 1, spelp,
+        24, 1, sdt,
+        32, 2, xul,
+        -1, 1, sd,
+    ];
+
+    Sie, "sie", 0x104, 0x00, [
+        0,  1, usie, // User Software Interrupt Enable
+        1,  1, ssie,
+        4,  1, utie, // User Time     Interrupt Enable
+        5,  1, stie,
+        8,  1, ueie, // User External Interrupt Enable
+        9,  1, seie,
+        0, XLEN, mip
+    ];
+
+    Stvec, "stvec", 0x105, 0x00, [
+        0, 2, mode,
+        2, XLEN - 2, base,
+    ];
+
+    Sscratch, "sscratch", 0x140, 0x00, [
+        0, XLEN, mscratch,
+    ];
+
+    Sepc, "sepc", 0x141, 0x00, [
+        0, XLEN, sepc,
+    ];
+
+    Scause, "scause", 0x142, 0x00, [
+        0, XLEN - 1, exception_code,
+        -1, 1, interrupt,
+    ];
+
+    Stval, "stval", 0x143, 0x00, [
+        0, XLEN, stval,
+    ];
+
+    Sip, "sip", 0x144, 0x00, [
+        0,  1, usip, // User Software Interrupt Pending.
+        1,  1, ssip,
+        // 2,  1, hsip,
+        4,  1, utip, // User Time     Interrupt Pending.
+        5,  1, stip,
+        // 6,  1, htip,
+        8,  1, ueip, // User External Interrupt Pending.
+        9,  1, seip,
+        // 10, 1, heip,
+        0, XLEN, mip,
+    ];
+
+    // TODO: riscv-32 support.
+    Satp, "satp", 0x180, 0x00, [
+        0, 44, ppn,
+        44, 16, asid,
+        60, 4, mode,
+    ];
+
+    // ==================================
+    //            M-Mode CSR
+    // ==================================
     Mstatus, "mstatus", 0x300, 0x00, [
         1,  1, sie,
         3,  1, mie,
@@ -134,14 +223,41 @@ gen_csr_regfile! {
         -2, 2, mxl,
     ];
 
+    Medeleg, "medeleg", 0x302, 0x00, [
+        0, 1, instruction_misaligned,
+        1, 1, instruction_fault,
+        2, 1, illegal_instruction,
+        3, 1, breakpoint,
+        4, 1, load_misaligned,
+        5, 1, load_fault,
+        6, 1, store_misaligned,
+        7, 1, store_fault,
+        8, 1, user_env_call,
+        9, 1, supervisor_env_call,
+        // 10, 1, hypervisor_env_call,
+        11, 1, machine_env_call,
+        12, 1, instruction_page_fault,
+        13, 1, load_page_fault,
+        15, 1, store_page_fault,
+        0, XLEN, medeleg,
+    ];
+
+    // see mip.
+    Mideleg, "mideleg", 0x303, 0x00, [
+        1, 1, ssip, // Delegate Supervisor Software Interrupt.
+        5, 1, stip, // Delegate Supervisor Time     Interrupt.
+        9, 1, seip, // Delegate Supervisor External Interrupt.
+        0, XLEN, mideleg,
+    ];
+
     Mie, "mie", 0x304, 0x00, [
-        0,  1, usie,
+        0,  1, usie, // User Software Interrupt Enable
         1,  1, ssie,
         2,  1, msie,
-        4,  1, utie,
+        4,  1, utie, // User Time     Interrupt Enable
         5,  1, stie,
         6,  1, mtie,
-        8,  1, ueie,
+        8,  1, ueie, // User External Interrupt Enable
         9,  1, seie,
         10, 1, meie,
         0, XLEN, mip
@@ -170,28 +286,19 @@ gen_csr_regfile! {
     ];
 
     Mip, "mip", 0x344, 0x00, [
-        0,  1, usip,
+        0,  1, usip, // User Software Interrupt Pending.
         1,  1, ssip,
-        2,  1, msip,
-        4,  1, utip,
+        // 2,  1, hsip,
+        3,  1, msip,
+        4,  1, utip, // User Time     Interrupt Pending.
         5,  1, stip,
-        6,  1, mtip,
-        8,  1, ueip,
+        // 6,  1, htip,
+        7,  1, mtip,
+        8,  1, ueip, // User External Interrupt Pending.
         9,  1, seip,
-        10, 1, meip,
+        // 10, 1, heip,
+        11, 1, meip,
         0, XLEN, mip,
-    ];
-
-    Fcsr, "fcsr", 0x003, 0x00, [
-        0, 5, fflags,
-        0, 1, nx,
-        1, 1, uf,
-        2, 1, of,
-        3, 1, dz,
-        4, 1, nv,
-
-        // rounding  mode
-        5, 3, rm,
     ];
 
     // TODO: Below are just stub to make riscv-tests executable, not fully implemented.
@@ -203,10 +310,6 @@ gen_csr_regfile! {
     //     0, XLEN, mnstatus,
     // ];
 
-    // Satp, 0x180, 0x00, [
-    //     0, XLEN, satp,
-    // ];
-
     // Pmpaddr0, 0x3B0, 0x00, [
     //     0, XLEN, pmpaddr0,
     // ];
@@ -214,19 +317,4 @@ gen_csr_regfile! {
     // Pmpcfg0, 0x3A0, 0x00, [
     //     0, XLEN, pmpcfg0,
     // ];
-
-    // Stvec, 0x105, 0x00, [
-    //     0, XLEN, stvec,
-    // ];
-
-    // Medeleg, 0x302, 0x00, [
-    //     0, XLEN, medeleg,
-    // ];
-
-    // TODO: riscv-32 support.
-    Satp, "satp", 0x180, 0x00, [
-        0, 44, ppn,
-        44, 16, asid,
-        60, 4, mode,
-    ];
 }

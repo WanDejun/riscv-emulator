@@ -5,10 +5,10 @@ use crate::{
         riscv::{
             csr_reg::{
                 PrivilegeLevel, csr_index,
-                csr_macro::{Mstatus, Mtvec},
+                csr_macro::{Medeleg, Mideleg, Mstatus, Mtvec},
             },
             executor::RV32CPU,
-            trap::{Exception, Trap},
+            trap::{Exception, Interrupt, Trap},
         },
     },
 };
@@ -20,7 +20,58 @@ impl TrapController {
     //     Self {}
     // }
 
-    pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+    // ======================================
+    //                M-Mode
+    // ======================================
+    fn m_mode_check_exception_delegate(cpu: &mut RV32CPU, exception: Exception) -> bool {
+        let medeleg = cpu.csr.get_by_type::<Medeleg>().unwrap();
+        let medeleg_val = medeleg.get_medeleg();
+        if (medeleg_val & (1 << exception as u8)) != 0 {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn m_mode_check_interrupt_delegate(cpu: &mut RV32CPU, interrupt: Interrupt) -> bool {
+        let mideleg = cpu.csr.get_by_type::<Mideleg>().unwrap();
+        match interrupt {
+            Interrupt::MachineExternal | Interrupt::MachineSoft | Interrupt::MachineTimer => false,
+            Interrupt::SupervisorExternal | Interrupt::UserExternal => {
+                if mideleg.get_seip() != 0 {
+                    true
+                } else {
+                    false
+                }
+            }
+            Interrupt::SupervisorSoft | Interrupt::UserSoft => {
+                if mideleg.get_ssip() != 0 {
+                    true
+                } else {
+                    false
+                }
+            }
+            Interrupt::SupervisorTimer | Interrupt::UserTimer => {
+                if mideleg.get_stip() != 0 {
+                    true
+                } else {
+                    false
+                }
+            }
+            Interrupt::Unknown => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn m_mode_check_delegate(cpu: &mut RV32CPU, cause: Trap) -> bool {
+        match cause {
+            Trap::Interrupt(interrupt) => Self::m_mode_check_interrupt_delegate(cpu, interrupt),
+            Trap::Exception(exception) => Self::m_mode_check_exception_delegate(cpu, exception),
+        }
+    }
+
+    fn m_mode_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr
             .write_uncheck_privilege(csr_index::mcause, cause.into());
@@ -67,6 +118,10 @@ impl TrapController {
         cpu.csr
             .set_current_privileged((mstatus.get_mpp() as u8).into());
         mstatus.set_mpp(0);
+    }
+
+    pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+        Self::m_mode_send_trap_signal(cpu, cause, trap_value);
     }
 }
 
