@@ -239,6 +239,7 @@ gen_csr_regfile! {
         12, 1, instruction_page_fault,
         13, 1, load_page_fault,
         15, 1, store_page_fault,
+        0, XLEN, medeleg,
     ];
 
     // see mip.
@@ -246,6 +247,7 @@ gen_csr_regfile! {
         1, 1, ssip, // Delegate Supervisor Software Interrupt.
         5, 1, stip, // Delegate Supervisor Time     Interrupt.
         9, 1, seip, // Delegate Supervisor External Interrupt.
+        0, XLEN, mideleg,
     ];
 
     Mie, "mie", 0x304, 0x00, [
