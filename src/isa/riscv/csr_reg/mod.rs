@@ -129,6 +129,7 @@ pub(crate) trait CsrReg: From<*mut WordType> {
     fn get_index() -> WordType;
     fn clear_by_mask(&mut self, mask: WordType);
     fn set_by_mask(&mut self, mask: WordType);
+    fn data(&self) -> WordType;
 }
 
 pub(crate) struct CsrRegFile {

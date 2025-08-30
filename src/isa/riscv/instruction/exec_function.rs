@@ -5,7 +5,9 @@ use crate::{
     isa::riscv::{
         csr_reg::csr_index, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
     },
-    utils::{TruncateTo, UnsignedInteger, sign_extend, sign_extend_u32, wrapping_add_as_signed},
+    utils::{
+        TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32, wrapping_add_as_signed,
+    },
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
@@ -304,28 +306,28 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
 pub(super) struct ExecAddw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecAddw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend(a.wrapping_add(b).truncate_to(32), 32))
+        Ok(sign_extend(a.wrapping_add(b).truncate_to_bits(32), 32))
     }
 }
 
 pub(super) struct ExecSubw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecSubw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend(a.wrapping_sub(b).truncate_to(32), 32))
+        Ok(sign_extend(a.wrapping_sub(b).truncate_to_bits(32), 32))
     }
 }
 
 pub(super) struct ExecMulw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend((a * b).truncate_to(32), 32))
+        Ok(sign_extend((a * b).truncate_to_bits(32), 32))
     }
 }
 
 pub(super) struct ExecDivw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to(32).cast_signed());
+        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32).cast_signed());
         Ok(sign_extend((sa / sb).cast_unsigned() as WordType, 32))
     }
 }
@@ -333,7 +335,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
 pub(super) struct ExecRemw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to(32).cast_signed());
+        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32).cast_signed());
         Ok(sign_extend((sa % sb).cast_unsigned() as WordType, 32))
     }
 }
@@ -341,7 +343,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
 pub(super) struct ExecDivuw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to(32));
+        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32));
         Ok(sign_extend((sa / sb) as WordType, 32))
     }
 }
@@ -349,7 +351,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
 pub(super) struct ExecRemuw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to(32));
+        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32));
         Ok(sign_extend((sa % sb) as WordType, 32))
     }
 }

@@ -2,7 +2,7 @@ use std::{cell::Cell, rc::Rc, u64};
 
 /// Simple clock, clone by ref, cannot used in multi-threaded context.
 #[derive(Clone)]
-pub(crate) struct VirtualClockRef {
+pub struct VirtualClockRef {
     time: Rc<Cell<u64>>,
 }
 
@@ -43,7 +43,7 @@ impl ScheduledTask {
     }
 }
 
-pub(crate) struct Timer {
+pub struct Timer {
     seq: u64,
     tasks: Vec<ScheduledTask>,
     vclock: VirtualClockRef,

@@ -21,6 +21,10 @@ macro_rules! gen_csr_reg {
         }
 
         impl CsrReg for $name {
+            fn data(&self) -> WordType {
+                unsafe { *(self.data) }
+            }
+
             fn get_index() -> WordType {
                 $addr
             }

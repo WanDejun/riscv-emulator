@@ -34,6 +34,12 @@ impl Ram {
         }
     }
 
+    pub fn with_init(byte: u8) -> Self {
+        Self {
+            data: vec![byte; ram_config::SIZE].into_boxed_slice(),
+        }
+    }
+
     pub fn insert_section(&mut self, elf_section_data: &[u8], start_addr: WordType) {
         if start_addr >= ram_config::SIZE as WordType {
             log::error!(
