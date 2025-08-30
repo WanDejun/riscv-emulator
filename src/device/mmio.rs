@@ -1,11 +1,15 @@
 use std::{cell::UnsafeCell, cmp::Ordering, rc::Rc};
 
 use crate::{
+    EMULATOR_CONFIG,
     config::arch_config::WordType,
     device::{
         DeviceTrait, Mem, MemError,
         config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
-        fast_uart::FastUart16550,
+        fast_uart::{
+            FastUart16550,
+            virtual_io::{SerialDestTrait, SerialDestination, SimulationIO, TerminalIO},
+        },
         power_manager::PowerManager,
     },
     ram::Ram,
@@ -86,6 +90,7 @@ impl MemoryMapIO {
     pub fn from_ram(ram: Rc<UnsafeCell<Ram>>) -> Self {
         let uart1 = FastUart16550::new();
         let power_manager = Device::PowerManager(PowerManager::new());
+        Self::init_uart_dest(&uart1);
 
         let map = vec![
             MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
@@ -96,6 +101,14 @@ impl MemoryMapIO {
             // atomic_lock: Rc::new(AtomicBool::new(false)),
             map,
             ram,
+        }
+    }
+
+    fn init_uart_dest(uart: &FastUart16550) -> Box<dyn SerialDestTrait> {
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
+            Box::new(TerminalIO::new(uart.get_io_channel()))
+        } else {
+            Box::new(SimulationIO::new(uart.get_io_channel()))
         }
     }
 
@@ -110,10 +123,6 @@ impl MemoryMapIO {
         if p_addr >= start + self.map[device_index].size {
             // out of range
             Err(MemError::LoadFault)
-            // panic!(
-            //     "read_from_device(index: {}, p_addr: {}): physical address overflow",
-            //     device_index, p_addr
-            // )
         } else {
             // in range
             let device = &mut self.map[device_index].device;
@@ -137,11 +146,6 @@ impl MemoryMapIO {
         let st = self.map[device_index].start;
         if p_addr >= st + self.map[device_index].size {
             // out of range
-            // panic!(
-            //     "write_to_device(index: {}, p_addr: {}, data: {}): physical address overflow",
-            //     device_index, p_addr, data
-            // )
-
             Err(MemError::StoreFault)
         } else {
             // in range
