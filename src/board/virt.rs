@@ -1,10 +1,14 @@
 use std::{cell::UnsafeCell, hint::cold_path, rc::Rc, sync::atomic::Ordering};
 
 use crate::{
+    EMULATOR_CONFIG,
     board::{Board, BoardStatus},
     device::{
         config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
-        fast_uart::FastUart16550,
+        fast_uart::{
+            FastUart16550,
+            virtual_io::{SerialDestTrait, SerialDestination, SimulationIO, TerminalIO},
+        },
         mmio::{MemoryMapIO, MemoryMapItem},
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
     },
@@ -28,6 +32,14 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
+    fn init_uart_dest(uart: &FastUart16550) -> Box<dyn SerialDestTrait> {
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
+            Box::new(TerminalIO::new(uart.get_io_channel()))
+        } else {
+            Box::new(SimulationIO::new(uart.get_io_channel()))
+        }
+    }
+
     pub fn from_ram(ram: Ram) -> Self {
         let clock = VirtualClockRef::new();
         let timer = Rc::new(Timer::new(clock.clone()));
@@ -36,6 +48,7 @@ impl VirtBoard {
 
         // Construct devices
         let uart1 = FastUart16550::new();
+        Self::init_uart_dest(&uart1);
         let power_manager = Device::PowerManager(PowerManager::new());
 
         let mmio_items = vec![

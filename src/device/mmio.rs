@@ -2,12 +2,7 @@ use std::{cell::UnsafeCell, cmp::Ordering, rc::Rc};
 
 use crate::{
     config::arch_config::WordType,
-    device::{
-        DeviceTrait, Mem, MemError,
-        config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
-        fast_uart::FastUart16550,
-        power_manager::PowerManager,
-    },
+    device::{DeviceTrait, Mem, MemError, config::Device},
     ram::Ram,
     ram_config,
     utils::{UnsignedInteger, check_align},
@@ -62,21 +57,6 @@ pub struct MemoryMapIO {
 }
 
 impl MemoryMapIO {
-    /// DEPRECATED: Old implementation retained for test compatibility.
-    pub fn new() -> Self {
-        // TODO: Remove this and fix/change tests.
-        let uart1 = FastUart16550::new();
-        let power_manager = Device::PowerManager(PowerManager::new());
-
-        Self::from_mmio_items(
-            Rc::new(UnsafeCell::new(Ram::new())),
-            vec![
-                MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
-                MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
-            ],
-        )
-    }
-
     pub fn from_mmio_items(ram: Rc<UnsafeCell<Ram>>, mut map: Vec<MemoryMapItem>) -> Self {
         map.sort();
         Self { map, ram }
@@ -204,13 +184,26 @@ impl DeviceTrait for MemoryMapIO {
 
 #[cfg(test)]
 mod test {
-    use crate::device::peripheral_init;
+    use crate::device::{
+        config::{POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
+        fast_uart::{FastUart16550, virtual_io::SimulationIO},
+        peripheral_init,
+        power_manager::PowerManager,
+    };
 
     use super::*;
 
     #[test]
     fn mmio_mem_test() {
-        let mut mmio = MemoryMapIO::new();
+        let ram = Rc::new(UnsafeCell::new(Ram::new()));
+        let uart1 = FastUart16550::new();
+        let power_manager = Device::PowerManager(PowerManager::new());
+        let table = vec![
+            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
+            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
+        ];
+
+        let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
         for i in 0 as WordType..100 {
             mmio.write(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()), i)
                 .unwrap();
@@ -227,11 +220,22 @@ mod test {
 
     #[test]
     fn mmio_stdout_test() {
+        let ram = Rc::new(UnsafeCell::new(Ram::new()));
+        let uart1 = FastUart16550::new();
+        let io: SimulationIO = SimulationIO::new(uart1.get_io_channel());
+        let power_manager = Device::PowerManager(PowerManager::new());
+        let table = vec![
+            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
+            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
+        ];
+
+        let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
         let _handles = peripheral_init();
-        let mut mmio = MemoryMapIO::new();
+
         mmio.write(UART1_ADDR + 0x00, 'a' as u8).unwrap();
         assert_ne!((mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x20), 0);
-        // assert_eq!((mmio.debug_uart.uart.read::<u8>(5).unwrap() & 0x01), 0);
-        // assert_eq!(mmio.debug_uart.receive(), Some('a' as u8));
+        let data = io.receive_output_data();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0], 'a' as u8);
     }
 }
