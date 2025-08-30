@@ -108,14 +108,14 @@ impl Breakpoint {
 
 const SAVE_PC_CNT: usize = 20;
 
-pub struct Debugger<I: ISATypes> {
+pub struct Debugger<'a, I: ISATypes> {
     breakpoints: BTreeMap<Breakpoint, I::RawInstr>,
-    target: I::CPU,
+    target: &'a mut I::CPU,
     pc_history: VecDeque<WordType>,
 }
 
-impl<I: ISATypes> Debugger<I> {
-    pub fn new(target: I::CPU) -> Self {
+impl<'a, I: ISATypes> Debugger<'a, I> {
+    pub fn new(target: &'a mut I::CPU) -> Self {
         Self {
             breakpoints: BTreeMap::new(),
             target: target,
@@ -292,7 +292,7 @@ mod test {
     #[test]
     fn test_breakpoint_riscv() {
         // Test that a breakpoint can be hit
-        let cpu = TestCPUBuilder::new()
+        let mut cpu = TestCPUBuilder::new()
             .program(&[
                 0x02520333, // mul x6, x4, x5
                 0x02520333, // mul x6, x4, x5
@@ -302,7 +302,7 @@ mod test {
             ])
             .build();
 
-        let mut debugger = Debugger::<RiscvTypes>::new(cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu);
         debugger.set_breakpoint(BASE_ADDR + 4).unwrap();
         debugger.continue_run().unwrap();
 
@@ -329,14 +329,14 @@ mod test {
 
     #[test]
     fn test_breakpoint_riscv_on_current() {
-        let cpu = TestCPUBuilder::new()
+        let mut cpu = TestCPUBuilder::new()
             .program(&[
                 0x02520333, // mul x6, x4, x5
                 0x02520333, // mul x6, x4, x5
             ])
             .build();
 
-        let mut debugger = Debugger::<RiscvTypes>::new(cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu);
         debugger.set_breakpoint(BASE_ADDR).unwrap();
         assert!(debugger.on_breakpoint());
 

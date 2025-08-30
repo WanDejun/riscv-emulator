@@ -1,17 +1,22 @@
 #![cfg(test)]
+use std::{cell::UnsafeCell, rc::Rc};
+
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 
 use crate::{
     config::arch_config::{REGFILE_CNT, WordType},
+    device::mmio::MemoryMapIO,
     isa::{
         DecoderTrait,
         riscv::{
             decoder::DecodeInstr,
             executor::RV32CPU,
             instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+            mmu::VirtAddrManager,
         },
     },
+    ram::Ram,
     ram_config::{self, BASE_ADDR},
     utils::{UnsignedInteger, sign_extend},
 };
@@ -20,10 +25,13 @@ pub(super) struct TestCPUBuilder {
     cpu: RV32CPU,
 }
 
+/// Build a CISC-V CPU, only has RAM, don't have other devices.
 impl TestCPUBuilder {
     pub(super) fn new() -> Self {
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
         Self {
-            cpu: RV32CPU::new(),
+            cpu: RV32CPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio)),
         }
     }
 

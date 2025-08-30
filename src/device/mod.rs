@@ -2,7 +2,9 @@ use crate::{
     config::arch_config::WordType, device::fast_uart::FastUart16550Handle,
     handle_trait::HandleTrait, utils::UnsignedInteger,
 };
-mod config;
+
+pub(crate) mod aclint;
+pub(crate) mod config;
 pub mod fast_uart;
 pub mod mmio;
 pub mod power_manager;

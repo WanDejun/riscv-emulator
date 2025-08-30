@@ -13,6 +13,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{
     Emulator,
+    board::virt::VirtBoard,
     device::{fast_uart::virtual_io::SerialDestination, peripheral_init},
     isa::riscv::RiscvTypes,
 };
@@ -68,13 +69,14 @@ fn main() {
         cli_args.path, cli_args.debug, cli_args.verbose
     );
 
-    let mut emulator = match (
+    let mut board = match (
         cli_args.format,
         cli_args.path.extension() == Some("elf".as_ref()),
     ) {
         (TargetFormat::Elf, _) | (TargetFormat::Auto, true) => {
             println!("ELF file detected\r");
-            Emulator::from_elf(&cli_args.path)
+            let bytes = std::fs::read(cli_args.path.clone()).unwrap();
+            VirtBoard::from_elf(&bytes)
         }
         _ => {
             println!("Non-ELF file detected\r");
@@ -83,13 +85,12 @@ fn main() {
     };
 
     if cli_args.debug {
-        DebugREPL::<RiscvTypes>::new(emulator.into()).run();
+        DebugREPL::<RiscvTypes>::new(&mut board).run();
     } else {
         let now = Instant::now();
+        let emulator = Emulator::from_board(board);
         match emulator.run() {
-            Ok(cnt) => {
-                println!("Executed {} instructions.\r", cnt);
-            }
+            Ok(()) => {}
             Err(e) => {
                 eprintln!("Error occurred while running emulator: {:?}\r", e);
             }

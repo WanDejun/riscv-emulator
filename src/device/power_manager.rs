@@ -13,8 +13,8 @@ impl Mem for PowerManager {
     where
         T: crate::utils::UnsignedInteger,
     {
-        assert!(addr == 0x00);
-        assert!(size_of::<T>() >= 2);
+        debug_assert!(addr == 0x00);
+        debug_assert!(size_of::<T>() >= 2);
         let mut ret: T = ((self.reg >> 8) as u8).into();
         ret <<= 8;
         ret |= (self.reg as u8).into();
@@ -23,13 +23,13 @@ impl Mem for PowerManager {
 
     fn write<T>(
         &mut self,
-        addr: crate::config::arch_config::WordType,
+        _addr: crate::config::arch_config::WordType,
         data: T,
     ) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
-        assert!(addr == 0x00);
+        debug_assert!(_addr == 0x00);
         let data: u64 = data.into();
         self.reg = data as u16;
 

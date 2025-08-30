@@ -13,10 +13,9 @@ use crate::{
     utils::{UnsignedInteger, check_align},
 };
 
-struct MemoryMapItem {
+pub struct MemoryMapItem {
     pub start: WordType,
     pub size: WordType,
-    // pub name: &'static str,
     pub device: Device,
 }
 
@@ -38,7 +37,7 @@ impl Ord for MemoryMapItem {
 }
 
 impl MemoryMapItem {
-    fn new(start: WordType, size: WordType, device: Device) -> Self {
+    pub fn new(start: WordType, size: WordType, device: Device) -> Self {
         Self {
             start,
             size,
@@ -46,21 +45,6 @@ impl MemoryMapItem {
         }
     }
 }
-
-// struct MMIOLockGuard {
-//     p: Rc<AtomicBool>,
-// }
-
-// impl MMIOLockGuard {
-//     fn new(p: Rc<AtomicBool>) -> Self {
-//         Self { p }
-//     }
-// }
-// impl Drop for MMIOLockGuard {
-//     fn drop(&mut self) {
-//         self.p.store(false, std::sync::atomic::Ordering::Release);
-//     }
-// }
 
 /// # mmio
 /// ## Usage
@@ -73,30 +57,29 @@ impl MemoryMapItem {
 /// mmio.write::<u32>(ram_config::BASE_ADDR + 0x03); // ILLIGAL! unaligned accesses
 /// ```
 pub struct MemoryMapIO {
-    // atomic_lock: Rc<AtomicBool>,
     map: Vec<MemoryMapItem>,
     ram: Rc<UnsafeCell<Ram>>,
 }
 
 impl MemoryMapIO {
+    /// DEPRECATED: Old implementation retained for test compatibility.
     pub fn new() -> Self {
-        Self::from_ram(Rc::new(UnsafeCell::new(Ram::new())))
-    }
-
-    pub fn from_ram(ram: Rc<UnsafeCell<Ram>>) -> Self {
+        // TODO: Remove this and fix/change tests.
         let uart1 = FastUart16550::new();
         let power_manager = Device::PowerManager(PowerManager::new());
 
-        let map = vec![
-            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
-        ];
+        Self::from_mmio_items(
+            Rc::new(UnsafeCell::new(Ram::new())),
+            vec![
+                MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
+                MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
+            ],
+        )
+    }
 
-        Self {
-            // atomic_lock: Rc::new(AtomicBool::new(false)),
-            map,
-            ram,
-        }
+    pub fn from_mmio_items(ram: Rc<UnsafeCell<Ram>>, mut map: Vec<MemoryMapItem>) -> Self {
+        map.sort();
+        Self { map, ram }
     }
 
     fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> Result<T, MemError>
@@ -110,10 +93,6 @@ impl MemoryMapIO {
         if p_addr >= start + self.map[device_index].size {
             // out of range
             Err(MemError::LoadFault)
-            // panic!(
-            //     "read_from_device(index: {}, p_addr: {}): physical address overflow",
-            //     device_index, p_addr
-            // )
         } else {
             // in range
             let device = &mut self.map[device_index].device;
@@ -137,11 +116,6 @@ impl MemoryMapIO {
         let st = self.map[device_index].start;
         if p_addr >= st + self.map[device_index].size {
             // out of range
-            // panic!(
-            //     "write_to_device(index: {}, p_addr: {}, data: {}): physical address overflow",
-            //     device_index, p_addr, data
-            // )
-
             Err(MemError::StoreFault)
         } else {
             // in range
@@ -149,20 +123,6 @@ impl MemoryMapIO {
             device.write(p_addr - st, data)
         }
     }
-
-    // fn lock(&mut self) -> MMIOLockGuard {
-    //     loop {
-    //         if self
-    //             .atomic_lock
-    //             .swap(true, std::sync::atomic::Ordering::Acquire)
-    //             == false
-    //         {
-    //             break;
-    //         }
-    //     }
-
-    //     MMIOLockGuard::new(self.atomic_lock.clone())
-    // }
 }
 
 impl Mem for MemoryMapIO {
@@ -170,7 +130,6 @@ impl Mem for MemoryMapIO {
     where
         T: crate::utils::UnsignedInteger,
     {
-        // let _guard = self.lock();
         if p_addr >= ram_config::BASE_ADDR {
             return unsafe {
                 self.ram
@@ -234,9 +193,6 @@ impl Mem for MemoryMapIO {
     }
 }
 
-/// # MemoryMapIO
-/// ## NOTE
-/// If there was more than one hart/core for emulator. Only one hart/core is allowed to do `MemoryMapIO::step`.
 impl DeviceTrait for MemoryMapIO {
     fn sync(&mut self) {
         // let _guard = self.lock();

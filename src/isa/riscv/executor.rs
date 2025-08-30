@@ -28,16 +28,11 @@ pub struct RV32CPU {
     pub(super) csr: CsrRegFile,
     pub(super) icache: SetICache<RiscvTypes, 64, 8>,
     pub(super) fpu: SoftFPU,
-    pub icache_cnt: usize, // TODO: Remove this since Zicsr is done.
+    pub icache_cnt: usize,
 }
 
 impl RV32CPU {
-    pub fn new() -> Self {
-        Self::from_memory(VirtAddrManager::new())
-    }
-
-    // TODO: A builder struct may be useful for future use.
-    pub fn from_memory(v_memory: VirtAddrManager) -> Self {
+    pub fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
         Self {
             reg_file: RegFile::new(),
             memory: v_memory,

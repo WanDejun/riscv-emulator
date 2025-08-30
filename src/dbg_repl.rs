@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use crossterm::style::Stylize;
 use lazy_static::lazy_static;
 use riscv_emulator::{
+    board::Board,
     cli_coordinator::CliCoordinator,
     config::arch_config::{FLOAT_REG_NAME, REG_NAME, WordType},
     isa::{
@@ -104,18 +105,18 @@ enum PrintObject {
     FReg(u8),
 }
 
-pub struct DebugREPL<I: ISATypes> {
-    dbg: Debugger<I>,
+pub struct DebugREPL<'a, I: ISATypes> {
+    dbg: Debugger<'a, I>,
     watch_list: Vec<PrintObject>,
     editor: rustyline::DefaultEditor,
 }
 
-impl<I: ISATypes + AsmFormattable<I>> DebugREPL<I> {
-    pub fn new(cpu: I::CPU) -> Self {
+impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
+    pub fn new<B: Board<ISA = I>>(board: &'a mut B) -> Self {
         CliCoordinator::global().pause_uart();
 
         DebugREPL {
-            dbg: Debugger::<I>::new(cpu),
+            dbg: Debugger::<I>::new(board.cpu_mut()),
             watch_list: Vec::new(),
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
         }

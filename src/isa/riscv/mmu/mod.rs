@@ -17,14 +17,9 @@ pub struct VirtAddrManager {
 }
 
 impl VirtAddrManager {
-    pub fn new() -> Self {
-        Self::from_ram(Ram::new())
-    }
-
-    pub fn from_ram(ram: Ram) -> Self {
-        let ram_ref = Rc::new(UnsafeCell::new(ram));
+    pub fn from_ram_and_mmio(ram_ref: Rc<UnsafeCell<Ram>>, mmio: MemoryMapIO) -> Self {
         Self {
-            mmio: MemoryMapIO::from_ram(ram_ref.clone()),
+            mmio: mmio,
             page_table: PageTable::new(0.into(), config::VirtualMemoryMode::None),
             ram: ram_ref,
         }

@@ -10,7 +10,9 @@ mod cpu;
 mod fpu;
 mod ram;
 mod utils;
+mod vclock;
 
+pub mod board;
 pub mod cli_coordinator;
 pub mod config;
 pub mod device;
@@ -22,24 +24,14 @@ pub use config::ram_config;
 use lazy_static::lazy_static;
 
 use crate::{
-    device::{
-        fast_uart::virtual_io::SerialDestination,
-        power_manager::{POWER_OFF_CODE, POWER_STATUS},
-    },
-    isa::riscv::{executor::RV32CPU, mmu::VirtAddrManager, trap::Exception},
-    ram::Ram,
+    board::{Board, BoardStatus, virt::VirtBoard},
+    device::fast_uart::virtual_io::SerialDestination,
+    isa::riscv::{executor::RV32CPU, trap::Exception},
 };
-
 use std::{
-    hint::cold_path,
     path::Path,
-    sync::atomic::Ordering,
     sync::{Mutex, MutexGuard},
 };
-
-pub struct Emulator {
-    cpu: RV32CPU,
-}
 
 pub(crate) struct EmulatorConfig {
     pub(crate) serial_destination: SerialDestination,
@@ -71,56 +63,34 @@ impl<'a> EmulatorConfigurator<'a> {
     }
 }
 
-impl Emulator {
-    pub fn from_elf(path: &Path) -> Self {
-        let mut ram = Ram::new();
-        let bytes = std::fs::read(path).unwrap();
-        load::load_elf(&mut ram, &bytes);
-        Self {
-            cpu: RV32CPU::from_memory(VirtAddrManager::from_ram(ram)),
-        }
-    }
-
-    pub fn run(&mut self) -> Result<usize, Exception> {
-        self.run_until(|_cpu, _instr| false) // Do nothing
-    }
-
-    /// Invoke `f` after each CPU step.
-    /// `f` is called as with &mut CPU and instruction count.
-    /// If `f` returns `true`, the emulator will power off.
-    pub fn run_until(
-        &mut self,
-        mut f: impl FnMut(&mut RV32CPU, usize) -> bool,
-    ) -> Result<usize, Exception> {
-        let mut instr_cnt: usize = 0;
-        POWER_STATUS.store(0, Ordering::Release);
-
-        loop {
-            self.cpu.step()?;
-            instr_cnt += 1;
-
-            if instr_cnt % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE)
-                || f(&mut self.cpu, instr_cnt)
-            {
-                cold_path();
-                self.cpu.power_off()?;
-                log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);
-                let rate = self.cpu.icache_cnt as f64 / instr_cnt as f64;
-                log::debug!("iCache hit rate {}", rate);
-                break;
-            }
-        }
-
-        Ok(instr_cnt)
-    }
-
-    pub fn cpu_mut(&mut self) -> &mut RV32CPU {
-        &mut self.cpu
-    }
+pub struct Emulator {
+    board: VirtBoard,
 }
 
-impl Into<RV32CPU> for Emulator {
-    fn into(self) -> RV32CPU {
-        self.cpu
+impl Emulator {
+    pub fn from_elf(path: &Path) -> Self {
+        let bytes = std::fs::read(path).unwrap();
+        Self {
+            board: VirtBoard::from_elf(&bytes),
+        }
+    }
+
+    pub fn from_board(board: VirtBoard) -> Self {
+        Self { board }
+    }
+
+    pub fn run(self) -> Result<(), Exception> {
+        self.run_until(&mut |_, _| false)
+    }
+
+    pub fn run_until<F>(mut self, f: &mut F) -> Result<(), Exception>
+    where
+        F: FnMut(&mut RV32CPU, usize) -> bool,
+    {
+        while self.board.status() != BoardStatus::Halt {
+            self.board.step_and_halt_if(f)?;
+        }
+
+        Ok(())
     }
 }

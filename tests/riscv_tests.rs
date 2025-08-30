@@ -1,3 +1,8 @@
+//! Integration tests for the [`riscv-tests`] repo. Need feature `riscv-tests`.
+//! You MUST compile the tests before using this, checkout the repo.
+//!
+//! [`riscv-tests`]: https://github.com/riscv-software-src/riscv-tests
+
 #![allow(unused)]
 
 use std::fs;
@@ -52,7 +57,7 @@ fn run_test(elf: &Path) -> bool {
         let bytes = std::fs::read(elf).unwrap();
         let tohost: WordType = get_section_addr(&bytes, ".tohost").unwrap();
 
-        emu.run_until(|cpu, instr_cnt| {
+        emu.run_until(&mut |cpu, instr_cnt| {
             // Handle tohost
             if (instr_cnt & (0xFFF)) == 0 {
                 let msg = cpu.read_mem::<u64>(tohost).unwrap();
