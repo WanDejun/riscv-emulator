@@ -1,3 +1,5 @@
+use std::{hint::unlikely, marker::PhantomData};
+
 pub(super) use super::exec_float_function::*;
 
 use crate::{
@@ -6,7 +8,8 @@ use crate::{
         csr_reg::csr_index, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
     },
     utils::{
-        TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32, wrapping_add_as_signed,
+        TruncateFrom, TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32,
+        wrapping_add_as_signed,
     },
 };
 
@@ -204,70 +207,94 @@ impl ExecTrait<Result<WordType, Exception>> for ExecMulLow {
     }
 }
 
-pub(super) struct ExecMulHighSighed {}
-impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSighed {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        const XLEN: WordType = (size_of::<WordType>() << 3) as WordType;
-        const HALF_XLEN: WordType = XLEN >> 1;
-        const HALF_XLEN_MAX: WordType = WordType::MAX >> (XLEN >> 1);
+pub(super) struct ExecMulHighUnsigned<U> {
+    phantom: PhantomData<U>,
+}
 
-        let lhs_hi = a >> HALF_XLEN;
-        let lhs_lo = a & HALF_XLEN_MAX;
-        let rhs_hi = b >> HALF_XLEN;
-        let rhs_lo = b & HALF_XLEN_MAX;
+#[cfg(feature = "riscv32")]
+impl ExecTrait<Result<u32, Exception>> for ExecMulHighUnsigned<u32> {
+    fn exec(a: u32, b: u32) -> Result<u32, Exception> {
+        let a = a as u64;
+        let b = b as u64;
 
-        // 4个部分
-        let p1 = lhs_hi * rhs_hi; // 高高
-        let p2 = lhs_hi * rhs_lo; // 高低
-        let p3 = lhs_lo * rhs_hi; // 低高
-        let p4 = lhs_lo * rhs_lo; // 低低
-
-        // 合并高位
-        let mid = (p2 & HALF_XLEN_MAX) + (p3 & HALF_XLEN_MAX) + (p4 >> HALF_XLEN);
-        let high = p1 + (p2 >> HALF_XLEN) + (p3 >> HALF_XLEN) + (mid >> HALF_XLEN);
-
-        Ok(high)
+        return Ok((a.wrapping_mul(b) >> 32) as u32);
     }
 }
 
-pub(super) struct ExecMulHighUnsigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecMulHighUnsigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let a = a as SignedWordType;
-        let b = b as SignedWordType;
+#[cfg(feature = "riscv64")]
+impl ExecTrait<Result<u64, Exception>> for ExecMulHighUnsigned<u64> {
+    fn exec(a: u64, b: u64) -> Result<u64, Exception> {
+        let a = a as u128;
+        let b = b as u128;
 
-        let neg = (a < 0) ^ (b < 0); // 异号
-        let lhs_abs = a.abs();
-        let rhs_abs = b.abs();
+        return Ok((a.wrapping_mul(b) >> 64) as u64);
+    }
+}
 
-        let high = ExecMulHighSighed::exec(lhs_abs as WordType, rhs_abs as WordType)?;
+// NOTE: This version is slow and deprecated.
 
-        if neg {
-            // 异号，高位取负
-            let tmp = (lhs_abs as WordType).wrapping_mul(rhs_abs as WordType);
-            let result = (!high).wrapping_add((tmp != 0) as WordType);
-            Ok(result)
-        } else {
-            Ok(high)
-        }
+// pub(super) struct ExecMulHighUnsigned {}
+// impl ExecTrait<Result<WordType, Exception>> for ExecMulHighUnsigned {
+//     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+//         const XLEN: WordType = (size_of::<WordType>() << 3) as WordType;
+//         const HALF_XLEN: WordType = XLEN >> 1;
+//         const HALF_XLEN_MAX: WordType = WordType::MAX >> (XLEN >> 1);
+
+//         let lhs_hi = a >> HALF_XLEN;
+//         let lhs_lo = a & HALF_XLEN_MAX;
+//         let rhs_hi = b >> HALF_XLEN;
+//         let rhs_lo = b & HALF_XLEN_MAX;
+
+//         // 4个部分
+//         let p1 = lhs_hi * rhs_hi; // 高高
+//         let p2 = lhs_hi * rhs_lo; // 高低
+//         let p3 = lhs_lo * rhs_hi; // 低高
+//         let p4 = lhs_lo * rhs_lo; // 低低
+
+//         // 合并高位
+//         let mid = (p2 & HALF_XLEN_MAX) + (p3 & HALF_XLEN_MAX) + (p4 >> HALF_XLEN);
+//         let high = p1 + (p2 >> HALF_XLEN) + (p3 >> HALF_XLEN) + (mid >> HALF_XLEN);
+
+//         Ok(high)
+//     }
+// }
+
+pub(super) struct ExecMulHighSigned<U> {
+    phantom: PhantomData<U>,
+}
+
+#[cfg(feature = "riscv32")]
+impl ExecTrait<Result<u32, Exception>> for ExecMulHighSigned<u32> {
+    fn exec(a: u32, b: u32) -> Result<u32, Exception> {
+        let a = a as i32 as i64;
+        let b = b as i32 as i64;
+
+        return Ok((a.wrapping_mul(b) >> 32) as u32);
+    }
+}
+
+#[cfg(feature = "riscv64")]
+impl ExecTrait<Result<u64, Exception>> for ExecMulHighSigned<u64> {
+    fn exec(a: u64, b: u64) -> Result<u64, Exception> {
+        let a = a as i64 as i128;
+        let b = b as i64 as i128;
+
+        return Ok((a.wrapping_mul(b) >> 64) as u64);
     }
 }
 
 pub(super) struct ExecMulHighSignedUnsigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSignedUnsigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let a = a as SignedWordType;
-        let lhs_neg = a < 0;
-        let lhs_abs = a.abs();
+        let lhs_neg = (a as SignedWordType) < 0;
 
-        let high = ExecMulHighSighed::exec(lhs_abs as WordType, b)?;
+        let high = ExecMulHighUnsigned::exec(a, b)?;
 
         if lhs_neg {
-            // 修正符号：高位 = ~(高位) + carry ？ 对应RISC-V mulh_su规则
-            // RISC-V mulh_su: 高位 = -(abs(lhs)*rhs)>>XLEN
-            let tmp = b.wrapping_mul(lhs_abs as WordType);
-            let result = (!high).wrapping_add((tmp != 0) as WordType);
-            Ok(result)
+            // Let M = 1 << XLEN, given a *negative* integer `a` bewteen [-M/2, 0).
+            // Then a * b = (a + M) * b - M * b.
+            // Here, a + M equals to the unsigned reinterpretation of `a`.
+            Ok(high.wrapping_sub(b))
         } else {
             Ok(high)
         }
@@ -277,27 +304,39 @@ impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSignedUnsigned {
 pub(super) struct ExecDivSigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivSigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a.cast_signed() / b.cast_signed()) as WordType)
+        if unlikely(b == 0) {
+            return Ok(WordType::MAX);
+        }
+        Ok((a.cast_signed().wrapping_div(b.cast_signed())) as WordType)
     }
 }
 
 pub(super) struct ExecDivUnsigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivUnsigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a / b)
+        if unlikely(b == 0) {
+            return Ok(WordType::MAX);
+        }
+        Ok(a.wrapping_div(b))
     }
 }
 
 pub(super) struct ExecRemSigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemSigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a.cast_signed() % b.cast_signed()) as WordType)
+        if unlikely(b == 0) {
+            return Ok(a);
+        }
+        Ok((a.cast_signed().wrapping_rem(b.cast_signed())) as WordType)
     }
 }
 
 pub(super) struct ExecRemUnsigned {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+        if unlikely(b == 0) {
+            return Ok(a);
+        }
         Ok(a % b)
     }
 }
@@ -320,23 +359,36 @@ impl ExecTrait<Result<WordType, Exception>> for ExecSubw {
 pub(super) struct ExecMulw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecMulw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend((a * b).truncate_to_bits(32), 32))
+        Ok(sign_extend((a.wrapping_mul(b)).truncate_to_bits(32), 32))
     }
 }
 
 pub(super) struct ExecDivw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32).cast_signed());
-        Ok(sign_extend((sa / sb).cast_unsigned() as WordType, 32))
+        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x).cast_signed());
+        if unlikely(sb == 0) {
+            return Ok(WordType::MAX);
+        }
+
+        Ok(sign_extend(
+            (sa.wrapping_div(sb)).cast_unsigned() as WordType,
+            32,
+        ))
     }
 }
 
 pub(super) struct ExecRemw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32).cast_signed());
-        Ok(sign_extend((sa % sb).cast_unsigned() as WordType, 32))
+        if unlikely(b == 0) {
+            return Ok(a as WordType);
+        }
+        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x).cast_signed());
+        Ok(sign_extend(
+            (sa.wrapping_rem(sb)).cast_unsigned() as WordType,
+            32,
+        ))
     }
 }
 
@@ -344,6 +396,9 @@ pub(super) struct ExecDivuw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
         let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32));
+        if unlikely(sb == 0) {
+            return Ok(WordType::MAX);
+        }
         Ok(sign_extend((sa / sb) as WordType, 32))
     }
 }
@@ -351,7 +406,10 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
 pub(super) struct ExecRemuw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32));
+        if unlikely(b == 0) {
+            return Ok(a);
+        }
+        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x));
         Ok(sign_extend((sa % sb) as WordType, 32))
     }
 }

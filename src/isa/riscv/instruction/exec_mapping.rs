@@ -22,9 +22,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::ADDW | RiscvInstr::ADDIW => exec_arith::<ExecAddw>,
         RiscvInstr::SUB => exec_arith::<ExecSub>,
         RiscvInstr::SUBW => exec_arith::<ExecSubw>,
+
         RiscvInstr::MUL => exec_arith::<ExecMulLow>,
-        RiscvInstr::MULH => exec_arith::<ExecMulHighSighed>,
-        RiscvInstr::MULHU => exec_arith::<ExecMulHighUnsigned>,
+        RiscvInstr::MULH => exec_arith::<ExecMulHighSigned<WordType>>,
+        RiscvInstr::MULHU => exec_arith::<ExecMulHighUnsigned<WordType>>,
         RiscvInstr::MULHSU => exec_arith::<ExecMulHighSignedUnsigned>,
         RiscvInstr::DIV => exec_arith::<ExecDivSigned>,
         RiscvInstr::DIVU => exec_arith::<ExecDivUnsigned>,

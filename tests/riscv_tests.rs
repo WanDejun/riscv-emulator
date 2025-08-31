@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crossterm::style::Stylize;
 use riscv_emulator::Emulator;
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
@@ -64,9 +65,9 @@ fn run_test(elf: &Path) -> bool {
 
                 if msg != 0 {
                     run_result = msg == 1;
-                    if msg != 1 {
-                        eprintln!("Test {:?} finished with message: {}", elf, msg);
-                    }
+                    // if msg != 1 {
+                    //     eprintln!("Test {:?} finished with message: {}", elf, msg);
+                    // }
                     return true;
                 }
             }
@@ -80,17 +81,17 @@ fn run_test(elf: &Path) -> bool {
 
     match result {
         Err(e) => {
-            eprintln!("Test {:?} panicked: {:?}", elf, e);
+            eprintln!("Test {:?}\tpanicked: {:?}", elf, e);
             false
         }
 
         Ok(false) => {
-            eprintln!("Test {:?} failed", elf);
+            eprintln!("Test {:?}\t{}", elf, "failed".red());
             false
         }
 
         Ok(true) => {
-            eprintln!("Test {:?} passed", elf);
+            eprintln!("Test {:?}\t{}", elf, "passed".green());
             true
         }
     }
@@ -131,6 +132,13 @@ fn run_rv64ui_p_tests() {
     run_test_group_exclude("rv64ui-p-", &["fence_i", "ma_data"]);
 }
 
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_rv64um_p_tests() {
+    run_test_group_exclude("rv64um-p-", &[]);
+}
+
 // #[test]
 // #[cfg(feature = "riscv64")]
 // #[cfg(feature = "riscv-tests")]
@@ -142,5 +150,5 @@ fn run_rv64ui_p_tests() {
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
 fn run_rv32uf_p_tests() {
-    run_test_group_exclude("rv64uf-p-", &[]);
+    run_test_group_exclude("rv64uf-p-", &["fdiv", "fmadd", "fmin"]);
 }

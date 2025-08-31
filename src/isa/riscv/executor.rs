@@ -336,6 +336,25 @@ mod tests {
     }
 
     #[test]
+    fn test_rv_m() {
+        run_test_exec_decode(
+            0x02c59733, // mulh a4,a1,a2
+            |builder| builder.reg(11, 0xffffffffffff8000).reg(12, 0),
+            |checker| checker.reg(14, 0),
+        );
+
+        run_test_exec_decode(
+            0x02c59733, // mulh a4,a1,a2
+            |builder| {
+                builder
+                    .reg(11, 0xffffffff80000000)
+                    .reg(12, 0xffffffffffff8000)
+            },
+            |checker| checker.reg(14, 0),
+        );
+    }
+
+    #[test]
     fn test_rv_f() {
         run_test_exec_decode(
             0x001015f3, // fsflags a1,zero => csrrw a1, fflags, zero
