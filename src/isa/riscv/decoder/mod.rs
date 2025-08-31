@@ -147,7 +147,7 @@ mod tests {
             csr_reg::csr_index,
             instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
         },
-        utils::{TruncateTo, negative_of},
+        utils::{TruncateToBits, negative_of},
     };
 
     use super::*;
@@ -372,7 +372,7 @@ mod tests {
             RVInstrInfo::I {
                 rs1: 3,
                 rd: 2,
-                imm: negative_of(5).truncate_to(12),
+                imm: negative_of(5).truncate_to_bits(12),
             },
         );
 
@@ -392,7 +392,7 @@ mod tests {
             RVInstrInfo::B {
                 rs1: 6,
                 rs2: 12,
-                imm: negative_of(112).truncate_to(13),
+                imm: negative_of(112).truncate_to_bits(13),
             },
         );
 

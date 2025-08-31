@@ -2,6 +2,7 @@
 use crossterm::terminal::disable_raw_mode;
 
 use crate::{
+    board::virt::IRQHandler,
     config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
     cpu::RegFile,
     fpu::soft_float::SoftFPU,
@@ -10,11 +11,11 @@ use crate::{
         icache::{ICache, SetICache},
         riscv::{
             RiscvTypes,
-            csr_reg::CsrRegFile,
+            csr_reg::{CsrRegFile, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
             mmu::VirtAddrManager,
-            trap::{Exception, Trap, trap_controller::TrapController},
+            trap::{Exception, Interrupt, Trap, trap_controller::TrapController},
         },
     },
     ram_config::DEFAULT_PC_VALUE,
@@ -73,6 +74,11 @@ impl RV32CPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
+        if let Some(interrupt) = TrapController::check_interrupt(self) {
+            TrapController::send_trap_signal(self, Trap::Interrupt(interrupt), 0);
+            return Ok(());
+        }
+
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
             log::trace!("Cache hit at pc: {:#x}", self.pc);
             self.icache_cnt += 1;
@@ -129,6 +135,23 @@ impl RV32CPU {
         #[cfg(not(test))]
         disable_raw_mode().unwrap();
         Ok(())
+    }
+}
+
+impl IRQHandler for RV32CPU {
+    fn handle_irq(&mut self, id: u8, level: bool) {
+        match Interrupt::from(id as usize) {
+            Interrupt::MachineTimer => {
+                if level {
+                    self.csr.get_by_type::<Mip>().unwrap().set_mtip(1);
+                } else {
+                    self.csr.get_by_type::<Mip>().unwrap().set_mtip(0);
+                }
+            }
+
+            // TODO: Handle other interrupts
+            _ => {}
+        }
     }
 }
 

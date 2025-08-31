@@ -9,7 +9,7 @@ use crate::{
         instruction::RVInstrInfo,
         trap::Exception,
     },
-    utils::{FloatPoint, TruncateTo, WordTrait, sign_extend, wrapping_add_as_signed},
+    utils::{FloatPoint, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed},
 };
 
 fn rm_to_round(cpu: &mut RV32CPU, rm: u8) -> Round {
@@ -253,7 +253,7 @@ where
         let val = cpu.reg_file.read(rs1, 0).0;
         let rm = rm_to_round(cpu, rm);
         cpu.fpu
-            .cvt_u_to_f_and_store::<F>(rd, val.truncate_to(BITS) as u128, rm);
+            .cvt_u_to_f_and_store::<F>(rd, val.truncate_to_bits(BITS) as u128, rm);
         save_fflags_to_cpu(cpu);
     } else {
         std::unreachable!();

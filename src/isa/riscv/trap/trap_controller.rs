@@ -3,10 +3,7 @@ use crate::{
     isa::{
         DebugTarget,
         riscv::{
-            csr_reg::{
-                PrivilegeLevel, csr_index,
-                csr_macro::{Medeleg, Mideleg, Mstatus, Mtvec},
-            },
+            csr_reg::{CsrReg, PrivilegeLevel, csr_index, csr_macro::*},
             executor::RV32CPU,
             trap::{Exception, Interrupt, Trap},
         },
@@ -123,13 +120,38 @@ impl TrapController {
     pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         Self::m_mode_send_trap_signal(cpu, cause, trap_value);
     }
+
+    pub fn check_interrupt(cpu: &mut RV32CPU) -> Option<Interrupt> {
+        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
+        if mstatus.get_mie() == 0 {
+            return None;
+        }
+
+        let mip = cpu.csr.get_by_type::<Mip>().unwrap();
+        let mie = cpu.csr.get_by_type::<Mie>().unwrap();
+
+        let pending_interrupts = mip.data() & mie.data();
+
+        if pending_interrupts == 0 {
+            return None;
+        }
+
+        for i in 0..=15 {
+            if (pending_interrupts & (1 << i)) != 0 {
+                let interrupt = Interrupt::from(i as usize);
+                return Some(interrupt);
+            }
+        }
+
+        unreachable!()
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::{
-        isa::riscv::{cpu_tester::run_test_cpu_step, csr_reg::csr_macro::*, trap::Exception},
+        isa::riscv::{cpu_tester::run_test_cpu_step, trap::Exception},
         ram_config,
     };
 

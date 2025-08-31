@@ -1,4 +1,8 @@
-use std::{cell::UnsafeCell, cmp::Ordering, rc::Rc};
+use std::{
+    cell::{RefCell, UnsafeCell},
+    cmp::Ordering,
+    rc::Rc,
+};
 
 use crate::{
     config::arch_config::WordType,
@@ -11,7 +15,7 @@ use crate::{
 pub struct MemoryMapItem {
     pub start: WordType,
     pub size: WordType,
-    pub device: Device,
+    pub device: Rc<RefCell<Device>>,
 }
 
 impl PartialEq for MemoryMapItem {
@@ -32,7 +36,7 @@ impl Ord for MemoryMapItem {
 }
 
 impl MemoryMapItem {
-    pub fn new(start: WordType, size: WordType, device: Device) -> Self {
+    pub fn new(start: WordType, size: WordType, device: Rc<RefCell<Device>>) -> Self {
         Self {
             start,
             size,
@@ -76,7 +80,7 @@ impl MemoryMapIO {
         } else {
             // in range
             let device = &mut self.map[device_index].device;
-            device.read(p_addr - start)
+            device.borrow_mut().read(p_addr - start)
         }
     }
 
@@ -100,7 +104,7 @@ impl MemoryMapIO {
         } else {
             // in range
             let device = &mut self.map[device_index].device;
-            device.write(p_addr - st, data)
+            device.borrow_mut().write(p_addr - st, data)
         }
     }
 }
@@ -177,7 +181,7 @@ impl DeviceTrait for MemoryMapIO {
     fn sync(&mut self) {
         // let _guard = self.lock();
         for item in self.map.iter_mut() {
-            item.device.sync();
+            item.device.borrow_mut().sync();
         }
     }
 }
@@ -199,8 +203,16 @@ mod test {
         let uart1 = FastUart16550::new();
         let power_manager = Device::PowerManager(PowerManager::new());
         let table = vec![
-            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
+            MemoryMapItem::new(
+                POWER_MANAGER_ADDR,
+                POWER_MANAGER_SIZE,
+                Rc::new(RefCell::new(power_manager)),
+            ),
+            MemoryMapItem::new(
+                UART1_ADDR,
+                UART_SIZE,
+                Rc::new(RefCell::new(Device::FastUart16550(uart1))),
+            ),
         ];
 
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
@@ -225,8 +237,16 @@ mod test {
         let io: SimulationIO = SimulationIO::new(uart1.get_io_channel());
         let power_manager = Device::PowerManager(PowerManager::new());
         let table = vec![
-            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(UART1_ADDR, UART_SIZE, Device::FastUart16550(uart1)),
+            MemoryMapItem::new(
+                POWER_MANAGER_ADDR,
+                POWER_MANAGER_SIZE,
+                Rc::new(RefCell::new(power_manager)),
+            ),
+            MemoryMapItem::new(
+                UART1_ADDR,
+                UART_SIZE,
+                Rc::new(RefCell::new(Device::FastUart16550(uart1))),
+            ),
         ];
 
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);

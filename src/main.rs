@@ -76,7 +76,7 @@ fn main() {
         (TargetFormat::Elf, _) | (TargetFormat::Auto, true) => {
             println!("ELF file detected\r");
             let bytes = std::fs::read(cli_args.path.clone()).unwrap();
-            VirtBoard::from_elf(&bytes)
+            VirtBoard::from_binary(&bytes)
         }
         _ => {
             println!("Non-ELF file detected\r");

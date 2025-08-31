@@ -44,7 +44,7 @@ pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
 
 /// get the negative of given number of [`WordType`] in 2's complement.
 pub fn negative_of(value: WordType) -> WordType {
-    !value + 1
+    (!value).wrapping_add(1)
 }
 
 #[macro_export]
@@ -173,12 +173,30 @@ macro_rules! gen_reg_name_list {
     };
 }
 
+pub fn concat_to_u64(high: u32, low: u32) -> u64 {
+    (high as u64).wrapping_shl(32) | (low as u64)
+}
+
 pub trait TruncateFrom<T>: Sized {
     fn truncate_from(value: T) -> Self;
 }
 
 pub trait TruncateTo<T>: Sized {
-    fn truncate_to(self, bits: u32) -> Self;
+    fn truncate_to(self) -> T;
+}
+
+impl<T, U> TruncateTo<U> for T
+where
+    U: TruncateFrom<T>,
+{
+    #[inline]
+    fn truncate_to(self) -> U {
+        U::truncate_from(self)
+    }
+}
+
+pub trait TruncateToBits<T>: Sized {
+    fn truncate_to_bits(self, bits: u32) -> Self;
 }
 
 macro_rules! impl_truncate_from {
@@ -191,19 +209,17 @@ macro_rules! impl_truncate_from {
     };
 }
 
-macro_rules! impl_truncate_to {
-    ($T:ty) => {
-        impl TruncateTo<$T> for $T {
-            fn truncate_to(self, bits: u32) -> Self {
-                if bits >= 64 {
-                    self
-                } else {
-                    ((self as u64) & ((1u64.wrapping_shl(bits)) - 1)) as Self
-                }
-            }
-        }
-    };
-}
+impl_truncate_from!(u8, u8);
+impl_truncate_from!(u8, u16);
+impl_truncate_from!(u8, u32);
+impl_truncate_from!(u8, u64);
+impl_truncate_from!(u8, u128);
+
+impl_truncate_from!(u16, u8);
+impl_truncate_from!(u16, u16);
+impl_truncate_from!(u16, u32);
+impl_truncate_from!(u16, u64);
+impl_truncate_from!(u16, u128);
 
 impl_truncate_from!(u32, u8);
 impl_truncate_from!(u32, u16);
@@ -223,10 +239,24 @@ impl_truncate_from!(u128, u32);
 impl_truncate_from!(u128, u64);
 impl_truncate_from!(u128, u128);
 
-impl_truncate_to!(u8);
-impl_truncate_to!(u16);
-impl_truncate_to!(u32);
-impl_truncate_to!(u64);
+macro_rules! impl_truncate_to_bits {
+    ($T:ty) => {
+        impl TruncateToBits<$T> for $T {
+            fn truncate_to_bits(self, bits: u32) -> Self {
+                if bits >= 64 {
+                    self
+                } else {
+                    ((self as u64) & ((1u64.wrapping_shl(bits)) - 1)) as Self
+                }
+            }
+        }
+    };
+}
+
+impl_truncate_to_bits!(u8);
+impl_truncate_to_bits!(u16);
+impl_truncate_to_bits!(u32);
+impl_truncate_to_bits!(u64);
 
 pub trait UnsignedInteger:
     Copy
@@ -263,6 +293,10 @@ pub trait UnsignedInteger:
     + Display
     + TruncateFrom<WordType>
     + TruncateFrom<u128>
+    + TruncateTo<u8>
+    + TruncateTo<u16>
+    + TruncateTo<u32>
+    + TruncateTo<u64>
 {
     const MAX: Self;
     const MIN: Self;
@@ -531,6 +565,7 @@ mod test {
 
     #[test]
     fn test_negative_of() {
+        assert_eq!(negative_of(0 as WordType), 0 as WordType);
         assert_eq!(negative_of(1 as WordType), (!0) as WordType);
         assert_eq!(negative_of(2 as WordType), (!0 - 1) as WordType);
     }
@@ -538,7 +573,10 @@ mod test {
     #[test]
     fn test_truncate() {
         assert_eq!(u8::truncate_from(0x1234u32), 0x34u8);
-        assert_eq!(0x1234567812345678u64.truncate_to(32), 0x12345678u64);
-        assert_eq!(0x1234567812345678u64.truncate_to(64), 0x1234567812345678u64);
+        assert_eq!(0x1234567812345678u64.truncate_to_bits(32), 0x12345678u64);
+        assert_eq!(
+            0x1234567812345678u64.truncate_to_bits(64),
+            0x1234567812345678u64
+        );
     }
 }
