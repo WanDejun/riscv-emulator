@@ -58,7 +58,15 @@ where
         let (val1, val2) = cpu.reg_file.read(rs1, rs2);
 
         if F::exec(val1, val2) {
-            cpu.pc = cpu.pc.wrapping_add(sign_extend(imm, 13));
+            let target = cpu.pc.wrapping_add(sign_extend(imm, 13));
+
+            // Like JAL(R), branch instructions will generate an exception.
+            // TODO: Like JAL(R), remember that this check should be disabled if 16-bit instructions are enabled.
+            if unlikely((target & 0x3) != 0) {
+                return Err(Exception::InstructionMisaligned);
+            }
+
+            cpu.pc = target;
         } else {
             cpu.pc = cpu.pc.wrapping_add(4);
         }

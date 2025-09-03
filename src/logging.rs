@@ -1,7 +1,9 @@
 use clap::ValueEnum;
 use flexi_logger::{
-    Cleanup, Criterion, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode, opt_format,
+    Cleanup, Criterion, Duplicate, FileSpec, LogSpecBuilder, Logger, LoggerHandle, Naming,
+    WriteMode, default_format,
 };
+use log::LevelFilter;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum LogLevel {
@@ -13,6 +15,16 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
+    pub fn to_level_filter(&self) -> LevelFilter {
+        match self {
+            LogLevel::Trace => LevelFilter::Trace,
+            LogLevel::Debug => LevelFilter::Debug,
+            LogLevel::Info => LevelFilter::Info,
+            LogLevel::Warn => LevelFilter::Warn,
+            LogLevel::Error => LevelFilter::Error,
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             LogLevel::Trace => "trace",
@@ -29,8 +41,11 @@ impl LogLevel {
 /// to ensure that all buffered log lines are flushed out.
 #[must_use]
 pub fn init(level: LogLevel) -> LoggerHandle {
-    Logger::try_with_str(level.name())
-        .unwrap()
+    let mut builder = LogSpecBuilder::new();
+    builder.module("rustyline", log::LevelFilter::Warn);
+    builder.default(level.to_level_filter());
+
+    Logger::with(builder.build())
         .log_to_file(
             FileSpec::default()
                 .directory("logs")
@@ -43,8 +58,8 @@ pub fn init(level: LogLevel) -> LoggerHandle {
             Cleanup::KeepLogFiles(3),
         )
         .write_mode(WriteMode::BufferAndFlush)
-        .duplicate_to_stderr(Duplicate::Warn)
-        .format_for_files(opt_format)
+        .duplicate_to_stderr(Duplicate::Error)
+        .format_for_files(default_format)
         .start()
         .unwrap()
 }

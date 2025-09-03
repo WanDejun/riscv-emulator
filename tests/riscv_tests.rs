@@ -81,7 +81,7 @@ fn run_test(elf: &Path) -> bool {
 
     match result {
         Err(e) => {
-            eprintln!("Test {:?}\tpanicked: {:?}", elf, e);
+            eprintln!("Test {:?}\t{}: {:?}", elf, "panicked".red(), e);
             false
         }
 
@@ -139,12 +139,12 @@ fn run_rv64um_p_tests() {
     run_test_group_exclude("rv64um-p-", &[]);
 }
 
-// #[test]
-// #[cfg(feature = "riscv64")]
-// #[cfg(feature = "riscv-tests")]
-// fn run_rv64mi_p_tests() {
-//     run_test_group_exclude("rv64mi-p-", &["breakpoint", "illegal"]);
-// }
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_rv64mi_p_tests() {
+    run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
+}
 
 #[test]
 #[cfg(feature = "riscv64")]
