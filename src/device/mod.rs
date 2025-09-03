@@ -6,8 +6,9 @@ use crate::{
 pub(crate) mod aclint;
 pub(crate) mod config;
 pub mod fast_uart;
-pub mod mmio;
-pub mod power_manager;
+pub(crate) mod mmio;
+pub(crate) mod power_manager;
+pub(crate) mod virtio;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MemError {
