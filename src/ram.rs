@@ -8,6 +8,7 @@ use crate::{
     utils::{read_raw_ptr, write_raw_ptr},
 };
 
+// TODO: align for inner box ptr, instead of struct Ram.
 #[repr(align(4096))]
 pub struct Ram {
     data: Box<[u8]>,
