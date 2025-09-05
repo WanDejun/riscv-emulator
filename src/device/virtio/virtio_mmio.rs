@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, rc::Rc};
+use std::{cell::UnsafeCell, fs::File, rc::Rc};
 
 use bitflags::bitflags;
 use log::error;
@@ -90,11 +90,13 @@ struct VirtIOMMIO {
 }
 
 impl VirtIOMMIO {
-    pub fn new() -> Self {
+    pub fn new(ram_base_raw: *mut u8) -> Self {
         Self {
             device: Rc::new(UnsafeCell::new(VirtIOBlkDevice::new(
                 "VirtIO Block Device".to_string(),
+                ram_base_raw,
                 VirtIODeviceID::Block as u16,
+                File::open("/dev/null").unwrap(),
             ))),
             host_features_sel: 0,
         }
