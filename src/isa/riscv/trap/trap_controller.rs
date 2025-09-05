@@ -69,6 +69,10 @@ impl TrapController {
     }
 
     fn m_mode_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+        cpu.csr
+            .get_by_type::<Mstatus>()
+            .unwrap()
+            .set_mpp(cpu.csr.get_current_privileged() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr
             .write_uncheck_privilege(csr_index::mcause, cause.into());
