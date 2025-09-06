@@ -148,8 +148,14 @@ impl VirtQueueAvail {
         unsafe { std::slice::from_raw_parts(&self.ring0 as *const u16, queue_num as usize) }
     }
 
+    // will add `last_avail_idx`
     fn try_get_desc_idx(&self, queue_num: u32, last_avail_idx: &mut u16) -> Option<u16> {
         let old_idx = *last_avail_idx;
+        let avail_ring_head = self.idx.load(std::sync::atomic::Ordering::Acquire);
+        if old_idx == avail_ring_head {
+            return None;
+        }
+
         *last_avail_idx = (old_idx + 1) % queue_num as u16;
 
         if (old_idx as u32) < queue_num {
@@ -165,7 +171,7 @@ impl VirtQueueAvail {
     pub(crate) fn mut_ring(base: u64, queue_num: u32) -> &'static mut [u16] {
         unsafe { std::slice::from_raw_parts_mut((base + 4) as *mut u16, queue_num as usize) }
     }
-    pub(crate) fn idx_add(&mut self, val: u16) {
+    pub(crate) fn idx_atomic_add(&mut self, val: u16) {
         self.idx.fetch_add(val, std::sync::atomic::Ordering::AcqRel);
     }
     pub(crate) fn idx_store(&mut self, val: u16) {
@@ -235,6 +241,11 @@ impl VirtQueueUsed {
 
         self.ring(queue_num)[old_idx as usize] = elem;
     }
+
+    fn index_add(&self, val: u16) {
+        self.idx
+            .fetch_add(val, std::sync::atomic::Ordering::Release);
+    }
 }
 
 #[cfg(test)]
@@ -245,10 +256,6 @@ impl VirtQueueUsed {
     }
     pub(crate) fn get_index(&self) -> u16 {
         self.idx.load(std::sync::atomic::Ordering::Relaxed)
-    }
-    pub(crate) fn index_add(&self, val: u16) {
-        self.idx
-            .fetch_add(val, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -284,29 +291,18 @@ impl VirtQueue {
             used: null_mut::<VirtQueueUsed>(),
         }
     }
-    pub(crate) fn set_desc_low(&mut self, addr_low: u32) {
-        self.desc_paddr &= !(u32::MAX as u64);
-        self.desc_paddr |= addr_low as u64;
+    pub(crate) fn set_desc(&mut self, addr: u64) {
+        self.desc_paddr = addr;
         self.update_desc_base(self.desc_paddr);
     }
-    pub(crate) fn set_desc_high(&mut self, addr_high: u32) {
-        self.desc_paddr &= !((u32::MAX as u64) << 32);
-        self.desc_paddr |= (addr_high as u64) << 32;
-        self.update_desc_base(self.desc_paddr);
-    }
-    pub(crate) fn set_avail_low(&mut self, addr_low: u32) {
-        self.avail_paddr &= !(u32::MAX as u64);
-        self.avail_paddr |= addr_low as u64;
+
+    pub(crate) fn set_avail(&mut self, addr: u64) {
+        self.avail_paddr = addr;
         self.update_avail_base(self.avail_paddr);
     }
-    pub(crate) fn set_avail_high(&mut self, addr_high: u32) {
-        self.avail_paddr &= !((u32::MAX as u64) << 32);
-        self.avail_paddr |= (addr_high as u64) << 32;
-        self.update_avail_base(self.avail_paddr);
-    }
-    pub(crate) fn set_used_low(&mut self, addr_low: u32) {
-        self.used_paddr &= !(u32::MAX as u64);
-        self.used_paddr |= addr_low as u64;
+
+    pub(crate) fn set_used(&mut self, addr: u64) {
+        self.used_paddr = addr;
         self.update_used_base(self.used_paddr);
     }
     pub(crate) fn set_used_high(&mut self, addr_high: u32) {
@@ -354,6 +350,7 @@ impl VirtQueue {
     //     VirtQueueDescHandle::new(table, ram_base, queue_num, idx as usize)
     // }
 
+    // will add `last_avail_idx`
     fn try_get_desc(&mut self) -> Option<VirtQueueDescHandle<'_>> {
         let virt_queue_avail = unsafe { self.avail.as_ref().unwrap() };
         virt_queue_avail
@@ -423,6 +420,11 @@ impl VirtQueue {
 
     pub(super) fn set_queue_num(&mut self, num: u32) {
         self.queue_num = num;
+    }
+
+    pub(super) fn ready(&self) -> bool {
+        // Always ready for request.
+        true
     }
 }
 
@@ -572,12 +574,9 @@ mod tests {
         let virtq_desc_base = 0x8000_2000 as u64;
         let virtq_avail_base = 0x8000_2100 + ((QUEUE_NUM + 2) * size_of::<u16>()) as u64;
         let virtq_used_base = 0x8000_2200 + (QUEUE_NUM * size_of::<VirtQueueUsed>() + 4) as u64;
-        virt_queue.set_avail_low(virtq_desc_base as u32);
-        virt_queue.set_avail_high((virtq_desc_base >> 32) as u32);
-        virt_queue.set_desc_low(virtq_desc_base as u32);
-        virt_queue.set_desc_low((virtq_desc_base >> 32) as u32);
-        virt_queue.set_used_low(virtq_used_base as u32);
-        virt_queue.set_used_high((virtq_used_base >> 32) as u32);
+        virt_queue.set_avail(virtq_avail_base);
+        virt_queue.set_desc(virtq_desc_base);
+        virt_queue.set_used(virtq_used_base);
         // virt_queue.update_avail_base(virtq_avail_base);
         // virt_queue.update_desc_base(virtq_desc_base);
         // virt_queue.update_used_base(virtq_used_base);
@@ -612,6 +611,7 @@ mod tests {
 
         // Write Available Ring.
         avail_ring[0] = 0;
+        virtq_avail.idx_atomic_add(1);
 
         let desc0 = &mut virt_queue_desc[0];
         desc0.paddr = 0x8000_2300;

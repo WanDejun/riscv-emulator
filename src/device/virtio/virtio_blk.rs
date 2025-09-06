@@ -97,14 +97,16 @@ pub(crate) enum VirtioBlkReqType {
 
 // Virtio block request header (0x10 bytes)
 #[repr(C, packed)]
-struct VirtioBlkReq {
+#[derive(Clone, Copy)]
+pub(super) struct VirtioBlkReq {
     request_type: u32, // (VirtioBlkReqStatus)
     reserved: u32,
     sector: u64,
 }
+
+#[cfg(test)]
 impl VirtioBlkReq {
-    #[cfg(test)]
-    fn new(request_type: VirtioBlkReqType, sector: u64) -> Self {
+    pub(super) fn new(request_type: VirtioBlkReqType, sector: u64) -> Self {
         Self {
             request_type: request_type as u32,
             reserved: 0,
@@ -132,8 +134,8 @@ pub(crate) enum VirtIOBlkReqStatus {
     NotReady = 3,
 }
 
-struct VirtioBlkStatus {
-    status: u8,
+pub(super) struct VirtioBlkStatus {
+    pub(super) status: u8,
 }
 impl VirtioBlkStatus {
     fn write_status(&mut self, status: VirtIOBlkReqStatus) {
@@ -227,33 +229,49 @@ impl VirtIOBlkDevice {
 }
 
 impl VirtIODeviceTrait for VirtIOBlkDevice {
+    fn get_device_id(&self) -> u16 {
+        self.device_id
+    }
+    fn status(&mut self) -> &mut u8 {
+        &mut self.status
+    }
+    fn get_generation(&self) -> u32 {
+        self.generation
+    }
+
+    fn isr(&mut self) -> &mut AtomicU8 {
+        &mut self.isr
+    }
+    fn update_irq(&mut self) {
+        // TODO!
+        todo!()
+    }
+
+    fn get_host_feature(&self) -> u64 {
+        self.host_feature
+    }
     fn set_queue_num(&mut self, num: u32) {
         self.queue.set_queue_num(num);
     }
+    fn queue_select(&self, _idx: u32) {
+        // ONLY ONE QUEUE.
+    }
 
-    fn set_desc_low(&mut self, addr_low: u32) {
-        self.queue.set_desc_low(addr_low);
+    fn set_desc(&mut self, addr: u64) {
+        self.queue.set_desc(addr);
     }
-    fn set_desc_high(&mut self, addr_high: u32) {
-        self.queue.set_desc_high(addr_high);
+    fn set_avail(&mut self, addr: u64) {
+        self.queue.set_avail(addr);
     }
-    fn set_avail_low(&mut self, addr_low: u32) {
-        self.queue.set_avail_low(addr_low);
-    }
-    fn set_avail_high(&mut self, addr_high: u32) {
-        self.queue.set_avail_high(addr_high);
-    }
-    fn set_used_low(&mut self, addr_low: u32) {
-        self.queue.set_used_low(addr_low);
-    }
-    fn set_used_high(&mut self, addr_high: u32) {
-        self.queue.set_used_high(addr_high);
+    fn set_used(&mut self, addr: u64) {
+        self.queue.set_used(addr);
     }
 
     fn manage_one_request(&mut self) -> bool {
         let mut req_type = VirtioBlkReqType::Unsupported;
         let mut sector: u64 = 0;
-        self.queue
+        let res = self
+            .queue
             .manage_one_request(|desc: &VirtQueueDesc, idx: usize| match idx {
                 0 => {
                     let t = Self::manage_request_header(self.ram_base_raw, desc);
@@ -311,15 +329,24 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
                     );
                     0
                 }
-            })
+            });
+        res
     }
 
-    fn notify(&mut self) {
+    fn notify(&mut self, _idx: u32) {
         loop {
             if !self.manage_one_request() {
                 break;
             }
         }
+    }
+
+    fn queue_ready(&self) -> bool {
+        self.queue.ready()
+    }
+
+    fn get_num_of_queue(&self) -> u32 {
+        1
     }
 }
 
@@ -327,6 +354,10 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
 impl VirtIOBlkDevice {
     pub(crate) fn flush(&mut self) {
         self.file.flush().unwrap();
+    }
+
+    pub(crate) fn queue(&mut self) -> &mut VirtQueue {
+        &mut self.queue
     }
 }
 
@@ -391,12 +422,9 @@ mod test {
         let virtq_desc_base = 0x8000_2000 as u64;
         let virtq_avail_base = 0x8000_2100 + ((QUEUE_NUM + 2) * size_of::<u16>()) as u64;
         let virtq_used_base = 0x8000_2200 + (QUEUE_NUM * size_of::<VirtQueueUsed>() + 4) as u64;
-        virt_device.set_avail_low(virtq_avail_base as u32);
-        virt_device.set_avail_high((virtq_avail_base >> 32) as u32);
-        virt_device.set_desc_low(virtq_desc_base as u32);
-        virt_device.set_desc_high((virtq_desc_base >> 32) as u32);
-        virt_device.set_used_low(virtq_used_base as u32);
-        virt_device.set_used_high((virtq_used_base >> 32) as u32);
+        virt_device.set_avail(virtq_avail_base);
+        virt_device.set_desc(virtq_desc_base);
+        virt_device.set_used(virtq_used_base);
 
         // Description Table.
         let virt_queue_desc = unsafe {
@@ -423,6 +451,7 @@ mod test {
 
         // Write Available Ring.
         avail_ring[0] = 0;
+        virtq_avail.idx_atomic_add(1);
 
         // header
         let desc0 = &mut virt_queue_desc[0];
@@ -475,7 +504,7 @@ mod test {
         let used_ring = virt_device.queue.get_used_ring();
         let used_index = used_ring.get_index();
         assert_eq!(used_index, 1);
-        used_ring.index_add(1);
+        // used_ring.index_add(1);
 
         let used_elem = used_ring.ring(QUEUE_NUM as u32)[0];
         assert_eq!(used_elem.get_len(), 0x200);
@@ -505,12 +534,9 @@ mod test {
         let virtq_desc_base = 0x8000_2000 as u64;
         let virtq_avail_base = 0x8000_2100 + ((QUEUE_NUM + 2) * size_of::<u16>()) as u64;
         let virtq_used_base = 0x8000_2200 + (QUEUE_NUM * size_of::<VirtQueueUsed>() + 4) as u64;
-        virt_device.set_avail_low(virtq_avail_base as u32);
-        virt_device.set_avail_high((virtq_avail_base >> 32) as u32);
-        virt_device.set_desc_low(virtq_desc_base as u32);
-        virt_device.set_desc_high((virtq_desc_base >> 32) as u32);
-        virt_device.set_used_low(virtq_used_base as u32);
-        virt_device.set_used_high((virtq_used_base >> 32) as u32);
+        virt_device.set_avail(virtq_avail_base);
+        virt_device.set_desc(virtq_desc_base);
+        virt_device.set_used(virtq_used_base);
 
         // Description Table.
         let virt_queue_desc = unsafe {
@@ -537,6 +563,7 @@ mod test {
 
         // Write Available Ring.
         avail_ring[0] = 0;
+        virtq_avail.idx_atomic_add(1);
 
         // header
         let desc0 = &mut virt_queue_desc[0];
@@ -592,7 +619,7 @@ mod test {
         let used_ring = virt_device.queue.get_used_ring();
         let used_index = used_ring.get_index();
         assert_eq!(used_index, 1);
-        used_ring.index_add(1);
+        // used_ring.index_add(1);
 
         let used_elem = used_ring.ring(QUEUE_NUM as u32)[0];
         assert_eq!(used_elem.get_len(), 0x200);
