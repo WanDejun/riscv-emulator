@@ -318,7 +318,7 @@ mod test {
     use crate::{
         device::virtio::{
             virtio_blk::{
-                VirtIOBlkDevice, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
+                VirtIOBlkDeviceBuilder, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
                 VirtioBlkReqType, VirtioBlkStatus,
             },
             virtio_queue::{
@@ -333,6 +333,44 @@ mod test {
     const QUEUE_NUM: usize = 8;
     const DESC_NUM: usize = 16;
 
+    // pub(crate) struct RamManager<'a> {
+    //     ram: Ram,
+
+    //     desc_array: &'a [VirtQueueDesc; DESC_NUM],
+    //     desc_head: usize,
+    //     desc_tail: usize,
+
+    //     avail_base: &'a [VirtQueueAvail; QUEUE_NUM],
+    //     avail_head: usize,
+    //     avail_tail: usize,
+
+    //     used_base: &'a [VirtQueueUsed; QUEUE_NUM],
+    //     used_head: usize,
+    //     used_tail: usize,
+    // }
+
+    // pub(crate) struct VirtIODescHandler<'a> {
+    //     desc: &'a mut VirtQueueDesc,
+    //     p: &'a mut RamManager<'a>,
+    // }
+    // impl<'a> Drop for VirtIODescHandler<'a> {
+    //     fn drop(&mut self) {
+    //         self.p.desc_tail += 1;
+    //         self.p.desc_tail %= DESC_NUM;
+    //     }
+    // }
+    // impl<'a> VirtIODescHandler<'a> {
+    //     pub(crate) fn new(ram: &mut RamManager) -> Self {
+    //         let desc = &mut ram.desc_array[ram.avail_head];
+    //         ram.avail_head += 1;
+    //         ram.avail_head %= DESC_NUM;
+    //         Self { desc: desc, p: ram }
+    //     }
+    // }
+    // impl<'a> RamManager<'a> {
+    //     pub(crate) fn alloc_desc(&mut self) -> VirtIODescHandler<'_, 'a> {}
+    // }
+
     #[test]
     fn test_mmio_blk_device() {
         let mut file = OpenOptions::new()
@@ -345,12 +383,10 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new(
-            "VirtIO Block 0".to_string(),
-            ram_base,
-            0,
-            file.try_clone().unwrap(),
-        );
+        let mut virt_device = VirtIOBlkDeviceBuilder::new(ram_base, file.try_clone().unwrap())
+            .name("VirtIO Block 0")
+            .generation(0)
+            .get();
 
         virt_device = virt_device
             .add_host_feature(VirtIOBlockFeature::BlockSize)

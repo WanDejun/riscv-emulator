@@ -1,4 +1,9 @@
-use std::sync::atomic::AtomicU8;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicU8, AtomicU16},
+};
+
+use lazy_static::lazy_static;
 
 pub(crate) trait VirtIODeviceTrait {
     fn get_device_id(&self) -> u16;
@@ -22,4 +27,20 @@ pub(crate) trait VirtIODeviceTrait {
 
     fn manage_one_request(&mut self) -> bool;
     fn notify(&mut self, queue_idx: u32);
+}
+
+pub struct DeviceIDAllocator(AtomicU16);
+
+impl DeviceIDAllocator {
+    pub fn new() -> Self {
+        Self(AtomicU16::new(0))
+    }
+    pub fn alloc(&mut self) -> u16 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+    }
+}
+
+lazy_static! {
+    pub(super) static ref DEVICE_ID_ALLOCTOR: Mutex<DeviceIDAllocator> =
+        Mutex::new(DeviceIDAllocator::new());
 }

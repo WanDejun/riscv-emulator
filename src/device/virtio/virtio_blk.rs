@@ -9,8 +9,8 @@ use log::error;
 use num_enum::TryFromPrimitive;
 
 use crate::device::virtio::{
-    virtio_device::VirtIODeviceTrait,
-    virtio_mmio::{VirtIO_MMIO_Offset, VirtIODeviceStatus},
+    virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
+    virtio_mmio::VirtIODeviceStatus,
     virtio_queue::{VirtQueue, VirtQueueDesc},
 };
 
@@ -147,8 +147,7 @@ impl VirtioBlkStatus {
 //          Virtio Block Device
 // ======================================
 pub(crate) struct VirtIOBlkDevice {
-    memory_mapped_register: [u32; 256],
-    pub(crate) name: String,
+    pub(crate) name: &'static str,
     pub(crate) status: u8,
     pub(crate) isr: AtomicU8,
     pub(crate) device_id: u16,
@@ -165,17 +164,13 @@ pub(crate) struct VirtIOBlkDevice {
 }
 
 impl VirtIOBlkDevice {
-    pub(crate) fn new(name: String, ram_base_raw: *mut u8, device_id: u16, file: File) -> Self {
-        let mut register = [0; 256];
-        register[VirtIO_MMIO_Offset::MagicValue as usize] = 0x74726976; // Magic Value
-        register[VirtIO_MMIO_Offset::Version as usize] = 0x2; // VirtIO Version
-        register[VirtIO_MMIO_Offset::DeviceId as usize] = 0x2; // Block device
-        register[VirtIO_MMIO_Offset::VendorId as usize] = 0x1af4; // Vendor 
-
-        register[VirtIO_MMIO_Offset::Status as usize] = 0x00; // Status
-
+    pub(crate) fn new(
+        name: &'static str,
+        ram_base_raw: *mut u8,
+        device_id: u16,
+        file: File,
+    ) -> Self {
         Self {
-            memory_mapped_register: register,
             name,
             status: 0,
             device_id,
@@ -376,6 +371,43 @@ impl VirtIOBlkDevice {
     }
 }
 
+pub struct VirtIOBlkDeviceBuilder {
+    device: VirtIOBlkDevice,
+}
+
+impl VirtIOBlkDeviceBuilder {
+    pub fn new(ram_base_raw: *mut u8, file: File) -> Self {
+        let device_id = DEVICE_ID_ALLOCTOR.lock().unwrap().alloc();
+        Self {
+            device: VirtIOBlkDevice::new(
+                "Unnamed VirtIO Block Device",
+                ram_base_raw,
+                device_id,
+                file,
+            ),
+        }
+    }
+
+    pub fn name(mut self, name: &'static str) -> Self {
+        self.device.name = name;
+        self
+    }
+
+    pub fn host_feature(mut self, feature: VirtIOBlockFeature) -> Self {
+        self.device.host_feature |= feature as u64;
+        self
+    }
+
+    pub fn generation(mut self, generation: u32) -> Self {
+        self.device.generation = generation;
+        self
+    }
+
+    pub fn get(self) -> VirtIOBlkDevice {
+        self.device
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::fs::OpenOptions;
@@ -431,7 +463,7 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0".to_string(), ram_base, 0, file);
+        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file);
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
@@ -538,12 +570,8 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new(
-            "VirtIO Block 0".to_string(),
-            ram_base,
-            0,
-            file.try_clone().unwrap(),
-        );
+        let mut virt_device =
+            VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file.try_clone().unwrap());
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
