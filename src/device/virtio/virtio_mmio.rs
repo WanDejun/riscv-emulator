@@ -79,8 +79,10 @@ bitflags! {
         const DRIVER_OK = 1 << 2;
         /// Driver has failed to set up the device or device has encountered an error.
         const FAILED = 1 << 7;
-        /// Device needs to be reset.
+        /// Indicates that the driver is set up and ready to drive the device
         const FEATURES_OK = 1 << 3;
+        /// Device needs to be reset.
+        const DEVICE_NEEDS_RESET = 1 << 6;
     }
 }
 
@@ -249,17 +251,13 @@ impl VirtIOMMIO {
                 }
                 VirtIO_MMIO_Offset::Status => {
                     if let Some(new_status) = VirtIODeviceStatus::from_bits(value as u8) {
-                        if (new_status & VirtIODeviceStatus::DRIVER_OK).is_empty() {
-                            // virtio_mmio_stop_ioeventfd(proxy);
-                            todo!()
-                        }
-                        if (new_status & VirtIODeviceStatus::FEATURES_OK)
-                            != VirtIODeviceStatus::empty()
-                        {
-                            // vdev.set_feature(self.guest_features)
+                        // if (new_status & VirtIODeviceStatus::DRIVER_OK).is_empty() {
+                        //     // virtio_mmio_stop_ioeventfd(proxy);
+                        // }
+                        if !(new_status & VirtIODeviceStatus::FEATURES_OK).is_empty() {
+                            vdev.set_feature(self.guest_features)
                         }
                         *vdev.status() |= new_status.bits();
-                        todo!()
                     }
                 }
                 VirtIO_MMIO_Offset::QueueDescLow => {
@@ -320,8 +318,8 @@ mod test {
     use crate::{
         device::virtio::{
             virtio_blk::{
-                VirtIOBlkDevice, VirtIOBlkReqStatus, VirtioBlkReq, VirtioBlkReqType,
-                VirtioBlkStatus,
+                VirtIOBlkDevice, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
+                VirtioBlkReqType, VirtioBlkStatus,
             },
             virtio_queue::{
                 VirtQueueAvail, VirtQueueAvailFlag, VirtQueueDesc, VirtQueueDescFlag,
@@ -347,14 +345,47 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let virt_device = VirtIOBlkDevice::new(
+        let mut virt_device = VirtIOBlkDevice::new(
             "VirtIO Block 0".to_string(),
             ram_base,
             0,
             file.try_clone().unwrap(),
         );
+
+        virt_device = virt_device
+            .add_host_feature(VirtIOBlockFeature::BlockSize)
+            .add_host_feature(VirtIOBlockFeature::Flush);
+
         let mut virtio_mmio_device = VirtIOMMIO::new(Rc::new(UnsafeCell::new(virt_device)));
         // virt_device.set_queue_num(QUEUE_NUM as u32);
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::Status as u64,
+            VirtIODeviceStatus::ACKNOWLEDGE.bits() as u32,
+        );
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::Status as u64,
+            VirtIODeviceStatus::DRIVER.bits() as u32,
+        );
+        virtio_mmio_device.write(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, 0);
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::DriverFeatures as u64,
+            VirtIOBlockFeature::BlockSize as u32,
+        );
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::DriverFeatures as u64,
+            ((VirtIOBlockFeature::Flush as u64) >> 32) as u32,
+        );
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::Status as u64,
+            VirtIODeviceStatus::DRIVER_OK.bits() as u32,
+        );
+        virtio_mmio_device.write(
+            VirtIO_MMIO_Offset::Status as u64,
+            VirtIODeviceStatus::FEATURES_OK.bits() as u32,
+        );
+        let status = virtio_mmio_device.read(VirtIO_MMIO_Offset::Status as u64);
+        assert!(status & VirtIODeviceStatus::DRIVER_OK.bits() as u32 != 0);
+
         virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueSelect as u64, 0);
         virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueNum as u64, QUEUE_NUM as u32);
 

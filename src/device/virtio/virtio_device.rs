@@ -9,6 +9,7 @@ pub(crate) trait VirtIODeviceTrait {
     fn update_irq(&mut self);
 
     fn get_host_feature(&self) -> u64;
+    fn set_feature(&mut self, feature: u64);
 
     fn set_queue_num(&mut self, num: u32);
     fn queue_ready(&self) -> bool;

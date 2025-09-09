@@ -10,7 +10,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::device::virtio::{
     virtio_device::VirtIODeviceTrait,
-    virtio_mmio::VirtIO_MMIO_Offset,
+    virtio_mmio::{VirtIO_MMIO_Offset, VirtIODeviceStatus},
     virtio_queue::{VirtQueue, VirtQueueDesc},
 };
 
@@ -153,7 +153,8 @@ pub(crate) struct VirtIOBlkDevice {
     pub(crate) isr: AtomicU8,
     pub(crate) device_id: u16,
 
-    pub(crate) host_feature: u64,
+    host_feature: u64,
+    guest_feature: u64,
 
     pub(crate) generation: u32,
     ram_base_raw: usize,
@@ -177,10 +178,12 @@ impl VirtIOBlkDevice {
             memory_mapped_register: register,
             name,
             status: 0,
+            device_id,
+
             isr: AtomicU8::new(0),
 
-            device_id,
             host_feature: 0,
+            guest_feature: 0,
 
             generation: 0,
             ram_base_raw: ram_base_raw as usize,
@@ -193,6 +196,10 @@ impl VirtIOBlkDevice {
 
     pub(crate) fn bound_file(&mut self, file: File) {
         self.file = file;
+    }
+    pub fn add_host_feature(mut self, new_feature: VirtIOBlockFeature) -> Self {
+        self.host_feature |= new_feature as u64;
+        self
     }
 
     fn write_blk(file: &mut File, buf: &[u8], offset: u64) -> u32 {
@@ -250,6 +257,14 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     fn get_host_feature(&self) -> u64 {
         self.host_feature
     }
+    fn set_feature(&mut self, feature: u64) {
+        if self.host_feature & feature != feature {
+            self.status &= !(VirtIODeviceStatus::DRIVER_OK.bits())
+        } else {
+            self.guest_feature = feature;
+        }
+    }
+
     fn set_queue_num(&mut self, num: u32) {
         self.queue.set_queue_num(num);
     }
