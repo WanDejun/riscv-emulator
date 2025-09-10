@@ -1,3 +1,5 @@
+use std::hint::unlikely;
+
 use crate::{
     config::arch_config::WordType,
     fpu::soft_float::*,
@@ -81,8 +83,17 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // Jump and link
         RiscvInstr::JAL => |inst_info: RVInstrInfo, cpu: &mut RV32CPU| {
             if let RVInstrInfo::J { rd, imm } = inst_info {
+                let target = cpu.pc.wrapping_add(sign_extend(imm, 21));
+
+                // > "The JAL and JALR instructions will generate an instruction-address-misaligned exception
+                // if the target address is not aligned to a four-byte boundary."
+                // TODO: Remember that this check in `JAL` and `JALR` should be disabled if 16-bit instructions are enabled.
+                if unlikely((target & 0x3) != 0) {
+                    return Err(Exception::InstructionMisaligned);
+                }
+
                 cpu.reg_file.write(rd, cpu.pc.wrapping_add(4));
-                cpu.pc = cpu.pc.wrapping_add(sign_extend(imm, 21));
+                cpu.pc = target;
             } else {
                 std::unreachable!();
             }
@@ -93,7 +104,14 @@ pub(in crate::isa::riscv) fn get_exec_func(
             if let RVInstrInfo::I { rs1, rd, imm } = inst_info {
                 let t = cpu.pc + 4;
                 let val = cpu.reg_file.read(rs1, 0).0;
-                cpu.pc = (val.wrapping_add(sign_extend(imm, 12)) & !1) as WordType;
+                let target: WordType = val.wrapping_add(sign_extend(imm, 12)) & !1;
+
+                // Same as JAL
+                if unlikely((target & 0x3) != 0) {
+                    return Err(Exception::InstructionMisaligned);
+                }
+
+                cpu.pc = target;
                 cpu.reg_file.write(rd, t);
             } else {
                 std::unreachable!();

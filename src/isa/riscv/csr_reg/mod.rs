@@ -198,6 +198,9 @@ impl CsrRegFile {
                 // implementations shall ignore writes to these bits and supply a zero value when read."
                 *fcsr = data & 0xFF;
             } // TODO: Raise error
+        } else if addr == csr_index::misa {
+            // Do nothing, "a value of zero can be returned to indicate the misa register has not been implemented"
+            // TODO: Implement misa
         } else {
             if let Some(val) = self.table.get_mut(&addr) {
                 *val = data

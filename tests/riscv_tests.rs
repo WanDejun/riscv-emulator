@@ -53,6 +53,7 @@ fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
 fn run_test(elf: &Path) -> bool {
     // Load the ELF file and run it
     let result = std::panic::catch_unwind(|| {
+        let mut timeout = false;
         let mut run_result = false;
         let mut emu = Emulator::from_elf(&elf);
         let bytes = std::fs::read(elf).unwrap();
@@ -72,25 +73,34 @@ fn run_test(elf: &Path) -> bool {
                 }
             }
 
+            if instr_cnt > 100_000 {
+                timeout = true;
+                return true;
+            }
+
             false
         })
         .unwrap();
 
-        run_result
+        (run_result, timeout)
     });
 
     match result {
         Err(e) => {
-            eprintln!("Test {:?}\tpanicked: {:?}", elf, e);
+            eprintln!("Test {:?}\t{}: {:?}", elf, "panicked".red(), e);
             false
         }
 
-        Ok(false) => {
-            eprintln!("Test {:?}\t{}", elf, "failed".red());
+        Ok((false, timeout)) => {
+            if timeout {
+                eprintln!("Test {:?}\t{}", elf, "timedout".red());
+            } else {
+                eprintln!("Test {:?}\t{}", elf, "failed".red());
+            }
             false
         }
 
-        Ok(true) => {
+        Ok((true, _)) => {
             eprintln!("Test {:?}\t{}", elf, "passed".green());
             true
         }
@@ -139,12 +149,13 @@ fn run_rv64um_p_tests() {
     run_test_group_exclude("rv64um-p-", &[]);
 }
 
-// #[test]
-// #[cfg(feature = "riscv64")]
-// #[cfg(feature = "riscv-tests")]
-// fn run_rv64mi_p_tests() {
-//     run_test_group_exclude("rv64mi-p-", &["breakpoint", "illegal"]);
-// }
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_rv64mi_p_tests() {
+    run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
+    // assert!(run_test(Path::new("riscv-tests/isa/rv64mi-p-ma_fetch")));
+}
 
 #[test]
 #[cfg(feature = "riscv64")]
