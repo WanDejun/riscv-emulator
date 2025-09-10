@@ -263,6 +263,7 @@ pub trait UnsignedInteger:
     + Sized
     + From<u8>
     + Into<u64>
+    + Default
     // 算术运算符
     + Add<Output = Self>
     + AddAssign

@@ -25,27 +25,51 @@ use lazy_static::lazy_static;
 
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
-    device::fast_uart::virtual_io::SerialDestination,
+    device::{fast_uart::virtual_io::SerialDestination, virtio::virtio_mmio::VirtIODeviceID},
     isa::riscv::{executor::RV32CPU, trap::Exception},
 };
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
+    str::FromStr,
     sync::{Mutex, MutexGuard},
 };
 
-pub(crate) struct EmulatorConfig {
+#[derive(Debug, Clone)]
+pub struct DeviceConfig {
+    pub dev_type: VirtIODeviceID,
+    pub path: PathBuf,
+}
+
+impl FromStr for DeviceConfig {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(':');
+        let dev_type = match parts.next() {
+            Some("virtio-block") => VirtIODeviceID::Block,
+            Some("virtio-network") => VirtIODeviceID::Network,
+            Some(other) => return Err(format!("Unknown device type: {}", other)),
+            None => return Err("Invaild device arguments.".into()),
+        };
+        let path = PathBuf::from(parts.next().ok_or("Need input a device path.")?);
+        Ok(DeviceConfig { dev_type, path })
+    }
+}
+
+pub struct EmulatorConfig {
     pub(crate) serial_destination: SerialDestination,
+    pub(crate) devices: Vec<DeviceConfig>,
 }
 impl EmulatorConfig {
     pub fn new() -> Self {
         Self {
             serial_destination: SerialDestination::Stdio,
+            devices: vec![],
         }
     }
 }
 lazy_static! {
-    pub(crate) static ref EMULATOR_CONFIG: Mutex<EmulatorConfig> =
-        Mutex::new(EmulatorConfig::new());
+    pub static ref EMULATOR_CONFIG: Mutex<EmulatorConfig> = Mutex::new(EmulatorConfig::new());
 }
 
 pub struct EmulatorConfigurator<'a> {
@@ -59,6 +83,11 @@ impl<'a> EmulatorConfigurator<'a> {
     }
     pub fn set_serial_destination(mut self, new_destination: SerialDestination) -> Self {
         self.lock.serial_destination = new_destination;
+        self
+    }
+
+    pub fn append_device(mut self, device: DeviceConfig) -> Self {
+        self.lock.devices.push(device);
         self
     }
 }

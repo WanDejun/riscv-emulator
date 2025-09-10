@@ -13,9 +13,9 @@ use crate::{
 };
 
 pub struct MemoryMapItem {
-    pub start: WordType,
-    pub size: WordType,
-    pub device: Rc<RefCell<Device>>,
+    pub(crate) start: WordType,
+    pub(crate) size: WordType,
+    pub(crate) device: Rc<RefCell<Device>>,
 }
 
 impl PartialEq for MemoryMapItem {
@@ -36,7 +36,7 @@ impl Ord for MemoryMapItem {
 }
 
 impl MemoryMapItem {
-    pub fn new(start: WordType, size: WordType, device: Rc<RefCell<Device>>) -> Self {
+    pub(crate) fn new(start: WordType, size: WordType, device: Rc<RefCell<Device>>) -> Self {
         Self {
             start,
             size,

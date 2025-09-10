@@ -12,7 +12,7 @@ use std::time::Instant;
 use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{
-    Emulator,
+    DeviceConfig, Emulator, EmulatorConfigurator,
     board::virt::VirtBoard,
     device::{fast_uart::virtual_io::SerialDestination, peripheral_init},
     isa::riscv::RiscvTypes,
@@ -29,6 +29,14 @@ enum TargetFormat {
     Auto,
     Elf,
     Bin,
+}
+
+fn device_list_display(devices: &Vec<DeviceConfig>) {
+    println!("\x1b[{}mdevice list:", 34);
+    for device in devices {
+        println!("\t{:#?}: {:#?}", device.dev_type, device.path);
+    }
+    println!("\x1b[0m");
 }
 
 #[derive(Parser, Debug)]
@@ -56,18 +64,30 @@ struct Args {
     /// Choose serial io destination.
     #[arg(value_enum, long = "serial", default_value_t = SerialDestination::Stdio)]
     serial_destination: SerialDestination,
+
+    /// Add devices to emulator. Arguments like --device VirtIODevice /dev/null, --device VirtIOConsole /dev/tty20
+    #[arg(long = "device", action = clap::ArgAction::Append)]
+    devices: Vec<DeviceConfig>,
 }
 
 fn main() {
     display_welcome_message();
-    let _logger_handle = logging::init(cli_args.log_level);
-    let _init_handle = peripheral_init();
-    // EmulatorConfigurator::new().set_serial_destination(cli_args.serial_destination);
-
+    device_list_display(&cli_args.devices);
     println!(
         "path = {:?}, debug = {}, verbose = {}.\r",
         cli_args.path, cli_args.debug, cli_args.verbose
     );
+
+    // Init emulator configuration by cli_args.
+    let mut emu_cfg = EmulatorConfigurator::new();
+    emu_cfg = emu_cfg.set_serial_destination(cli_args.serial_destination);
+    for device in cli_args.devices.iter() {
+        emu_cfg = emu_cfg.append_device(device.clone())
+    }
+    drop(emu_cfg);
+
+    let _logger_handle = logging::init(cli_args.log_level);
+    let _init_handle = peripheral_init();
 
     let mut board = match (
         cli_args.format,

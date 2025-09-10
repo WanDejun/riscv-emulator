@@ -11,14 +11,22 @@ use crate::{
     config::arch_config::WordType,
     device::{
         aclint::Clint,
-        config::{Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
+        config::{
+            Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR,
+            VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE,
+        },
         fast_uart::{
             FastUart16550,
             virtual_io::{SerialDestTrait, SerialDestination, SimulationIO, TerminalIO},
         },
         mmio::{MemoryMapIO, MemoryMapItem},
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
+        virtio::{
+            virtio_blk::VirtIOBlkDeviceBuilder,
+            virtio_mmio::{VirtIODeviceID, VirtIOMMIO},
+        },
     },
+    emulator_panic,
     isa::riscv::{
         RiscvTypes,
         executor::RV32CPU,
@@ -98,11 +106,35 @@ impl VirtBoard {
             timer.clone(),
         ))));
 
-        let mmio_items = vec![
+        let mut mmio_items = vec![
             MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
             MemoryMapItem::new(UART1_ADDR, UART_SIZE, uart1),
             MemoryMapItem::new(0x200_0000, 0x10000, clint.clone()),
         ];
+
+        // Add VirtIO device.
+        for (i, virtio_device_cfg) in EMULATOR_CONFIG.lock().unwrap().devices.iter().enumerate() {
+            let virtio_device = match virtio_device_cfg.dev_type {
+                VirtIODeviceID::Block => {
+                    let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
+                    VirtIOBlkDeviceBuilder::new(
+                        ram_raw_base,
+                        String::from(virtio_device_cfg.path.to_str().unwrap()),
+                    )
+                    .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::BlockSize)
+                    .get()
+                }
+                dev_type => {
+                    emulator_panic!("unsupport device: {:#?}", dev_type);
+                }
+            };
+            let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
+            mmio_items.push(MemoryMapItem::new(
+                VIRTIO_MMIO_BASE + i as WordType * VIRTIO_MMIO_SIZE,
+                VIRTIO_MMIO_SIZE,
+                Rc::new(RefCell::new(Device::VirtIOMMIO(virtio_mmio_device))),
+            ));
+        }
 
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), mmio_items);
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
