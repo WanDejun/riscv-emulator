@@ -551,6 +551,15 @@ const fn gen_ones_array<const LEN: usize>() -> [WordType; LEN + 1] {
 
 pub const BIT_ONES_ARRAY: [WordType; XLEN + 1] = gen_ones_array::<XLEN>();
 
+#[macro_export]
+macro_rules! emulator_panic {
+    ($($arg:tt)*) => {{
+        use crossterm::terminal::disable_raw_mode;
+        disable_raw_mode().unwrap();
+
+        panic!($($arg)*);
+    }};
+}
 #[cfg(test)]
 mod test {
     use super::*;

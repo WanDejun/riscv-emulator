@@ -66,6 +66,7 @@ pub enum VirtIO_MMIO_Offset {
     SharedMemBaseHigh = 0x0BC,
     // QueueReset = 0x0C0,
     ConfigGeneration = 0x0FC,
+    Config = 0x100,
 }
 
 bitflags! {
@@ -154,7 +155,7 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::VendorId => VIRT_VENDOR,
                     VirtIO_MMIO_Offset::DeviceFeatures => {
                         // TODO!
-                        (vdev.get_host_feature() >> self.host_features_sel) as u32
+                        (vdev.get_host_feature() >> (self.host_features_sel * 32)) as u32
                     }
                     VirtIO_MMIO_Offset::QueueNumMax => VIRTQUEUE_MAX_SIZE,
                     // VirtIO_MMIO_Offset::QueuePFN => 0 as u32, // legacy
@@ -167,6 +168,9 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::Status => *vdev.status() as u32,
                     VirtIO_MMIO_Offset::ConfigGeneration => vdev.get_generation(),
                     VirtIO_MMIO_Offset::SharedMemLenLow | VirtIO_MMIO_Offset::SharedMemLenHigh => u32::MAX,
+                    VirtIO_MMIO_Offset::Config => {
+                        vdev.read_config(offset - VirtIO_MMIO_Offset::Config as u64)
+                    }
                     VirtIO_MMIO_Offset::DeviceFeaturesSelect
                     | VirtIO_MMIO_Offset::DriverFeatures
                     | VirtIO_MMIO_Offset::DriverFeaturesSelect
@@ -216,7 +220,7 @@ impl VirtIOMMIO {
             Ok(offset_type) => match offset_type {
                 VirtIO_MMIO_Offset::DeviceFeaturesSelect => self.host_features_sel = value & 0x1,
                 VirtIO_MMIO_Offset::DriverFeatures => {
-                    let feature = (value as u64) << self.host_features_sel;
+                    let feature = (value as u64) << (self.host_features_sel * 32);
                     self.guest_features |= feature;
                 }
                 VirtIO_MMIO_Offset::DriverFeaturesSelect => {
@@ -284,6 +288,9 @@ impl VirtIOMMIO {
                     let q = &mut self.queues[self.queue_select as usize];
                     q.used |= (value as u64) << 32;
                 }
+                VirtIO_MMIO_Offset::Config => {
+                    vdev.write_config(offset - VirtIO_MMIO_Offset::Config as u64, value);
+                }
                 VirtIO_MMIO_Offset::MagicValue
                 | VirtIO_MMIO_Offset::Version
                 | VirtIO_MMIO_Offset::DeviceId
@@ -307,19 +314,88 @@ impl VirtIOMMIO {
 }
 
 #[cfg(test)]
+impl VirtIOMMIO {
+    pub(crate) fn write_status(&mut self, status: VirtIODeviceStatus) {
+        self.write(VirtIO_MMIO_Offset::Status as u64, status.bits() as u32);
+    }
+
+    pub(crate) fn get_host_feature(&mut self) -> u64 {
+        let mut feature: u64 = 0;
+        for i in (0..=1).rev() {
+            feature <<= 32;
+            self.write(VirtIO_MMIO_Offset::DeviceFeaturesSelect as u64, i);
+            feature |= self.read(VirtIO_MMIO_Offset::DeviceFeatures as u64) as u64;
+        }
+        feature
+    }
+
+    pub(crate) fn set_guest_feature(&mut self, mut feature: u64) {
+        for i in 0..=1 {
+            use crate::utils::BIT_ONES_ARRAY;
+
+            self.write(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, i);
+            self.write(
+                VirtIO_MMIO_Offset::DriverFeatures as u64,
+                (feature & BIT_ONES_ARRAY[32]) as u32,
+            );
+            feature >>= 32;
+        }
+    }
+
+    pub(crate) fn init_queue(&mut self, desc_base: u64, avail_base: u64, used_base: u64) {
+        self.write(VirtIO_MMIO_Offset::QueueAvailLow as u64, avail_base as u32);
+        self.write(
+            VirtIO_MMIO_Offset::QueueAvailHigh as u64,
+            (avail_base >> 32) as u32,
+        );
+
+        self.write(VirtIO_MMIO_Offset::QueueDescLow as u64, desc_base as u32);
+        self.write(
+            VirtIO_MMIO_Offset::QueueDescHigh as u64,
+            (desc_base >> 32) as u32,
+        );
+
+        self.write(VirtIO_MMIO_Offset::QueueUsedLow as u64, used_base as u32);
+        self.write(
+            VirtIO_MMIO_Offset::QueueUsedHigh as u64,
+            (used_base >> 32) as u32,
+        );
+
+        self.write(VirtIO_MMIO_Offset::QueueReady as u64, 0x01);
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct GuestFeatureBuilder {
+    feature: u64,
+}
+#[cfg(test)]
+impl GuestFeatureBuilder {
+    pub(crate) fn new() -> Self {
+        Self { feature: 0 }
+    }
+
+    pub(crate) fn add_guest_feature(mut self, one_feature: u64) -> Self {
+        self.feature |= one_feature;
+        self
+    }
+
+    pub(crate) fn take(self) -> u64 {
+        self.feature
+    }
+}
+
+#[cfg(test)]
 mod test {
     use core::slice;
-    use std::{
-        fs::OpenOptions,
-        io::{Read, Seek},
-    };
+    use std::io::{Read, Seek};
 
     use super::*;
     use crate::{
         device::virtio::{
             virtio_blk::{
                 VirtIOBlkDeviceBuilder, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
-                VirtioBlkReqType, VirtioBlkStatus,
+                VirtioBlkReqType, VirtioBlkStatus, init_block_file,
             },
             virtio_queue::{
                 VirtQueueAvail, VirtQueueAvailFlag, VirtQueueDesc, VirtQueueDescFlag,
@@ -333,129 +409,47 @@ mod test {
     const QUEUE_NUM: usize = 8;
     const DESC_NUM: usize = 16;
 
-    // pub(crate) struct RamManager<'a> {
-    //     ram: Ram,
-
-    //     desc_array: &'a [VirtQueueDesc; DESC_NUM],
-    //     desc_head: usize,
-    //     desc_tail: usize,
-
-    //     avail_base: &'a [VirtQueueAvail; QUEUE_NUM],
-    //     avail_head: usize,
-    //     avail_tail: usize,
-
-    //     used_base: &'a [VirtQueueUsed; QUEUE_NUM],
-    //     used_head: usize,
-    //     used_tail: usize,
-    // }
-
-    // pub(crate) struct VirtIODescHandler<'a> {
-    //     desc: &'a mut VirtQueueDesc,
-    //     p: &'a mut RamManager<'a>,
-    // }
-    // impl<'a> Drop for VirtIODescHandler<'a> {
-    //     fn drop(&mut self) {
-    //         self.p.desc_tail += 1;
-    //         self.p.desc_tail %= DESC_NUM;
-    //     }
-    // }
-    // impl<'a> VirtIODescHandler<'a> {
-    //     pub(crate) fn new(ram: &mut RamManager) -> Self {
-    //         let desc = &mut ram.desc_array[ram.avail_head];
-    //         ram.avail_head += 1;
-    //         ram.avail_head %= DESC_NUM;
-    //         Self { desc: desc, p: ram }
-    //     }
-    // }
-    // impl<'a> RamManager<'a> {
-    //     pub(crate) fn alloc_desc(&mut self) -> VirtIODescHandler<'_, 'a> {}
-    // }
-
     #[test]
     fn test_mmio_blk_device() {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("./tmp/test_mmio_blk_device.txt")
-            .unwrap();
+        let file_name = String::from("./tmp/test_mmio_blk_device.txt");
+        let mut buf: [u8; 512] = [0u8; 512];
+        buf[0xff] = 0x55;
+        let mut file = init_block_file(&file_name, 1, |_| &buf);
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDeviceBuilder::new(ram_base, file.try_clone().unwrap())
+        let virt_device = VirtIOBlkDeviceBuilder::new(ram_base, file_name)
             .name("VirtIO Block 0")
             .generation(0)
+            .host_feature(VirtIOBlockFeature::BlockSize)
+            .host_feature(VirtIOBlockFeature::Flush)
             .get();
 
-        virt_device = virt_device
-            .add_host_feature(VirtIOBlockFeature::BlockSize)
-            .add_host_feature(VirtIOBlockFeature::Flush);
-
         let mut virtio_mmio_device = VirtIOMMIO::new(Rc::new(UnsafeCell::new(virt_device)));
-        // virt_device.set_queue_num(QUEUE_NUM as u32);
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::Status as u64,
-            VirtIODeviceStatus::ACKNOWLEDGE.bits() as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::Status as u64,
-            VirtIODeviceStatus::DRIVER.bits() as u32,
-        );
-        virtio_mmio_device.write(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, 0);
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::DriverFeatures as u64,
-            VirtIOBlockFeature::BlockSize as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::DriverFeatures as u64,
-            ((VirtIOBlockFeature::Flush as u64) >> 32) as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::Status as u64,
-            VirtIODeviceStatus::DRIVER_OK.bits() as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::Status as u64,
-            VirtIODeviceStatus::FEATURES_OK.bits() as u32,
-        );
+        virtio_mmio_device.write_status(VirtIODeviceStatus::ACKNOWLEDGE);
+        virtio_mmio_device.write_status(VirtIODeviceStatus::DRIVER);
+
+        // set feature.
+        let _device_feature = virtio_mmio_device.get_host_feature();
+        let driver_feature = GuestFeatureBuilder::new()
+            .add_guest_feature(VirtIOBlockFeature::BlockSize as u64)
+            .add_guest_feature(VirtIOBlockFeature::Flush as u64)
+            .take();
+        virtio_mmio_device.set_guest_feature(driver_feature);
+
+        virtio_mmio_device.write_status(VirtIODeviceStatus::DRIVER_OK);
+        virtio_mmio_device.write_status(VirtIODeviceStatus::FEATURES_OK);
         let status = virtio_mmio_device.read(VirtIO_MMIO_Offset::Status as u64);
         assert!(status & VirtIODeviceStatus::DRIVER_OK.bits() as u32 != 0);
 
+        // init virt_queue.
         virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueSelect as u64, 0);
         virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueNum as u64, QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
         let virtq_avail_base = 0x8000_2100 + ((QUEUE_NUM + 2) * size_of::<u16>()) as u64;
         let virtq_used_base = 0x8000_2200 + (QUEUE_NUM * size_of::<VirtQueueUsed>() + 4) as u64;
-        // virt_device.set_avail(virtq_avail_base);
-        // virt_device.set_desc(virtq_desc_base);
-        // virt_device.set_used(virtq_used_base);
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueAvailLow as u64,
-            virtq_avail_base as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueAvailHigh as u64,
-            (virtq_avail_base >> 32) as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueDescLow as u64,
-            virtq_desc_base as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueDescHigh as u64,
-            (virtq_desc_base >> 32) as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueUsedLow as u64,
-            virtq_used_base as u32,
-        );
-        virtio_mmio_device.write(
-            VirtIO_MMIO_Offset::QueueUsedHigh as u64,
-            (virtq_used_base >> 32) as u32,
-        );
-        virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueReady as u64, 0x01);
+        virtio_mmio_device.init_queue(virtq_desc_base, virtq_avail_base, virtq_used_base);
 
         // Description Table.
         let virt_queue_desc = unsafe {
@@ -498,6 +492,7 @@ mod test {
         let req = unsafe { req.as_mut().unwrap() };
         *req = VirtioBlkReq::new(VirtioBlkReqType::Out, 0);
 
+        // data body
         let desc1 = &mut virt_queue_desc[1];
         let desc1_buf_addr = 0x8000_2400;
         desc1.init(0x8000_2400, 0x200, VirtQueueDescFlag::VIRTQ_DESC_F_NEXT, 2);
@@ -511,6 +506,7 @@ mod test {
             desc_buf[i] = (i * i) as u8;
         }
 
+        // result status
         let desc2 = &mut virt_queue_desc[2];
         let desc2_buf_addr = 0x8000_2310;
         desc2.init(
@@ -527,25 +523,19 @@ mod test {
         };
 
         // manage request.
-        // let t = virt_device.manage_one_request();
-        // assert_eq!(t, true);
         virtio_mmio_device.write(VirtIO_MMIO_Offset::QueueNotify as u64, 0x00);
 
         assert_eq!(desc_status.status, VirtIOBlkReqStatus::Ok as u8);
         assert_eq!(desc_buf[0], 0);
 
-        // let used_ring = virt_device.queue().get_used_ring();
-        // let used_index = used_ring.get_index();
-        // assert_eq!(used_index, 1);
-        // used_ring.index_add(1);
-
-        // let used_elem = used_ring.ring(QUEUE_NUM as u32)[0];
-        // assert_eq!(used_elem.get_len(), 0x200);
-        // assert_eq!(used_elem.get_id(), 0);
-
+        // Check the data written.
         let mut buf: [u8; 512] = [0u8; 512];
         file.seek(std::io::SeekFrom::Start(0)).unwrap();
         file.read(&mut buf).unwrap();
         assert_eq!(buf[93], (93 * 93) as u8);
+
+        // Check file size (device config region).
+        let capacity = virtio_mmio_device.read(VirtIO_MMIO_Offset::Config as u64);
+        assert_eq!(capacity, 1);
     }
 }

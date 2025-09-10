@@ -1,20 +1,23 @@
 use core::slice;
 use std::{
-    fs::File,
-    io::{Read, Seek, Write},
+    fs::{File, OpenOptions},
+    io::{Read, Seek, SeekFrom, Write},
     sync::atomic::AtomicU8,
 };
 
 use log::error;
 use num_enum::TryFromPrimitive;
 
-use crate::device::virtio::{
-    virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
-    virtio_mmio::VirtIODeviceStatus,
-    virtio_queue::{VirtQueue, VirtQueueDesc},
+use crate::{
+    device::virtio::{
+        virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
+        virtio_mmio::VirtIODeviceStatus,
+        virtio_queue::{VirtQueue, VirtQueueDesc},
+    },
+    emulator_panic,
 };
 
-const SECTOR_SIZE: u64 = 512;
+pub(super) const SECTOR_SIZE: usize = 512;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,48 +38,75 @@ pub(crate) enum VirtIOBlockFeature {
     SecureErase  = 1 << 16,  // Secure erase supported
 }
 
-// #[repr(C, packed)]
-// #[derive(Debug, Clone, Copy, Default)]
-// pub(crate) struct VirtioBlkGeometry {
-//     pub(crate) cylinders: u16,
-//     pub(crate) heads: u8,
-//     pub(crate) sectors: u8,
-// }
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct VirtioBlkGeometry {
+    pub(crate) cylinders: u16,
+    pub(crate) heads: u8,
+    pub(crate) sectors: u8,
+}
 
-// #[repr(C, packed)]
-// #[derive(Debug, Clone, Copy, Default)]
-// pub struct VirtioBlkTopology {
-//     pub physical_block_exp: u8,
-//     pub alignment_offset: u8,
-//     pub min_io_size: u16,
-//     pub opt_io_size: u32,
-// }
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct VirtioBlkTopology {
+    pub(crate) physical_block_exp: u8,
+    pub(crate) alignment_offset: u8,
+    pub(crate) min_io_size: u16,
+    pub(crate) opt_io_size: u32,
+}
 
-// #[repr(C, packed)]
-// #[derive(Debug, Clone, Copy, Default)]
-// #[rustfmt::skip]
-// pub struct VirtioBlkConfig {
-//     pub capacity: u64,                      // 0x00: Size of the block device (in 512-byte sectors)
-//     pub size_max: u32,                      // 0x08: Maximum segment size (if VIRTIO_BLK_F_SIZE_MAX)
-//     pub seg_max: u32,                       // 0x0c: Maximum number of segments (if VIRTIO_BLK_F_SEG_MAX)
-//     pub geometry: VirtioBlkGeometry,        // 0x10: Disk geometry (if VIRTIO_BLK_F_GEOMETRY)
-//     pub blk_size: u32,                      // 0x14: Block size of device (if VIRTIO_BLK_F_BLK_SIZE)
-//     pub topology: VirtioBlkTopology,        // 0x18: Topology information (if VIRTIO_BLK_F_TOPOLOGY)
-//     pub writeback: u8,                      // 0x1c: Writeback mode (if VIRTIO_BLK_F_CONFIG_WCE)
-//     pub unused0: [u8; 3],                   // 0x1d: Padding
-//     pub num_queues: u16,                    // 0x20: Number of queues (if VIRTIO_BLK_F_MQ)
-//     pub unused1: [u8; 6],                   // 0x22: Padding
-//     pub max_discard_sectors: u32,           // 0x28: Max discard sectors (if VIRTIO_BLK_F_DISCARD)
-//     pub max_discard_seg: u32,               // 0x2c: Max discard segments (if VIRTIO_BLK_F_DISCARD)
-//     pub discard_sector_alignment: u32,      // 0x30: Discard sector alignment (if VIRTIO_BLK_F_DISCARD)
-//     pub max_write_zeroes_sectors: u32,      // 0x34: Max write zeroes sectors (if VIRTIO_BLK_F_WRITE_ZEROES)
-//     pub max_write_zeroes_seg: u32,          // 0x38: Max write zeroes segments (if VIRTIO_BLK_F_WRITE_ZEROES)
-//     pub write_zeroes_may_unmap: u8,         // 0x3c: Write zeroes may unmap (if VIRTIO_BLK_F_WRITE_ZEROES)
-//     pub unused2: [u8; 3],                   // 0x3d: Padding
-//     pub max_secure_erase_sectors: u32,      // 0x40: Max secure erase sectors (if VIRTIO_BLK_F_SECURE_ERASE)
-//     pub max_secure_erase_seg: u32,          // 0x44: Max secure erase segments (if VIRTIO_BLK_F_SECURE_ERASE)
-//     pub secure_erase_sector_alignment: u32, // 0x48: Secure erase sector alignment (if VIRTIO_BLK_F_SECURE_ERASE)
-// }
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
+#[rustfmt::skip]
+pub(crate) struct VirtioBlkConfig {
+    pub(crate) capacity: u64,                      // 0x00: Size of the block device (in 512-byte sectors)
+    pub(crate) size_max: u32,                      // 0x08: Maximum segment size        (if VIRTIO_BLK_F_SIZE_MAX)
+    pub(crate) seg_max: u32,                       // 0x0c: Maximum number of segments  (if VIRTIO_BLK_F_SEG_MAX)
+    pub(crate) geometry: VirtioBlkGeometry,        // 0x10: Disk geometry               (if VIRTIO_BLK_F_GEOMETRY)
+    pub(crate) blk_size: u32,                      // 0x14: Block size of device        (if VIRTIO_BLK_F_BLK_SIZE)
+    pub(crate) topology: VirtioBlkTopology,        // 0x18: Topology information        (if VIRTIO_BLK_F_TOPOLOGY)
+    pub(crate) writeback: u8,                      // 0x1c: Writeback mode              (if VIRTIO_BLK_F_CONFIG_WCE)
+    pub(crate) unused0: [u8; 3],                   // 0x1d: Padding
+    pub(crate) num_queues: u16,                    // 0x20: Number of queues            (if VIRTIO_BLK_F_MQ)
+    pub(crate) unused1: [u8; 6],                   // 0x22: Padding
+    pub(crate) max_discard_sectors: u32,           // 0x28: Max discard sectors         (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) max_discard_seg: u32,               // 0x2c: Max discard segments        (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) discard_sector_alignment: u32,      // 0x30: Discard sector alignment    (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) max_write_zeroes_sectors: u32,      // 0x34: Max write zeroes sectors    (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) max_write_zeroes_seg: u32,          // 0x38: Max write zeroes segments   (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) write_zeroes_may_unmap: u8,         // 0x3c: Write zeroes may unmap      (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) unused2: [u8; 3],                   // 0x3d: Padding
+    pub(crate) max_secure_erase_sectors: u32,      // 0x40: Max secure erase sectors        (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) max_secure_erase_seg: u32,          // 0x44: Max secure erase segments       (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) secure_erase_sector_alignment: u32, // 0x48: Secure erase sector alignment   (if VIRTIO_BLK_F_SECURE_ERASE)
+}
+
+impl VirtioBlkConfig {
+    pub(crate) fn new(capacity: u64) -> Self {
+        let mut config = Self::default();
+        config.capacity = capacity;
+        config.blk_size = SECTOR_SIZE as u32;
+        config
+    }
+
+    pub(crate) fn into_slice(&self) -> &[u32] {
+        unsafe {
+            slice::from_raw_parts(
+                self as *const Self as *const u32,
+                size_of::<VirtioBlkConfig>() / 4,
+            )
+        }
+    }
+
+    pub(crate) fn into_slice_mut(&mut self) -> &mut [u32] {
+        unsafe {
+            slice::from_raw_parts_mut(
+                self as *mut Self as *mut u32,
+                size_of::<VirtioBlkConfig>() / 4,
+            )
+        }
+    }
+}
 
 // ======================================
 //      Virtio block request types
@@ -161,6 +191,7 @@ pub(crate) struct VirtIOBlkDevice {
     file: File, // the file that is bound to this device
 
     queue: VirtQueue,
+    pub(super) config_region: VirtioBlkConfig,
 }
 
 impl VirtIOBlkDevice {
@@ -168,8 +199,22 @@ impl VirtIOBlkDevice {
         name: &'static str,
         ram_base_raw: *mut u8,
         device_id: u16,
-        file: File,
+        file_path: String,
     ) -> Self {
+        let mut file;
+        if let Ok(file_result) = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .append(false)
+            .create(false)
+            .open(file_path.as_str())
+        {
+            file = file_result;
+        } else {
+            emulator_panic!("Can not find file: {}.", file_path);
+        }
+        let size = file.seek(SeekFrom::End(0)).unwrap();
+
         Self {
             name,
             status: 0,
@@ -186,6 +231,7 @@ impl VirtIOBlkDevice {
             file,
 
             queue: VirtQueue::new(ram_base_raw, 0), // will be set later
+            config_region: VirtioBlkConfig::new(size.div_ceil(SECTOR_SIZE as u64)),
         }
     }
 
@@ -300,10 +346,10 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
 
                     match req_type {
                         VirtioBlkReqType::In => {
-                            Self::read_blk(&mut self.file, buf, sector * SECTOR_SIZE)
+                            Self::read_blk(&mut self.file, buf, sector * SECTOR_SIZE as u64)
                         }
                         VirtioBlkReqType::Out => {
-                            Self::write_blk(&mut self.file, buf, sector * SECTOR_SIZE)
+                            Self::write_blk(&mut self.file, buf, sector * SECTOR_SIZE as u64)
                         }
                         VirtioBlkReqType::Flush => {
                             self.file.flush().unwrap();
@@ -358,6 +404,14 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     fn get_num_of_queue(&self) -> u32 {
         1
     }
+
+    fn read_config(&mut self, idx: u64) -> u32 {
+        self.config_region.into_slice()[idx as usize]
+    }
+
+    fn write_config(&mut self, idx: u64, data: u32) {
+        self.config_region.into_slice_mut()[idx as usize] = data
+    }
 }
 
 #[cfg(test)]
@@ -376,7 +430,7 @@ pub struct VirtIOBlkDeviceBuilder {
 }
 
 impl VirtIOBlkDeviceBuilder {
-    pub fn new(ram_base_raw: *mut u8, file: File) -> Self {
+    pub fn new(ram_base_raw: *mut u8, file: String) -> Self {
         let device_id = DEVICE_ID_ALLOCTOR.lock().unwrap().alloc();
         Self {
             device: VirtIOBlkDevice::new(
@@ -409,6 +463,28 @@ impl VirtIOBlkDeviceBuilder {
 }
 
 #[cfg(test)]
+pub fn init_block_file<'a, F>(path: &str, blk_num: u64, mut f: F) -> File
+where
+    F: FnMut(usize) -> &'a [u8],
+{
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .unwrap();
+    // let write_buf: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+    for i in 0..blk_num {
+        let write_buf = f(i as usize);
+        assert_eq!(write_buf.len(), SECTOR_SIZE);
+        file.write_all(write_buf).unwrap();
+    }
+
+    file
+}
+
+#[cfg(test)]
 mod test {
     use std::fs::OpenOptions;
 
@@ -433,37 +509,31 @@ mod test {
             .truncate(true)
             .open("./tmp/test_file_read_write.txt")
             .unwrap();
-        let write_buf: [u8; 512] = [0xAB; 512];
+        let write_buf: [u8; SECTOR_SIZE] = [0xAB; SECTOR_SIZE];
         let offset = 0;
 
         // 测试写入
         let write_len = VirtIOBlkDevice::write_blk(&mut file, &write_buf, offset);
-        assert_eq!(write_len, 512);
+        assert_eq!(write_len, SECTOR_SIZE as u32);
 
         let mut file_copy = file.try_clone().unwrap();
         // 测试读取
-        let mut read_buf: [u8; 512] = [0u8; 512];
+        let mut read_buf: [u8; SECTOR_SIZE] = [0u8; SECTOR_SIZE];
         let read_len = VirtIOBlkDevice::read_blk(&mut file_copy, &mut read_buf, offset);
-        assert_eq!(read_len, 512);
+        assert_eq!(read_len, SECTOR_SIZE as u32);
         assert_eq!(read_buf, write_buf);
     }
 
     #[test]
     fn test_blk_read() {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("./tmp/test_blk_read.txt")
-            .unwrap();
-        let mut buf: [u8; 512] = [0u8; 512];
+        let mut buf: [u8; SECTOR_SIZE] = [0u8; SECTOR_SIZE];
         buf[0xff] = 0x55;
-        file.write_all(&buf).unwrap();
+        let file_name = String::from("./tmp/test_blk_read.txt");
+        let _ = init_block_file(&file_name, 1, |_| &buf);
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file);
+        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file_name);
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
@@ -560,18 +630,15 @@ mod test {
 
     #[test]
     fn test_blk_write() {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("./tmp/test_blk_write.txt")
-            .unwrap();
+        // init file.
+        let mut buf: [u8; SECTOR_SIZE] = [0u8; SECTOR_SIZE];
+        buf[0xff] = 0x55;
+        let file_name = String::from("./tmp/test_blk_write.txt");
+        let mut file = init_block_file(file_name.as_str(), 1, |_| &buf);
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device =
-            VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file.try_clone().unwrap());
+        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file_name);
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
@@ -668,7 +735,7 @@ mod test {
         assert_eq!(used_elem.get_len(), 0x200);
         assert_eq!(used_elem.get_id(), 0);
 
-        let mut buf: [u8; 512] = [0u8; 512];
+        let mut buf: [u8; SECTOR_SIZE] = [0u8; SECTOR_SIZE];
         file.seek(std::io::SeekFrom::Start(0)).unwrap();
         file.read(&mut buf).unwrap();
         assert_eq!(buf[93], (93 * 93) as u8);
