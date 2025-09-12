@@ -467,6 +467,10 @@ pub fn init_block_file<'a, F>(path: &str, blk_num: u64, mut f: F) -> File
 where
     F: FnMut(usize) -> &'a [u8],
 {
+    use std::{fs::create_dir_all, path::Path};
+    let parent_dir = Path::new(path).parent().unwrap();
+    create_dir_all(parent_dir).unwrap();
+
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -486,8 +490,6 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::fs::OpenOptions;
-
     use crate::{
         device::virtio::virtio_queue::{
             VirtQueueAvail, VirtQueueAvailFlag, VirtQueueDescFlag, VirtQueueUsed, VirtQueueUsedFlag,
@@ -502,15 +504,16 @@ mod test {
 
     #[test]
     fn test_file_read_write() {
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("./tmp/test_file_read_write.txt")
-            .unwrap();
+        // let mut file = OpenOptions::new()
+        //     .read(true)
+        //     .write(true)
+        //     .create(true)
+        //     .truncate(true)
+        //     .open("./tmp/test_file_read_write.txt")
+        //     .unwrap();
         let write_buf: [u8; SECTOR_SIZE] = [0xAB; SECTOR_SIZE];
         let offset = 0;
+        let mut file = init_block_file("./tmp/test_file_read_write.txt", 1, |_| &write_buf);
 
         // 测试写入
         let write_len = VirtIOBlkDevice::write_blk(&mut file, &write_buf, offset);
