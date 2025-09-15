@@ -12,7 +12,7 @@ QEMU := qemu-system-$(ARCH)
 
 TARGET ?= main
 
-TARGETS := main fib prime matrix_mul io_bench trap_test
+TARGETS := main fib prime matrix_mul io_bench trap_test virtio_blk_test
 TARGET_ELFS := $(patsubst %,$(BIN)/%.elf,$(TARGETS))
 
 LIBS := io log boot trap trap_handler power
@@ -40,8 +40,6 @@ $(OBJ)/boot.o: $(SRC)/boot.S
 $(OBJ)/%.o: $(LIB)/%.c
 	@ mkdir $(OBJ) $(BIN) -p
 	$(CC) $(C_FLAG) -c $^ -o $@
-
-
 
 
 build: $(LIBS_OBJ) $(BIN)/$(TARGET).elf 

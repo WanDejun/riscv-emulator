@@ -32,7 +32,7 @@ enum TargetFormat {
 }
 
 fn device_list_display(devices: &Vec<DeviceConfig>) {
-    println!("\x1b[{}mdevice list:", 34);
+    println!("\x1b[{}mdevices list:", 34);
     for device in devices {
         println!("\t{:#?}: {:#?}", device.dev_type, device.path);
     }

@@ -329,7 +329,7 @@ impl Mem for VirtIOMMIO {
             return Err(MemError::LoadMisaligned);
         }
 
-        let offset = addr & !BIT_ONES_ARRAY[4]; // align to u32
+        let offset: u64 = addr & !BIT_ONES_ARRAY[2]; // align to u32
         let val = self.read_u32(offset);
         let val = unsafe { (&val as *const u32 as *const T).read() };
         Ok(val)
@@ -348,7 +348,7 @@ impl Mem for VirtIOMMIO {
         }
 
         let data = unsafe { (&data as *const T as *const u32).read() };
-        let offset = addr & !BIT_ONES_ARRAY[4]; // align to u32
+        let offset = addr & !BIT_ONES_ARRAY[2]; // align to u32
         self.write_u32(offset, data);
         Ok(())
     }

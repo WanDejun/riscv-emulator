@@ -27,14 +27,17 @@ int scanf(const char* fmt, ...);
 
 
 #define TEST_START(x)                                                                    \
-    print_str("========== START ");                                                      \
-    print_str(x);                                                                        \
-    print_str(" ==========\n");
+    do {                                                                                 \
+        print_str("========== START ");                                                  \
+        print_str(x);                                                                    \
+        print_str(" ==========\n");                                                      \
+    } while(0)
 #define TEST_END(x)                                                                      \
-    print_str("========== END ");                                                        \
-    print_str(x);                                                                        \
-    print_str(" ==========\n");
-
+    do {                                                                                 \
+        print_str("========== END ");                                                    \
+        print_str(x);                                                                    \
+        print_str(" ==========\n");                                                      \
+    } while(0)                                                       
 
 #define PASS                                                                             \
     do {                                                                                 \
