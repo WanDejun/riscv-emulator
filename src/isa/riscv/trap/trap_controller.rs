@@ -3,7 +3,7 @@ use crate::{
     isa::{
         DebugTarget,
         riscv::{
-            csr_reg::{CsrReg, PrivilegeLevel, csr_index, csr_macro::*},
+            csr_reg::{NamedCsrReg, PrivilegeLevel, csr_index, csr_macro::*},
             executor::RV32CPU,
             trap::{Exception, Interrupt, Trap},
         },

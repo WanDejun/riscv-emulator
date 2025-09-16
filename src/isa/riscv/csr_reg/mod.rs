@@ -125,16 +125,70 @@ impl From<u8> for PrivilegeLevel {
 
 const DEFAULT_PRIVILEGE_LEVEL: PrivilegeLevel = PrivilegeLevel::M;
 
-pub(crate) trait CsrReg: From<*mut WordType> {
+pub(crate) trait NamedCsrReg {
+    fn new(data: *mut CsrReg, ctx: *mut CsrContext) -> Self;
     fn get_index() -> WordType;
-    fn clear_by_mask(&mut self, mask: WordType);
-    fn set_by_mask(&mut self, mask: WordType);
     fn data(&self) -> WordType;
 }
 
+struct CsrWriteOp {
+    mask: WordType,
+    value: WordType,
+}
+
+impl CsrWriteOp {
+    fn apply(&self, target: &mut WordType) {
+        *target = self.get_new_value(*target);
+    }
+
+    fn get_new_value(&self, value: WordType) -> WordType {
+        (value & !self.mask) | self.value
+    }
+}
+
+pub(crate) struct CsrContext {}
+
+impl CsrContext {
+    fn new() -> CsrContext {
+        CsrContext {}
+    }
+}
+
+type Validator = fn(WordType, &CsrContext) -> CsrWriteOp;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CsrReg {
+    value: WordType,
+    validator: Option<Validator>,
+}
+
+impl CsrReg {
+    fn new(value: WordType, validator: Option<Validator>) -> CsrReg {
+        CsrReg { value, validator }
+    }
+
+    fn value(&self) -> WordType {
+        self.value
+    }
+
+    fn validate(&mut self, write: CsrWriteOp) {
+        write.apply(&mut self.value);
+    }
+
+    fn write(&mut self, new_value: WordType, context: &CsrContext) {
+        if let Some(validator) = self.validator {
+            let write = validator(new_value, context);
+            write.apply(&mut self.value);
+        } else {
+            self.value = new_value;
+        }
+    }
+}
+
 pub(crate) struct CsrRegFile {
-    table: HashMap<WordType, WordType>,
+    table: HashMap<WordType, CsrReg>,
     cpl: PrivilegeLevel, // current privileged level
+    ctx: CsrContext,
 }
 
 impl CsrRegFile {
@@ -145,11 +199,12 @@ impl CsrRegFile {
     pub fn from(csr_table: &[(WordType, WordType)]) -> Self {
         let mut table = HashMap::new();
         for (addr, default_value) in csr_table.iter() {
-            table.insert(*addr, *default_value);
+            table.insert(*addr, CsrReg::new(*default_value, None));
         }
         Self {
             table,
             cpl: DEFAULT_PRIVILEGE_LEVEL,
+            ctx: CsrContext::new(),
         }
     }
 
@@ -170,12 +225,12 @@ impl CsrRegFile {
 
     /// ONLY used in debugger. Read & write without side-effect.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
-        if let Some(val) = self.table.get_mut(&addr) {
-            let old = *val;
+        if let Some(reg) = self.table.get_mut(&addr) {
+            let old = *reg;
             if let Some(new) = new_value {
-                *val = new;
+                reg.write(new, &self.ctx);
             }
-            Some(old)
+            Some(old.value)
         } else {
             None
         }
@@ -185,25 +240,25 @@ impl CsrRegFile {
         // Special-case fflags and frm; they are subfields of fcsr
         if addr == csr_index::fflags {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                *fcsr = (*fcsr & !0b11111) | (data & 0b11111);
+                fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
             } // TODO: Raise error
         } else if addr == csr_index::frm {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                *fcsr = (*fcsr & !0b11100000) | ((data & 0b111) << 5);
+                fcsr.value = (fcsr.value & !0b11100000) | ((data & 0b111) << 5);
             } // TODO: Raise error
         } else if addr == csr_index::fcsr {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
                 // Quoted from RISC-V manual:
                 // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
                 // implementations shall ignore writes to these bits and supply a zero value when read."
-                *fcsr = data & 0xFF;
+                fcsr.value = data & 0xFF;
             } // TODO: Raise error
         } else if addr == csr_index::misa {
             // Do nothing, "a value of zero can be returned to indicate the misa register has not been implemented"
             // TODO: Implement misa
         } else {
             if let Some(val) = self.table.get_mut(&addr) {
-                *val = data
+                val.write(data, &self.ctx);
             } else {
                 // TODO: Raise error
             }
@@ -216,23 +271,26 @@ impl CsrRegFile {
             self.table
                 .get(&csr_index::fcsr)
                 .copied()
-                .map(|x| x & 0b11111)
+                .map(|reg| reg.value & 0b11111)
         } else if addr == csr_index::frm {
             self.table
                 .get(&csr_index::fcsr)
                 .copied()
-                .map(|x| (x >> 5) & 0b111)
+                .map(|reg| (reg.value >> 5) & 0b111)
         } else {
-            self.table.get(&addr).copied()
+            self.table.get(&addr).copied().map(|reg| reg.value)
         }
     }
 
     pub fn get_by_type<T>(&mut self) -> Option<T>
     where
-        T: CsrReg,
+        T: NamedCsrReg,
     {
-        let val = self.table.get_mut(&T::get_index())?;
-        Some(T::from(val as *mut u64))
+        let reg = self.table.get_mut(&T::get_index())?;
+        Some(NamedCsrReg::new(
+            reg as *mut CsrReg,
+            &mut self.ctx as *mut CsrContext,
+        ))
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {

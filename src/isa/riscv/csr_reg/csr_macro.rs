@@ -1,6 +1,6 @@
 use phf::phf_map;
 
-use super::CsrReg;
+use super::{CsrContext, CsrReg, CsrWriteOp, NamedCsrReg};
 use crate::config::arch_config::{SignedWordType, WordType, XLEN};
 use crate::utils::BIT_ONES_ARRAY;
 
@@ -11,28 +11,22 @@ macro_rules! gen_csr_reg {
         [ $( $bit:expr, $len:expr, $fname:ident ),*  $(,)? ]
     ) => {
         pub struct $name {
-            data: *mut WordType,
+            reg: *mut CsrReg,
+            ctx: *mut CsrContext,
         }
 
-        impl From<*mut WordType> for $name {
-            fn from(value: *mut WordType) -> Self {
-                Self { data: value }
+        impl NamedCsrReg for $name {
+            fn new(reg: *mut CsrReg, ctx: *mut CsrContext) -> Self {
+                Self { reg, ctx }
             }
-        }
 
-        impl CsrReg for $name {
             fn data(&self) -> WordType {
-                unsafe { *(self.data) }
+                unsafe { (*self.reg).value() }
             }
 
+            #[inline]
             fn get_index() -> WordType {
                 $addr
-            }
-            fn clear_by_mask(&mut self, mask: WordType) {
-                unsafe {*self.data &= !(mask)}
-            }
-            fn set_by_mask(&mut self, mask: WordType) {
-                unsafe {*self.data |= mask}
             }
         }
 
@@ -47,7 +41,7 @@ macro_rules! gen_csr_reg {
                         ((XLEN as SignedWordType) + $bit) as WordType
                     };
 
-                    ((unsafe { self.data.read_volatile() })
+                    ((unsafe { self.reg.read_volatile().value() })
                     & (BIT_ONES_ARRAY[$len]) << LOW_BIT) >> LOW_BIT
                 }
 
@@ -61,9 +55,10 @@ macro_rules! gen_csr_reg {
                         ((XLEN as SignedWordType) + $bit) as WordType
                     };
 
-                    let mut data = unsafe { self.data.read_volatile() };
-                    data &= !((BIT_ONES_ARRAY[$len]) << LOW_BIT);
-                    unsafe { self.data.write_volatile(data | (val << LOW_BIT)) };
+                    let reg = unsafe { &mut *self.reg };
+
+                    let write_op = CsrWriteOp {mask: (BIT_ONES_ARRAY[$len]) << LOW_BIT, value: val << LOW_BIT};
+                    reg.write(write_op.get_new_value(reg.value()), unsafe {&*self.ctx});
                 }
             )*
         }
