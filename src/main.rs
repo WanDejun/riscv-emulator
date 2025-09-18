@@ -65,7 +65,7 @@ struct Args {
     #[arg(value_enum, long = "serial", default_value_t = SerialDestination::Stdio)]
     serial_destination: SerialDestination,
 
-    /// Add devices to emulator. Arguments like --device VirtIODevice /dev/null, --device VirtIOConsole /dev/tty20
+    /// Add devices to emulator. Arguments like --device:virtio-device:/dev/null, --device:virtio-console:/dev/tty20
     #[arg(long = "device", action = clap::ArgAction::Append)]
     devices: Vec<DeviceConfig>,
 }
