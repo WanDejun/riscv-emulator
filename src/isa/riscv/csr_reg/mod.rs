@@ -1,8 +1,13 @@
 pub mod csr_macro;
+mod validator;
 
 use std::{cmp::Ordering, collections::HashMap};
+use validator::*;
 
-use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, Misa},
+};
 
 #[rustfmt::skip]
 #[allow(non_upper_case_globals, unused)]
@@ -131,30 +136,48 @@ pub(crate) trait NamedCsrReg {
     fn data(&self) -> WordType;
 }
 
+/// Write `value` to the bits specified by `mask`.
 struct CsrWriteOp {
     mask: WordType,
     value: WordType,
 }
 
 impl CsrWriteOp {
+    fn new(mask: WordType, value: WordType) -> CsrWriteOp {
+        CsrWriteOp {
+            mask,
+            value: value & mask,
+        }
+    }
+
     fn apply(&self, target: &mut WordType) {
         *target = self.get_new_value(*target);
     }
 
     fn get_new_value(&self, value: WordType) -> WordType {
-        (value & !self.mask) | self.value
+        (value & !self.mask) | (self.value & self.mask)
+    }
+
+    /// Combine two write operations into one.
+    ///
+    /// XXX: You'd better not to pass overlapped masks, but there's no check for this.
+    fn merge(&self, rhs: &CsrWriteOp) -> CsrWriteOp {
+        CsrWriteOp {
+            mask: self.mask | rhs.mask,
+            value: self.value | rhs.value,
+        }
     }
 }
 
-pub(crate) struct CsrContext {}
+pub(crate) struct CsrContext {
+    pub extension: WordType, // Used in `misa`
+}
 
 impl CsrContext {
     fn new() -> CsrContext {
-        CsrContext {}
+        CsrContext { extension: 0 }
     }
 }
-
-type Validator = fn(WordType, &CsrContext) -> CsrWriteOp;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CsrReg {
@@ -171,10 +194,6 @@ impl CsrReg {
         self.value
     }
 
-    fn validate(&mut self, write: CsrWriteOp) {
-        write.apply(&mut self.value);
-    }
-
     fn write(&mut self, new_value: WordType, context: &CsrContext) {
         if let Some(validator) = self.validator {
             let write = validator(new_value, context);
@@ -183,12 +202,17 @@ impl CsrReg {
             self.value = new_value;
         }
     }
+
+    fn write_without_validate(&mut self, new_value: WordType) {
+        self.value = new_value;
+    }
 }
 
 pub(crate) struct CsrRegFile {
     table: HashMap<WordType, CsrReg>,
     cpl: PrivilegeLevel, // current privileged level
-    ctx: CsrContext,
+    pub(super) ctx: CsrContext,
+    last_write_addr: Option<WordType>,
 }
 
 impl CsrRegFile {
@@ -201,10 +225,14 @@ impl CsrRegFile {
         for (addr, default_value) in csr_table.iter() {
             table.insert(*addr, CsrReg::new(*default_value, None));
         }
+
+        table.get_mut(&Misa::get_index()).unwrap().validator = Some(validate_misa);
+
         Self {
             table,
             cpl: DEFAULT_PRIVILEGE_LEVEL,
             ctx: CsrContext::new(),
+            last_write_addr: None,
         }
     }
 
@@ -236,8 +264,18 @@ impl CsrRegFile {
         }
     }
 
+    /// Write directly without any check or validation and have no other side effects.
+    pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
+        if let Some(reg) = self.table.get_mut(&addr) {
+            reg.write_without_validate(data);
+            Some(())
+        } else {
+            None
+        }
+    }
+
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
-        // Special-case fflags and frm; they are subfields of fcsr
+        // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
         if addr == csr_index::fflags {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
                 fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
@@ -253,12 +291,10 @@ impl CsrRegFile {
                 // implementations shall ignore writes to these bits and supply a zero value when read."
                 fcsr.value = data & 0xFF;
             } // TODO: Raise error
-        } else if addr == csr_index::misa {
-            // Do nothing, "a value of zero can be returned to indicate the misa register has not been implemented"
-            // TODO: Implement misa
         } else {
             if let Some(val) = self.table.get_mut(&addr) {
                 val.write(data, &self.ctx);
+                self.last_write_addr = Some(addr);
             } else {
                 // TODO: Raise error
             }

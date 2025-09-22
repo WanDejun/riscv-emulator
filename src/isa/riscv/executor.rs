@@ -11,7 +11,7 @@ use crate::{
         icache::{ICache, SetICache},
         riscv::{
             RiscvTypes,
-            csr_reg::{CsrRegFile, csr_macro::*},
+            csr_reg::{CsrRegFile, csr_index, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
             mmu::VirtAddrManager,
@@ -34,12 +34,30 @@ pub struct RV32CPU {
 
 impl RV32CPU {
     pub fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
+        let mut csr = CsrRegFile::new();
+
+        // TODO: Record extensions in Decoder.
+        let ext = "FIMSU"
+            .chars()
+            .into_iter()
+            .map(|c| c as WordType - 'A' as WordType)
+            .fold(0, |acc, c| acc | (1 << c));
+        csr.ctx.extension = ext;
+
+        let mxl = if WordType::BITS == 32 {
+            1 << 30
+        } else {
+            debug_assert!(WordType::BITS == 64);
+            2 << 62
+        };
+        csr.write_directly(csr_index::misa, ext | mxl);
+
         Self {
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
-            csr: CsrRegFile::new(),
+            csr: csr,
             icache: SetICache::new(),
             fpu: SoftFPU::new(),
             icache_cnt: 0,
