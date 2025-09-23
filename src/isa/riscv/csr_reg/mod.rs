@@ -1,12 +1,13 @@
-pub mod csr_macro;
+#[macro_use]
 mod validator;
 
+pub mod csr_macro;
+
 use std::{cmp::Ordering, collections::HashMap};
-use validator::*;
 
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::csr_reg::csr_macro::{CSR_REG_TABLE, Misa},
+    isa::riscv::csr_reg::{csr_macro::CSR_REG_TABLE, validator::Validator},
 };
 
 #[rustfmt::skip]
@@ -137,45 +138,53 @@ pub(crate) trait NamedCsrReg {
 }
 
 /// Write `value` to the bits specified by `mask`.
-struct CsrWriteOp {
+pub(crate) struct CsrWriteOp {
     mask: WordType,
-    value: WordType,
 }
 
 impl CsrWriteOp {
-    fn new(mask: WordType, value: WordType) -> CsrWriteOp {
-        CsrWriteOp {
-            mask,
-            value: value & mask,
-        }
+    #[inline]
+    fn new(mask: WordType) -> CsrWriteOp {
+        CsrWriteOp { mask }
     }
 
-    fn apply(&self, target: &mut WordType) {
-        *target = self.get_new_value(*target);
+    #[inline]
+    fn new_write_all() -> CsrWriteOp {
+        CsrWriteOp { mask: !0 }
     }
 
-    fn get_new_value(&self, value: WordType) -> WordType {
-        (value & !self.mask) | (self.value & self.mask)
+    #[inline]
+    fn apply(&self, target: &mut WordType, value: WordType) {
+        *target = self.get_new_value(*target, value);
     }
 
-    /// Combine two write operations into one.
+    #[inline]
+    fn get_new_value(&self, old_value: WordType, value: WordType) -> WordType {
+        (old_value & !self.mask) | (value & self.mask)
+    }
+
+    /// Merge two write operations into one.
     ///
     /// XXX: You'd better not to pass overlapped masks, but there's no check for this.
+    #[inline]
     fn merge(&self, rhs: &CsrWriteOp) -> CsrWriteOp {
         CsrWriteOp {
             mask: self.mask | rhs.mask,
-            value: self.value | rhs.value,
         }
     }
 }
 
 pub(crate) struct CsrContext {
     pub extension: WordType, // Used in `misa`
+    pub xlen: u8,            // 32 or 64
 }
 
 impl CsrContext {
     fn new() -> CsrContext {
-        CsrContext { extension: 0 }
+        CsrContext {
+            extension: 0,
+            xlen: 0,
+        }
     }
 }
 
@@ -196,14 +205,15 @@ impl CsrReg {
 
     fn write(&mut self, new_value: WordType, context: &CsrContext) {
         if let Some(validator) = self.validator {
-            let write = validator(new_value, context);
-            write.apply(&mut self.value);
+            let op = validator(new_value, context);
+            op.apply(&mut self.value, new_value);
         } else {
             self.value = new_value;
         }
     }
 
-    fn write_without_validate(&mut self, new_value: WordType) {
+    /// Write directly without any validation.
+    fn write_directly(&mut self, new_value: WordType) {
         self.value = new_value;
     }
 }
@@ -220,13 +230,11 @@ impl CsrRegFile {
         Self::from(CSR_REG_TABLE)
     }
 
-    pub fn from(csr_table: &[(WordType, WordType)]) -> Self {
+    pub fn from(csr_table: &[(WordType, WordType, Validator)]) -> Self {
         let mut table = HashMap::new();
-        for (addr, default_value) in csr_table.iter() {
-            table.insert(*addr, CsrReg::new(*default_value, None));
+        for (addr, default_value, validator) in csr_table.iter() {
+            table.insert(*addr, CsrReg::new(*default_value, Some(*validator)));
         }
-
-        table.get_mut(&Misa::get_index()).unwrap().validator = Some(validate_misa);
 
         Self {
             table,
@@ -267,7 +275,7 @@ impl CsrRegFile {
     /// Write directly without any check or validation and have no other side effects.
     pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if let Some(reg) = self.table.get_mut(&addr) {
-            reg.write_without_validate(data);
+            reg.write_directly(data);
             Some(())
         } else {
             None

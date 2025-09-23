@@ -303,6 +303,16 @@ pub trait UnsignedInteger:
     const MIN: Self;
 
     const BITS: usize;
+
+    fn mask_bits(self, l: u32, r: u32) -> Self {
+        debug_assert!(l <= r && (r as usize) < Self::BITS);
+        self & make_mask(l as usize, r as usize).truncate_to()
+    }
+
+    fn extract_bits(self, l: u32, r: u32) -> Self {
+        debug_assert!(l <= r && (r as usize) < Self::BITS);
+        (self >> l) & (BIT_ONES_ARRAY[(r - l + 1) as usize]).truncate_to()
+    }
 }
 
 impl UnsignedInteger for u8 {
@@ -551,6 +561,12 @@ const fn gen_ones_array<const LEN: usize>() -> [WordType; LEN + 1] {
 }
 
 pub const BIT_ONES_ARRAY: [WordType; XLEN + 1] = gen_ones_array::<XLEN>();
+
+#[inline]
+pub(crate) const fn make_mask(left: usize, right: usize) -> WordType {
+    let width = right - left + 1;
+    BIT_ONES_ARRAY[width] << left
+}
 
 #[macro_export]
 macro_rules! emulator_panic {
