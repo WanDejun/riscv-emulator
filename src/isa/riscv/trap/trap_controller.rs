@@ -102,11 +102,14 @@ impl TrapController {
             // Direct Mode
             cpu.write_pc(mtvec.get_base() << 2);
         } else {
+            // Vector Mode
+            debug_assert!(mtvec.get_mode() == 1);
+
             let offset: WordType = match cause {
                 Trap::Exception(nr) => nr.into(),
                 Trap::Interrupt(nr) => nr.into(),
             };
-            cpu.write_pc((mtvec.get_base() << 2) + offset * size_of::<WordType>() as WordType);
+            cpu.write_pc((mtvec.get_base() << 2) + offset * 4);
         }
     }
 

@@ -54,7 +54,12 @@ fn validate_with_cond<const L: usize, const R: usize, C: ValidateCond>(
 }
 
 #[inline]
-fn validate_range<const L: usize, const R: usize, const MIN: WordType, const MAX: WordType>(
+pub(super) fn validate_range<
+    const L: usize,
+    const R: usize,
+    const MIN: WordType,
+    const MAX: WordType,
+>(
     value: WordType,
     ctx: &CsrContext,
 ) -> CsrWriteOp {
@@ -71,7 +76,7 @@ pub(super) fn validate_write_any<const L: usize, const R: usize>(
 
 /// Make a validator that only write the bits with masks.
 #[inline]
-fn validate_mask<const L: usize, const R: usize, const MASK: WordType>(
+pub(super) fn validate_mask<const L: usize, const R: usize, const MASK: WordType>(
     _value: WordType,
     _ctx: &CsrContext,
 ) -> CsrWriteOp {
@@ -103,7 +108,10 @@ pub(super) fn validate_misa_extension(_value: WordType, ctx: &CsrContext) -> Csr
     CsrWriteOp::new(ctx.extension)
 }
 
-fn validate_xlen<const L: usize, const R: usize>(value: WordType, ctx: &CsrContext) -> CsrWriteOp {
+pub(super) fn validate_xlen<const L: usize, const R: usize>(
+    value: WordType,
+    ctx: &CsrContext,
+) -> CsrWriteOp {
     if ctx.xlen == 32 {
         validate_range::<L, R, 1, 1>(value, ctx)
     } else {

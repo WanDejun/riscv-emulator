@@ -102,7 +102,11 @@ macro_rules! gen_csr_name_hashmap {
     };
 }
 
-/// Generator csr RegFile. Support a optional validator for each field, use [`validate_write_any`] on default.
+/// Generates a CSR RegFile. Supports an optional validator for each field, uses [`validate_write_any`] by default.
+/// If you don't specify a CSR field, it will be readonly by default.
+///
+/// NOTE: If you have overlapping fields, the bits will be allowed to write if any validator allows it,
+/// so don't forget to make overlapping fields readonly when necessary.
 macro_rules! gen_csr_regfile {
     (
         $( $name:ident, $name_str: literal, $addr:expr, $default:expr,
@@ -142,6 +146,7 @@ macro_rules! gen_csr_regfile {
 
 }
 
+// Ensure you have read the comments above the macro definition.
 gen_csr_regfile! {
     // ==================================
     //            U-Mode CSR
@@ -309,7 +314,7 @@ gen_csr_regfile! {
     ];
 
     Mtvec, "mtvec", 0x305, 0x00, [
-        0, 2, mode;
+        0, 2, mode, validate_range::<0, 2, 0, 1>;
         2, XLEN - 2, base;
     ];
 
