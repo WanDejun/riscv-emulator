@@ -208,6 +208,7 @@ gen_csr_regfile! {
     Scause, "scause", 0x142, 0x00, [
         0, XLEN - 1, exception_code;
         -1, 1, interrupt;
+        0, XLEN, scause;
     ];
 
     Stval, "stval", 0x143, 0x00, [
@@ -366,17 +367,4 @@ gen_csr_regfile! {
     Mhartid, "mhartid", 0xF14, 0x00, [
         0, XLEN, mhartid, validate_readonly;
     ];
-
-
-    // Mnstatus, 0x744, 0x00, [
-    //     0, XLEN, mnstatus;
-    // ];
-
-    // Pmpaddr0, 0x3B0, 0x00, [
-    //     0, XLEN, pmpaddr0;
-    // ];
-
-    // Pmpcfg0, 0x3A0, 0x00, [
-    //     0, XLEN, pmpcfg0;
-    // ];
 }

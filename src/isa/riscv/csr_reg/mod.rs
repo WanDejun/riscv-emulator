@@ -10,6 +10,9 @@ use crate::{
     isa::riscv::csr_reg::{csr_macro::CSR_REG_TABLE, validator::Validator},
 };
 
+/// Constants in this module are not complete. Use `get_index` static method for each CSR type, like [`Mstatus::get_index`].
+// TODO: Consider replace all uses of `csr_index` with the corresponding `CSRType::get_index`, 
+// then remove the `csr_index` module.
 #[rustfmt::skip]
 #[allow(non_upper_case_globals, unused)]
 pub(crate) mod csr_index {
@@ -251,6 +254,7 @@ impl CsrRegFile {
         self.read_uncheck_privilege(addr)
     }
 
+    // TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
     pub fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if !self.get_current_privileged().write_check_privilege(addr) {
             return None;
@@ -273,6 +277,7 @@ impl CsrRegFile {
     }
 
     /// Write directly without any check or validation and have no other side effects.
+    /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
     pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if let Some(reg) = self.table.get_mut(&addr) {
             reg.write_directly(data);
@@ -282,6 +287,8 @@ impl CsrRegFile {
         }
     }
 
+    /// Write without check for privilege level, but still have validation and other side effects.
+    /// If you want to write without any check or validation, use [`Self::write_directly`] instead.
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
         // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
         if addr == csr_index::fflags {
@@ -326,6 +333,8 @@ impl CsrRegFile {
         }
     }
 
+    /// NOTE: Given that this the CSR type is known, so this function won't check privilege level.
+    /// If you ensure the CSR exists, use [`Self::get_by_type_existing`] instead for better performance.
     pub fn get_by_type<T>(&mut self) -> Option<T>
     where
         T: NamedCsrReg,
@@ -335,6 +344,22 @@ impl CsrRegFile {
             reg as *mut CsrReg,
             &mut self.ctx as *mut CsrContext,
         ))
+    }
+
+    /// Similar to `get_by_type`, but this function assumes the CSR definitely exists.
+    ///
+    /// - In debug builds, this function will panic if the CSR does not exist.
+    /// - In release builds, this function will skip the runtime check for performance.
+    /// TODO: Almost all old code can assumes the CSR exists, replace them with this function.
+    pub fn get_by_type_existing<T>(&mut self) -> T
+    where
+        T: NamedCsrReg,
+    {
+        if cfg!(debug_assertions) {
+            self.get_by_type::<T>().unwrap()
+        } else {
+            unsafe { self.get_by_type::<T>().unwrap_unchecked() }
+        }
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {

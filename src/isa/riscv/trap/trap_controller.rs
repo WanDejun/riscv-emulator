@@ -10,6 +10,7 @@ use crate::{
     },
 };
 
+// TODO: Remove static class `TrapController` with sepreate modules for each privilege level.
 pub(in crate::isa::riscv) struct TrapController {}
 
 impl TrapController {
@@ -20,78 +21,50 @@ impl TrapController {
     // ======================================
     //                M-Mode
     // ======================================
-    fn m_mode_check_exception_delegate(cpu: &mut RV32CPU, exception: Exception) -> bool {
+    fn is_exception_delegated_m_mode(cpu: &mut RV32CPU, exception: Exception) -> bool {
         let medeleg = cpu.csr.get_by_type::<Medeleg>().unwrap();
         let medeleg_val = medeleg.get_medeleg();
-        if (medeleg_val & (1 << exception as u8)) != 0 {
-            true
-        } else {
-            false
-        }
+        (medeleg_val & (1 << exception as u8)) != 0
     }
 
-    fn m_mode_check_interrupt_delegate(cpu: &mut RV32CPU, interrupt: Interrupt) -> bool {
+    fn is_interrupt_delegated_m_mode(cpu: &mut RV32CPU, interrupt: Interrupt) -> bool {
         let mideleg = cpu.csr.get_by_type::<Mideleg>().unwrap();
         match interrupt {
             Interrupt::MachineExternal | Interrupt::MachineSoft | Interrupt::MachineTimer => false,
-            Interrupt::SupervisorExternal | Interrupt::UserExternal => {
-                if mideleg.get_seip() != 0 {
-                    true
-                } else {
-                    false
-                }
-            }
-            Interrupt::SupervisorSoft | Interrupt::UserSoft => {
-                if mideleg.get_ssip() != 0 {
-                    true
-                } else {
-                    false
-                }
-            }
-            Interrupt::SupervisorTimer | Interrupt::UserTimer => {
-                if mideleg.get_stip() != 0 {
-                    true
-                } else {
-                    false
-                }
-            }
+            Interrupt::SupervisorExternal | Interrupt::UserExternal => mideleg.get_seip() != 0,
+            Interrupt::SupervisorSoft | Interrupt::UserSoft => mideleg.get_ssip() != 0,
+            Interrupt::SupervisorTimer | Interrupt::UserTimer => mideleg.get_stip() != 0,
             Interrupt::Unknown => {
                 unreachable!()
             }
         }
     }
 
-    fn m_mode_check_delegate(cpu: &mut RV32CPU, cause: Trap) -> bool {
+    fn is_delegated_m_mode(cpu: &mut RV32CPU, cause: Trap) -> bool {
         match cause {
-            Trap::Interrupt(interrupt) => Self::m_mode_check_interrupt_delegate(cpu, interrupt),
-            Trap::Exception(exception) => Self::m_mode_check_exception_delegate(cpu, exception),
+            Trap::Interrupt(interrupt) => Self::is_interrupt_delegated_m_mode(cpu, interrupt),
+            Trap::Exception(exception) => Self::is_exception_delegated_m_mode(cpu, exception),
         }
     }
 
-    fn m_mode_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+    fn send_trap_signal_m_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr
             .get_by_type::<Mstatus>()
             .unwrap()
             .set_mpp(cpu.csr.get_current_privileged() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr
-            .write_uncheck_privilege(csr_index::mcause, cause.into());
-        cpu.csr.write_uncheck_privilege(csr_index::mepc, cpu.pc);
+            .write_uncheck_privilege(Mcause::get_index(), cause.into());
+        cpu.csr.write_uncheck_privilege(Mepc::get_index(), cpu.pc);
 
-        if matches!(
-            cause, // TODO: Do we need to handle other exceptions?
-            Trap::Exception(
-                Exception::LoadMisaligned
-                    | Exception::StoreMisaligned
-                    | Exception::LoadFault
-                    | Exception::StoreFault
-            )
-        ) == false
-        {
-            // Addr has been stored to mtval in `exec_load`/`exec_store` on mem error
-            cpu.csr
-                .write_uncheck_privilege(csr_index::mtval, trap_value);
-        }
+        let tval = if let Some(tval) = cpu.pending_tval {
+            cpu.pending_tval = None;
+            tval
+        } else {
+            trap_value
+        };
+
+        cpu.csr.write_uncheck_privilege(csr_index::mtval, tval);
 
         let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
         mstatus.set_mpie(mstatus.get_mie());
@@ -124,8 +97,71 @@ impl TrapController {
         mstatus.set_mpp(0);
     }
 
+    // ======================================
+    //                S-Mode
+    // ======================================
+    fn send_trap_signal_s_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+        cpu.csr
+            .get_by_type_existing::<Sstatus>()
+            .set_spp(cpu.csr.get_current_privileged() as u8 as WordType);
+        cpu.csr.set_current_privileged(PrivilegeLevel::S);
+
+        cpu.csr.write_directly(Scause::get_index(), cause.into());
+        cpu.csr.write_directly(Sepc::get_index(), cpu.pc);
+
+        let tval = if let Some(tval) = cpu.pending_tval {
+            cpu.pending_tval = None;
+            tval
+        } else {
+            trap_value
+        };
+
+        cpu.csr.write_directly(Stval::get_index(), tval);
+
+        let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
+        sstatus.set_spie(sstatus.get_sie());
+        sstatus.set_sie(0);
+
+        let stvec = cpu.csr.get_by_type_existing::<Stvec>();
+        if stvec.get_mode() == 0 {
+            // Direct Mode
+            cpu.write_pc(stvec.get_base() << 2);
+        } else {
+            // Vector Mode
+            debug_assert!(stvec.get_mode() == 1);
+
+            let offset: WordType = match cause {
+                Trap::Exception(nr) => nr.into(),
+                Trap::Interrupt(nr) => nr.into(),
+            };
+            cpu.write_pc((stvec.get_base() << 2) + offset * 4);
+        }
+    }
+
+    pub fn sret(cpu: &mut RV32CPU) {
+        let sstatus = cpu.csr.get_by_type::<Sstatus>().unwrap();
+        sstatus.set_sie(sstatus.get_spie());
+        sstatus.set_spie(1);
+        let sepc = cpu.csr.get_by_type::<Sepc>().unwrap().get_sepc();
+        cpu.write_pc(sepc);
+
+        cpu.csr
+            .set_current_privileged((sstatus.get_spp() as u8).into());
+        sstatus.set_spp(0);
+    }
+
+    // ======================================
+    //                 Common
+    // ======================================
+
     pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
-        Self::m_mode_send_trap_signal(cpu, cause, trap_value);
+        if cpu.csr.get_current_privileged() == PrivilegeLevel::M
+            || Self::is_delegated_m_mode(cpu, cause) == false
+        {
+            Self::send_trap_signal_m_mode(cpu, cause, trap_value);
+        } else {
+            Self::send_trap_signal_s_mode(cpu, cause, trap_value)
+        }
     }
 
     pub fn check_interrupt(cpu: &mut RV32CPU) -> Option<Interrupt> {

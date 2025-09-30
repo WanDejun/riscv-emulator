@@ -30,6 +30,9 @@ pub struct RV32CPU {
     pub(super) icache: SetICache<RiscvTypes, 64, 8>,
     pub(super) fpu: SoftFPU,
     pub icache_cnt: usize,
+
+    /// The trap value pending to be written to `mtval`/`stval`.
+    pub(super) pending_tval: Option<WordType>,
 }
 
 impl RV32CPU {
@@ -72,6 +75,7 @@ impl RV32CPU {
             icache: SetICache::new(),
             fpu: SoftFPU::new(),
             icache_cnt: 0,
+            pending_tval: None,
         }
     }
 
@@ -109,7 +113,6 @@ impl RV32CPU {
         }
 
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
-            log::trace!("Cache hit at pc: {:#x}", self.pc);
             self.icache_cnt += 1;
             decode_instr
         } else {
@@ -124,11 +127,16 @@ impl RV32CPU {
                 return Ok(());
             }
             let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
-            log::trace!("Raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
+            log::trace!(
+                "I-Cache not hit, raw instruction: {:#x} at {:#x}",
+                instr_bytes,
+                self.pc
+            );
 
             // ID
             let decoder_result = self.decoder.decode(instr_bytes);
             if let None = decoder_result {
+                log::warn!("Illegal instruction: {:#x} at {:#x}", instr_bytes, self.pc);
                 TrapController::send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
@@ -155,8 +163,11 @@ impl RV32CPU {
             Ok(()) => {} // there is nothing to do.
         }
 
-        log::trace!("Regs: {}", self.debug_reg_string());
         return Ok(());
+    }
+
+    pub fn clear_all_cache(&mut self) {
+        self.icache.clear();
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
@@ -178,8 +189,9 @@ impl IRQHandler for RV32CPU {
                 }
             }
 
-            // TODO: Handle other interrupts
-            _ => {}
+            _ => {
+                todo!("IRQ handling not implemented yet.")
+            }
         }
     }
 }
@@ -210,13 +222,11 @@ mod tests {
             |checker| checker.reg(2, 5).pc(0x2004),
         );
 
-        for _i in 1..=100 {
+        for _ in 1..=100 {
             tester.test_rand_r(RiscvInstr::ADD, |lhs, rhs| lhs.wrapping_add(rhs));
             tester.test_rand_r(RiscvInstr::SUB, |lhs, rhs| lhs.wrapping_sub(rhs));
             tester.test_rand_i(RiscvInstr::ADDI, |lhs, imm| lhs.wrapping_add(imm));
 
-            // TODO: Add some handmade data,
-            // because tests and actual codes are actually written in similar ways.
             tester.test_rand_i(RiscvInstr::SLTI, |lhs, imm| {
                 ((lhs.cast_signed()) < (sign_extend(imm, 12).cast_signed())) as WordType
             });
@@ -224,11 +234,7 @@ mod tests {
                 ((lhs) < (sign_extend(imm, 12))) as WordType
             });
         }
-    }
 
-    #[test]
-    fn test_exec_arith_decode() {
-        // TODO: add checks for boundary cases
         run_test_exec_decode(
             0x02520333, // mul x6, x4, x5
             |builder| builder.reg(4, 5).reg(5, 10).pc(0x1000),

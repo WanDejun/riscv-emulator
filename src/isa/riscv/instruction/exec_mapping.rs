@@ -3,10 +3,13 @@ use std::hint::unlikely;
 use crate::{
     config::arch_config::WordType,
     fpu::soft_float::*,
-    isa::riscv::{
-        executor::RV32CPU,
-        instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
-        trap::{Exception, trap_controller::TrapController},
+    isa::{
+        DebugTarget,
+        riscv::{
+            executor::RV32CPU,
+            instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
+            trap::{Exception, trap_controller::TrapController},
+        },
     },
     utils::sign_extend,
 };
@@ -209,5 +212,19 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         // Classify
         RiscvInstr::FCLASS_S => exec_float_classify::<f32>,
+
+        //---------------------------------------
+        // RV_S
+        //---------------------------------------
+        RiscvInstr::SRET => |_info, cpu| {
+            TrapController::sret(cpu);
+            Ok(())
+        },
+
+        RiscvInstr::SFENCE_VMA => |_info, cpu| {
+            cpu.clear_all_cache();
+            cpu.write_pc(cpu.pc.wrapping_add(4));
+            Ok(())
+        },
     }
 }

@@ -4,9 +4,7 @@ pub(super) use super::exec_float_function::*;
 
 use crate::{
     config::arch_config::{SignedWordType, WordType},
-    isa::riscv::{
-        csr_reg::csr_index, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
-    },
+    isa::riscv::{executor::RV32CPU, instruction::RVInstrInfo, trap::Exception},
     utils::{
         TruncateFrom, TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32,
         wrapping_add_as_signed,
@@ -99,7 +97,7 @@ where
                 cpu.reg_file.write(rd, data);
             }
             Err(err) => {
-                cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
+                cpu.pending_tval = Some(addr);
                 return Err(Exception::from_memory_err(err));
             }
         }
@@ -121,7 +119,7 @@ where
 
         let ret = cpu.memory.write(addr, T::truncate_from(val2));
         if let Err(err) = ret {
-            cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
+            cpu.pending_tval = Some(addr);
             return Err(Exception::from_memory_err(err));
         }
     } else {
