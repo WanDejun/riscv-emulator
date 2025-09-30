@@ -106,7 +106,7 @@ impl Breakpoint {
     }
 }
 
-const SAVE_PC_CNT: usize = 20;
+const SAVE_PC_CNT: usize = 50;
 
 pub struct Debugger<'a, I: ISATypes> {
     breakpoints: BTreeMap<Breakpoint, I::RawInstr>,

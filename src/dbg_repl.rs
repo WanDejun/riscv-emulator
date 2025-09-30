@@ -24,53 +24,61 @@ use rustyline::error::ReadlineError;
 #[derive(Debug, Parser)]
 #[command(multicall = true)]
 enum Cli {
-    /// Print registers, PC, or memory
+    /// Print items such as registers, the PC, or memory.
     #[command(alias = "p", subcommand)]
     Print(PrintCmd),
 
-    /// Display given item each time the program stops.
+    /// Display a given item each time the program stops.
     #[command(alias = "d", subcommand)]
     Display(PrintCmd),
 
-    /// Cancel display request.
+    /// Cancel a display request.
     #[command(subcommand)]
     Undisplay(PrintCmd),
 
-    /// List assembly around current position.
+    /// List assembly around the current position.
     #[command(alias = "l")]
     List,
 
-    /// Show history PC values.
+    /// Show historical PC values.
     #[command(alias = "his")]
-    History,
+    History {
+        #[arg(default_value_t = 20)]
+        count: usize,
+    },
 
-    /// Step instruction
+    /// Step a single instruction.
     #[command(alias = "s")]
     Si,
 
-    /// Continue running
+    /// Continue running.
     #[command(name = "continue", aliases = ["c"])]
-    Continue,
+    Continue {
+        #[arg(default_value_t = u64::MAX)]
+        steps: u64,
+    },
 
-    /// Set or delete breakpoint
+    /// Set or delete a breakpoint.
     #[command(name = "break", alias = "b")]
     Breakpoint {
         #[arg(short = 'd', long = "delete")]
         delete: bool,
+        /// Address to set/delete the breakpoint; decimal by default, or hex if prefixed with `0x`.
         addr: String,
     },
 
-    /// show debug infos such as breakpoints.
+    /// Show information such as breakpoints.
     #[command(subcommand)]
     Info(InfoCmd),
 
-    /// Quit debugger
+    /// Quit the debugger
     #[command(name = "quit", aliases = ["q", "exit"]) ]
     Quit,
 }
 
 #[derive(Debug, Subcommand)]
 enum PrintCmd {
+    /// Program counter; decimal by default, or hex if prefixed with `0x`.
     Pc,
     Reg {
         reg: String,
@@ -266,10 +274,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                     .retain(|&item| item != PrintObject::FReg(reg_idx));
             }
 
-            Cli::History => {
-                // To bypass borrow check.
+            Cli::History { count } => {
                 let history = self.dbg.pc_history().collect::<Vec<WordType>>();
-                for (idx, pc) in history.into_iter().enumerate() {
+                let skip_len = history.len().saturating_sub(count);
+                for (idx, pc) in history.into_iter().skip(skip_len).enumerate() {
                     println!(
                         "{}: pc = {}, {}",
                         format_idx(idx),
@@ -328,8 +336,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.handle_continue(1)?;
             }
 
-            Cli::Continue => {
-                self.handle_continue(u64::MAX)?;
+            Cli::Continue { steps } => {
+                self.handle_continue(steps)?;
             }
 
             Cli::Breakpoint { delete, addr } => {
