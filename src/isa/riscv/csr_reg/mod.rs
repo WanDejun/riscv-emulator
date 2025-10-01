@@ -245,6 +245,7 @@ impl CsrRegFile {
         }
     }
 
+    #[must_use]
     pub fn read(&self, addr: WordType) -> Option<WordType> {
         if !self.get_current_privileged().read_check_privilege(addr) {
             return None;
@@ -259,6 +260,7 @@ impl CsrRegFile {
     /// [`RV32CPU::write_csr`]: crate::isa::riscv::executor::RV32CPU::write_csr
     ///
     /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
+    #[must_use]
     pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if !self.get_current_privileged().write_check_privilege(addr) {
             return None;
@@ -283,6 +285,7 @@ impl CsrRegFile {
 
     /// Write directly without any check or validation and have no other side effects.
     /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
+    #[must_use]
     pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if let Some(reg) = self.table.get_mut(&addr) {
             reg.write_directly(data);
@@ -383,8 +386,8 @@ mod test {
     #[test]
     fn test_rw_by_addr() {
         let mut reg = CsrRegFile::new();
-        reg.write(csr_index::mcause, 3);
-        reg.write(csr_index::mepc, 0x1234_5678);
+        reg.write(csr_index::mcause, 3).unwrap();
+        reg.write(csr_index::mepc, 0x1234_5678).unwrap();
 
         let mcause = reg.read(csr_index::mcause).unwrap();
         let mepc = reg.read(csr_index::mepc).unwrap();
@@ -410,7 +413,7 @@ mod test {
         assert_eq!(mstatus.get_mpp(), 0b10);
 
         let mtvec = reg.get_by_type::<Mtvec>().unwrap();
-        reg.write(csr_index::mtvec, 0x114514);
+        reg.write(csr_index::mtvec, 0x114514).unwrap();
         assert_eq!(mtvec.get_base(), 0x114514 >> 2);
     }
 

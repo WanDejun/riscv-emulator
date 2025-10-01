@@ -106,8 +106,10 @@ impl TrapController {
             .set_spp(cpu.csr.get_current_privileged() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::S);
 
-        cpu.csr.write_directly(Scause::get_index(), cause.into());
-        cpu.csr.write_directly(Sepc::get_index(), cpu.pc);
+        cpu.csr
+            .write_directly(Scause::get_index(), cause.into())
+            .unwrap();
+        cpu.csr.write_directly(Sepc::get_index(), cpu.pc).unwrap();
 
         let tval = if let Some(tval) = cpu.pending_tval {
             cpu.pending_tval = None;
@@ -116,7 +118,7 @@ impl TrapController {
             trap_value
         };
 
-        cpu.csr.write_directly(Stval::get_index(), tval);
+        cpu.csr.write_directly(Stval::get_index(), tval).unwrap();
 
         let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
         sstatus.set_spie(sstatus.get_sie());

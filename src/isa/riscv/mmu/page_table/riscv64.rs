@@ -7,7 +7,7 @@ use crate::{
     isa::riscv::mmu::{
         address::{PageSize, PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
         config::{
-            PAGE_SIZE_XLEN, PPN_MASK, PTE_FLAG_MASK, VirtualMemoryMode, get_page_table_level,
+            PAGE_SIZE_XLEN, PTE_FLAG_MASK, PTE_PPN_MASK, VirtualMemoryMode, get_page_table_level,
         },
     },
     ram::Ram,
@@ -29,7 +29,7 @@ bitflags! {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PageTableEntry {
-    pub bits: WordType,
+    bits: WordType,
 }
 
 #[allow(unused)]
@@ -42,78 +42,78 @@ impl PageTableEntry {
         PageTableEntry { bits: 0 }
     }
 
-    pub fn ppn(&self) -> PhysicalPageNum {
-        ((self.bits << 2) & PPN_MASK).into()
+    fn ppn(&self) -> PhysicalPageNum {
+        PhysicalPageNum::from_ppn((self.bits & PTE_PPN_MASK) >> 10)
     }
 
-    pub fn set_ppn(&mut self, ppn: PhysicalPageNum) {
-        self.bits &= !(PPN_MASK >> 2);
-        self.bits |= ppn.0 >> 2;
+    fn set_ppn(&mut self, ppn: PhysicalPageNum) {
+        self.bits &= PTE_FLAG_MASK; // clear ppn bits.
+        self.bits |= ppn.address >> 2;
     }
 
-    pub fn flags(&self) -> PTEFlags {
+    fn flags(&self) -> PTEFlags {
         PTEFlags::from_bits((self.bits & PTE_FLAG_MASK) as u8).unwrap()
     }
 
-    pub fn is_page(&self) -> bool {
+    fn is_page(&self) -> bool {
         self.bits & 0x0f == 0x01
     }
 
     // check flag in PTE.
-    pub fn check_flag(&self, flag: PTEFlags) -> bool {
+    fn check_flag(&self, flag: PTEFlags) -> bool {
         !(self.flags() & flag).is_empty()
     }
-    pub fn is_vaild(&self) -> bool {
+    fn is_vaild(&self) -> bool {
         !(self.flags() & PTEFlags::V).is_empty()
     }
-    pub fn is_readable(&self) -> bool {
+    fn is_readable(&self) -> bool {
         !(self.flags() & PTEFlags::R).is_empty()
     }
-    pub fn is_writeable(&self) -> bool {
+    fn is_writeable(&self) -> bool {
         !(self.flags() & PTEFlags::W).is_empty()
     }
-    pub fn is_executeble(&self) -> bool {
+    fn is_executeble(&self) -> bool {
         !(self.flags() & PTEFlags::X).is_empty()
     }
-    pub fn is_u_mode(&self) -> bool {
+    fn is_u_mode(&self) -> bool {
         !(self.flags() & PTEFlags::U).is_empty()
     }
-    pub fn is_global(&self) -> bool {
+    fn is_global(&self) -> bool {
         !(self.flags() & PTEFlags::G).is_empty()
     }
-    pub fn is_accessed(&self) -> bool {
+    fn is_accessed(&self) -> bool {
         !(self.flags() & PTEFlags::A).is_empty()
     }
-    pub fn is_dirty(&self) -> bool {
+    fn is_dirty(&self) -> bool {
         !(self.flags() & PTEFlags::G).is_empty()
     }
 
     // set flag for PTE.
-    pub fn set_flag(&mut self, flag: PTEFlags) {
+    fn set_flag(&mut self, flag: PTEFlags) {
         self.bits |= flag.bits() as WordType;
     }
-    pub fn set_vaild(&mut self) {
+    fn set_vaild(&mut self) {
         self.bits |= PTEFlags::V.bits() as WordType;
     }
-    pub fn set_readable(&mut self) {
+    fn set_readable(&mut self) {
         self.bits |= PTEFlags::R.bits() as WordType;
     }
-    pub fn set_writeable(&mut self) {
+    fn set_writeable(&mut self) {
         self.bits |= PTEFlags::W.bits() as WordType;
     }
-    pub fn set_executeble(&mut self) {
+    fn set_executeble(&mut self) {
         self.bits |= PTEFlags::X.bits() as WordType;
     }
-    pub fn set_u_mode(&mut self) {
+    fn set_u_mode(&mut self) {
         self.bits |= PTEFlags::U.bits() as WordType;
     }
-    pub fn set_global(&mut self) {
+    fn set_global(&mut self) {
         self.bits |= PTEFlags::G.bits() as WordType;
     }
-    pub fn set_accessed(&mut self) {
+    fn set_accessed(&mut self) {
         self.bits |= PTEFlags::A.bits() as WordType;
     }
-    pub fn set_dirty(&mut self) {
+    fn set_dirty(&mut self) {
         self.bits |= PTEFlags::G.bits() as WordType;
     }
 }
@@ -126,13 +126,13 @@ pub enum PageTableError {
 }
 
 pub struct PageTable {
-    root_ppn: PhysicalPageNum,
+    root_address: WordType,
     mode: VirtualMemoryMode,
 }
 
 impl PageTable {
-    pub fn new(root_ppn: PhysicalPageNum, mode: VirtualMemoryMode) -> Self {
-        Self { root_ppn, mode }
+    pub fn new(root_address: WordType, mode: VirtualMemoryMode) -> Self {
+        Self { root_address, mode }
     }
 
     pub fn set_mode(&mut self, mode: u8) {
@@ -150,8 +150,8 @@ impl PageTable {
         }
     }
 
-    pub fn set_root_ppn_by_addr(&mut self, ppn: PhysicalPageNum) {
-        self.root_ppn = ppn;
+    pub fn set_root_addr(&mut self, root_address: WordType) {
+        self.root_address = root_address;
     }
 
     // TODO: Maybe we need to take shared owership in virtual memory manager to avoid intermediate overhead
@@ -173,9 +173,15 @@ impl PageTable {
         }
         let ppn = target_pte.0.ppn();
         let paddr = match target_pte.1 {
-            PageSize::Small4K => ppn.0 | (vaddr.0 & ((1 << (1 * PAGE_SIZE_XLEN as WordType)) - 1)),
-            PageSize::Medium2M => ppn.0 | (vaddr.0 & ((1 << (2 * PAGE_SIZE_XLEN as WordType)) - 1)),
-            PageSize::Large1G => ppn.0 | (vaddr.0 & ((1 << (3 * PAGE_SIZE_XLEN as WordType)) - 1)),
+            PageSize::Small4K => {
+                ppn.address | (vaddr.0 & ((1 << (1 * PAGE_SIZE_XLEN as WordType)) - 1))
+            }
+            PageSize::Medium2M => {
+                ppn.address | (vaddr.0 & ((1 << (2 * PAGE_SIZE_XLEN as WordType)) - 1))
+            }
+            PageSize::Large1G => {
+                ppn.address | (vaddr.0 & ((1 << (3 * PAGE_SIZE_XLEN as WordType)) - 1))
+            }
         };
         Ok(paddr.into())
     }
@@ -186,7 +192,7 @@ impl PageTable {
         vpn: VirtualPageNum,
     ) -> Result<(&mut PageTableEntry, PageSize), PageTableError> {
         let level = get_page_table_level(self.mode);
-        let mut entry = self.root_ppn;
+        let mut entry = PhysicalPageNum::from_paddr(self.root_address);
         let sub_vpn_array = vpn.get_sub_vpn();
 
         for i in (0..level).rev() {
@@ -225,21 +231,23 @@ mod test {
         pte.set_vaild();
 
         // level 0
-        pte.set_ppn(ppn1.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(ppn1));
         ram.write(ppn0 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         // level 1
-        pte.set_ppn(ppn2.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(ppn2));
         ram.write(ppn1 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         // level 2
-        pte.set_ppn(data_page.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(data_page));
         pte.set_readable();
         pte.set_writeable();
         ram.write(ppn2 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         let page_table = PageTable::new(ppn0.into(), VirtualMemoryMode::Page39bit);
-        let data_pte = page_table.find_pte(&mut ram, 0x0000_0010.into()).unwrap();
+        let data_pte = page_table
+            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
+            .unwrap();
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
@@ -260,17 +268,19 @@ mod test {
         pte.set_vaild();
 
         // level 0
-        pte.set_ppn(ppn1.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(ppn1));
         ram.write(ppn0 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         // level 1
-        pte.set_ppn(data_page.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(data_page));
         pte.set_readable();
         pte.set_writeable();
         ram.write(ppn1 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         let page_table = PageTable::new(ppn0.into(), VirtualMemoryMode::Page39bit);
-        let data_pte = page_table.find_pte(&mut ram, 0x0000_8000.into()).unwrap();
+        let data_pte = page_table
+            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_8000))
+            .unwrap();
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
@@ -291,15 +301,15 @@ mod test {
         pte.set_vaild();
 
         // level 0
-        pte.set_ppn(ppn1.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(ppn1));
         ram.write(ppn0 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         // level 1
-        pte.set_ppn(ppn2.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(ppn2));
         ram.write(ppn1 - ram_config::BASE_ADDR, pte.bits).unwrap();
 
         // level 2
-        pte.set_ppn(data_page.into());
+        pte.set_ppn(PhysicalPageNum::from_paddr(data_page));
         pte.set_readable();
         pte.set_writeable();
         ram.write(ppn2 - ram_config::BASE_ADDR, pte.bits).unwrap();

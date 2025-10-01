@@ -7,7 +7,7 @@ use std::{cell::UnsafeCell, rc::Rc};
 use crate::{
     device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
     isa::riscv::mmu::{
-        config::PAGE_SIZE,
+        config::PAGE_SIZE_XLEN,
         page_table::{PTEFlags, PageTable},
     },
     ram::Ram,
@@ -23,7 +23,7 @@ impl VirtAddrManager {
     pub fn from_ram_and_mmio(ram_ref: Rc<UnsafeCell<Ram>>, mmio: MemoryMapIO) -> Self {
         Self {
             mmio: mmio,
-            page_table: PageTable::new(0.into(), config::VirtualMemoryMode::None),
+            page_table: PageTable::new(0, config::VirtualMemoryMode::None),
             ram: ram_ref,
         }
     }
@@ -85,9 +85,7 @@ impl VirtAddrManager {
     }
 
     pub fn set_root_ppn(&mut self, ppn: u64) {
-        // FIXME: This function actually accepts address (ppn * PAGE_SIZE) due to its chaos design.
-        self.page_table
-            .set_root_ppn_by_addr((ppn * PAGE_SIZE).into());
+        self.page_table.set_root_addr(ppn << PAGE_SIZE_XLEN);
     }
 
     pub fn sync(&mut self) {

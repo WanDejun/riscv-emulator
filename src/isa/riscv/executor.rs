@@ -3,7 +3,7 @@ use crossterm::terminal::disable_raw_mode;
 
 use crate::{
     board::virt::IRQHandler,
-    config::arch_config::{REG_NAME, REGFILE_CNT, WordType},
+    config::arch_config::WordType,
     cpu::RegFile,
     fpu::soft_float::SoftFPU,
     isa::{
