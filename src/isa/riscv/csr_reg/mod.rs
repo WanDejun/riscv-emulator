@@ -225,7 +225,6 @@ pub(crate) struct CsrRegFile {
     table: HashMap<WordType, CsrReg>,
     cpl: PrivilegeLevel, // current privileged level
     pub(super) ctx: CsrContext,
-    last_write_addr: Option<WordType>,
 }
 
 impl CsrRegFile {
@@ -243,7 +242,6 @@ impl CsrRegFile {
             table,
             cpl: DEFAULT_PRIVILEGE_LEVEL,
             ctx: CsrContext::new(),
-            last_write_addr: None,
         }
     }
 
@@ -254,8 +252,14 @@ impl CsrRegFile {
         self.read_uncheck_privilege(addr)
     }
 
-    // TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
-    pub fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
+    /// Write with privilege check and validation.
+    /// XXX: In most cases, you should use [`RV32CPU::write_csr`] in `executor.rs` instead of this function directly,
+    /// because writting to CSR may have other side-effects in CPU.
+    ///
+    /// [`RV32CPU::write_csr`]: crate::isa::riscv::executor::RV32CPU::write_csr
+    ///
+    /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
+    pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if !self.get_current_privileged().write_check_privilege(addr) {
             return None;
         }
@@ -264,6 +268,7 @@ impl CsrRegFile {
     }
 
     /// ONLY used in debugger. Read & write without side-effect.
+    /// TODO: Consider remove this.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
         if let Some(reg) = self.table.get_mut(&addr) {
             let old = *reg;
@@ -287,7 +292,7 @@ impl CsrRegFile {
         }
     }
 
-    /// Write without check for privilege level, but still have validation and other side effects.
+    /// Write without check for privilege level, but still have validation.
     /// If you want to write without any check or validation, use [`Self::write_directly`] instead.
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
         // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
@@ -309,7 +314,6 @@ impl CsrRegFile {
         } else {
             if let Some(val) = self.table.get_mut(&addr) {
                 val.write(data, &self.ctx);
-                self.last_write_addr = Some(addr);
             } else {
                 // TODO: Raise error
             }
@@ -367,6 +371,7 @@ impl CsrRegFile {
     }
 
     pub fn set_current_privileged(&mut self, new_level: PrivilegeLevel) {
+        log::debug!("Privilege level change: {:?} -> {:?}", self.cpl, new_level);
         self.cpl = new_level
     }
 }

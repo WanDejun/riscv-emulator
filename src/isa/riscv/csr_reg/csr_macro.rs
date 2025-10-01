@@ -85,7 +85,8 @@ macro_rules! gen_csr_reg {
 
                     let reg = unsafe { &mut *self.reg };
 
-                    reg.write_directly(val << LOW_BIT);
+                    let write_op = CsrWriteOp {mask: (BIT_ONES_ARRAY[$len]) << LOW_BIT};
+                    reg.write_directly(write_op.get_new_value(reg.value(), val << LOW_BIT));
                 }
             )*
         }
@@ -232,7 +233,7 @@ gen_csr_regfile! {
     Satp, "satp", 0x180, 0x00, [
         0, 44, ppn;
         44, 16, asid;
-        60, 4, mode;
+        60, 4, mode;  // TODO: Validate mode.
     ];
 
     // ==================================

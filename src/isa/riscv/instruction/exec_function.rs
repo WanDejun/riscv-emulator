@@ -136,12 +136,11 @@ pub(super) fn exec_csrw<const UIMM: bool>(
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         // read generate register.
-        let new_val;
-        if UIMM {
-            new_val = rs1 as WordType;
+        let new_val = if UIMM {
+            rs1 as WordType
         } else {
-            new_val = cpu.reg_file.read(rs1, rs1).0;
-        }
+            cpu.reg_file.read(rs1, rs1).0
+        };
 
         // write generate register.
         if rd != 0 {
@@ -149,8 +148,7 @@ pub(super) fn exec_csrw<const UIMM: bool>(
             cpu.reg_file.write(rd, value);
         }
 
-        // write csr.
-        cpu.csr.write(imm, new_val);
+        cpu.write_csr(imm, new_val)?;
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
@@ -170,12 +168,13 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
         };
 
         let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
-        if rd != 0 || UIMM {
-            cpu.reg_file.write(rd, value);
-        }
+        cpu.reg_file.write(rd, value);
 
-        let data = if SET { value | rhs } else { value & !rhs };
-        cpu.csr.write(imm, data);
+        // This check is necessary because some CSR is read-only.
+        if rhs != 0 {
+            let data = if SET { value | rhs } else { value & !rhs };
+            cpu.write_csr(imm, data)?;
+        }
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);

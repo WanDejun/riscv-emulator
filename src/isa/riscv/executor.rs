@@ -11,7 +11,7 @@ use crate::{
         icache::{ICache, SetICache},
         riscv::{
             RiscvTypes,
-            csr_reg::{CsrRegFile, PrivilegeLevel, csr_macro::*},
+            csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
             mmu::VirtAddrManager,
@@ -54,15 +54,15 @@ impl RV32CPU {
             2
         };
 
-        csr.get_by_type::<Misa>()
-            .unwrap()
+        csr.get_by_type_existing::<Misa>()
             .set_extension_directly(ext);
-        csr.get_by_type::<Misa>().unwrap().set_mxl_directly(mxl);
-        csr.get_by_type::<Mstatus>().unwrap().set_sxl_directly(mxl);
-        csr.get_by_type::<Mstatus>().unwrap().set_uxl_directly(mxl);
-        csr.get_by_type::<Sstatus>().unwrap().set_uxl_directly(mxl);
+        csr.get_by_type_existing::<Misa>().set_mxl_directly(mxl);
+        csr.get_by_type_existing::<Mstatus>().set_sxl_directly(mxl);
+        csr.get_by_type_existing::<Mstatus>().set_uxl_directly(mxl);
+        csr.get_by_type_existing::<Sstatus>().set_uxl_directly(mxl);
 
-        debug_assert!(csr.get_by_type::<Mstatus>().unwrap().get_uxl() == mxl);
+        debug_assert!(csr.get_by_type_existing::<Mstatus>().get_uxl() == mxl);
+        debug_assert!(csr.get_by_type_existing::<Mstatus>().get_sxl() == mxl);
 
         csr.set_current_privileged(PrivilegeLevel::M);
 
@@ -88,6 +88,20 @@ impl RV32CPU {
         self.reg_file[0] = 0;
 
         rst
+    }
+
+    /// Write CSR and update context correctly.
+    ///
+    /// XXX: Use this function instead of `self.csr.write`, unless you are sure about what you are doing.
+    ///
+    /// You may need [`CsrRegFile::write_directly`] in some cases.
+    pub(crate) fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), Exception> {
+        if let None = self.csr.write(addr, data) {
+            log::warn!("Failed to write CSR {:#x} with data {:#x}", addr, data);
+            return Err(Exception::IllegalInstruction);
+        }
+
+        Ok(())
     }
 
     // TODO: Move or delete this when the debugger is implemented
