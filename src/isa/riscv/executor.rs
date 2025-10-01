@@ -101,23 +101,13 @@ impl RV32CPU {
             return Err(Exception::IllegalInstruction);
         }
 
-        Ok(())
-    }
-
-    // TODO: Move or delete this when the debugger is implemented
-    fn debug_reg_string(&self) -> String {
-        let mut s = String::new();
-        for i in 0..REGFILE_CNT {
-            if self.reg_file[i] == 0 {
-                continue;
-            }
-
-            s.push_str(&format!("{}: 0x{:x}", REG_NAME[i], self.reg_file[i]));
-            if i != REGFILE_CNT - 1 {
-                s.push_str(", ");
-            }
+        if addr == Satp::get_index() {
+            let satp = self.csr.get_by_type_existing::<Satp>();
+            self.memory.set_mode(satp.get_mode() as u8);
+            self.memory.set_root_ppn(satp.get_ppn() as u64);
         }
-        s
+
+        Ok(())
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {

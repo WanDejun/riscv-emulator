@@ -1,14 +1,13 @@
+use core::panic;
+
 use bitflags::bitflags;
 
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::{
-        csr_reg::csr_macro::Satp,
-        mmu::{
-            address::{PageSize, PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
-            config::{
-                PAGE_SIZE_XLEN, PPN_MASK, PTE_FLAG_MASK, VirtualMemoryMode, get_page_table_level,
-            },
+    isa::riscv::mmu::{
+        address::{PageSize, PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
+        config::{
+            PAGE_SIZE_XLEN, PPN_MASK, PTE_FLAG_MASK, VirtualMemoryMode, get_page_table_level,
         },
     },
     ram::Ram,
@@ -129,7 +128,6 @@ pub enum PageTableError {
 pub struct PageTable {
     root_ppn: PhysicalPageNum,
     mode: VirtualMemoryMode,
-    // TODO: Add TLB here.
 }
 
 impl PageTable {
@@ -137,14 +135,23 @@ impl PageTable {
         Self { root_ppn, mode }
     }
 
-    pub fn updata(&mut self, satp: Satp) {
-        self.mode = match satp.get_mode() {
+    pub fn set_mode(&mut self, mode: u8) {
+        self.mode = match mode {
+            0 => VirtualMemoryMode::None,
             8 => VirtualMemoryMode::Page32bit,
             9 => VirtualMemoryMode::Page39bit,
             10 => VirtualMemoryMode::Page48bit,
             11 => VirtualMemoryMode::Page57bit,
-            _ => VirtualMemoryMode::None,
+            _ => {
+                // This is not allow to happen because satp.mode is WARL.
+                log::error!("MMU receive unsupported virtual memory mode: {}.", mode);
+                panic!()
+            }
         }
+    }
+
+    pub fn set_root_ppn_by_addr(&mut self, ppn: PhysicalPageNum) {
+        self.root_ppn = ppn;
     }
 
     // TODO: Maybe we need to take shared owership in virtual memory manager to avoid intermediate overhead
