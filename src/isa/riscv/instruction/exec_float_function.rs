@@ -57,7 +57,7 @@ where
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         let val = cpu.reg_file.read(rs1, 0).0;
         let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
-        let rst = cpu.memory.read::<F::BitsType>(addr);
+        let rst = cpu.memory.read::<F::BitsType>(addr, &mut cpu.csr);
 
         match rst {
             Ok(data) => {
@@ -85,7 +85,7 @@ where
         let val2 = cpu.fpu.load::<F>(rs2);
         let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
 
-        let ret = cpu.memory.write(addr, val2.to_bits());
+        let ret = cpu.memory.write(addr, val2.to_bits(), &mut cpu.csr);
         if let Err(err) = ret {
             cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
             return Err(Exception::from_memory_err(err));

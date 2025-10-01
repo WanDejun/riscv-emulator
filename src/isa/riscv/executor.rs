@@ -36,7 +36,7 @@ pub struct RV32CPU {
 }
 
 impl RV32CPU {
-    pub fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
+    pub(crate) fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
         let mut csr = CsrRegFile::new();
 
         // TODO: Record extensions in Decoder.
@@ -121,7 +121,7 @@ impl RV32CPU {
             decode_instr
         } else {
             // IF
-            let instr_bytes = self.memory.read::<u32>(self.pc);
+            let instr_bytes = self.memory.get_instr_code::<u32>(self.pc, &mut self.csr);
             if let Err(err) = instr_bytes {
                 TrapController::send_trap_signal(
                     self,

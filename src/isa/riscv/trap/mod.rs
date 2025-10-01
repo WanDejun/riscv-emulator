@@ -42,11 +42,12 @@ pub enum Exception {
     StoreFault,
     UserEnvCall,
     SupervisorEnvCall,
+    HypervisionEnvCall,
     MachineEnvCall,
     InstructionPageFault,
     LoadPageFault,
-    StorePageFault,
     Unknown,
+    StorePageFault,
 }
 
 impl Interrupt {
@@ -140,6 +141,7 @@ impl Into<WordType> for Exception {
             Exception::StoreFault => 7,
             Exception::UserEnvCall => 8,
             Exception::SupervisorEnvCall => 9,
+            Exception::HypervisionEnvCall => 10,
             Exception::MachineEnvCall => 11,
             Exception::InstructionPageFault => 12,
             Exception::LoadPageFault => 13,

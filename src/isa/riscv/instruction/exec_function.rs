@@ -85,7 +85,7 @@ where
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         let val = cpu.reg_file.read(rs1, 0).0;
         let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
-        let ret = cpu.memory.read::<T>(addr);
+        let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
 
         match ret {
             Ok(data) => {
@@ -117,7 +117,7 @@ where
         let (val1, val2) = cpu.reg_file.read(rs1, rs2);
         let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
 
-        let ret = cpu.memory.write(addr, T::truncate_from(val2));
+        let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
         if let Err(err) = ret {
             cpu.pending_tval = Some(addr);
             return Err(Exception::from_memory_err(err));

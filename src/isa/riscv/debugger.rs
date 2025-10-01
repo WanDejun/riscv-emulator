@@ -49,11 +49,12 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
     }
 
     fn read_instr(&mut self, addr: WordType) -> Result<u32, MemError> {
-        self.memory.read::<u32>(addr)
+        self.memory
+            .get_instr_code_without_side_effect::<u32>(addr, &mut self.csr)
     }
 
     fn write_back_instr(&mut self, instr: u32, addr: WordType) -> Result<(), MemError> {
-        self.memory.write(addr, instr)?;
+        self.memory.write_by_paddr(addr, instr)?;
         self.icache.invalidate(addr);
         Ok(())
     }
@@ -67,11 +68,11 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
     }
 
     fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError> {
-        self.memory.read::<T>(addr)
+        self.memory.read_by_paddr::<T>(addr)
     }
 
     fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
-        self.memory.write::<T>(addr, data)
+        self.memory.write_by_paddr::<T>(addr, data)
     }
 
     fn read_float_reg(&self, idx: u8) -> f64 {

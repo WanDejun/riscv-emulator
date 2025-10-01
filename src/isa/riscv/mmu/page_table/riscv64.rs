@@ -7,7 +7,8 @@ use crate::{
     isa::riscv::mmu::{
         address::{PageSize, PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
         config::{
-            PAGE_SIZE_XLEN, PTE_FLAG_MASK, PTE_PPN_MASK, VirtualMemoryMode, get_page_table_level,
+            PAGE_SIZE_XLEN, PTE_FLAG_MASK, PTE_PPN_MASK, PTE_WIDTH_SIZE, VirtualMemoryMode,
+            get_page_table_level,
         },
     },
     ram::Ram,
@@ -85,7 +86,7 @@ impl PageTableEntry {
         !(self.flags() & PTEFlags::A).is_empty()
     }
     fn is_dirty(&self) -> bool {
-        !(self.flags() & PTEFlags::G).is_empty()
+        !(self.flags() & PTEFlags::D).is_empty()
     }
 
     // set flag for PTE.
@@ -114,7 +115,7 @@ impl PageTableEntry {
         self.bits |= PTEFlags::A.bits() as WordType;
     }
     fn set_dirty(&mut self) {
-        self.bits |= PTEFlags::G.bits() as WordType;
+        self.bits |= PTEFlags::D.bits() as WordType;
     }
 }
 
@@ -158,20 +159,28 @@ impl PageTable {
     // TODO: Maybe we need to take shared owership in virtual memory manager to avoid intermediate overhead
     // TODO: Read/Write/Execute check.
     // TODO: Privilege check.
-    pub fn translate_addr(
+    pub fn translate_addr<const DIRTY: bool, const ACCESS: bool>(
         &self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
-        flag: PTEFlags,
+        masks: PTEFlags,
+        target_flags: PTEFlags,
     ) -> Result<PhysicalAddr, PageTableError> {
         if self.mode == VirtualMemoryMode::None {
             return Ok(vaddr.0.into());
         }
 
         let target_pte = self.find_pte(mem, vaddr.floor())?;
-        if !target_pte.0.check_flag(flag) {
+        if (target_pte.0.flags().bits() & masks.bits()) != target_flags.bits() {
             return Err(PageTableError::PrivilegeFault);
         }
+        if DIRTY {
+            target_pte.0.set_dirty();
+        }
+        if ACCESS {
+            target_pte.0.set_accessed();
+        }
+
         let ppn = target_pte.0.ppn();
         let paddr = match target_pte.1 {
             PageSize::Small4K => {
@@ -204,7 +213,14 @@ impl PageTable {
             }
 
             if i == 0 || !pte.is_page() {
-                return Ok((pte, PageSize::from(i as u8)));
+                // A leaf PTE has been reached. If i>0 and pte.ppn[i-1:0] ≠ 0  this is a misaligned superpage;
+                // stop and raise a page-fault exception corresponding to the original access type.
+                let mask = ((1 << (i * 9)) - 1) << PTE_WIDTH_SIZE;
+                if pte.bits & mask != 0 {
+                    return Err(PageTableError::PageFault);
+                } else {
+                    return Ok((pte, PageSize::from(i as u8)));
+                }
             }
 
             entry = pte.ppn();
@@ -252,7 +268,7 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr(&mut ram, 0x0000_0123.into(), PTEFlags::R)
+            .translate_addr::<false, true>(&mut ram, 0x0000_0123.into(), PTEFlags::R, PTEFlags::R)
             .unwrap();
         assert_eq!(paddr.0, data_page | 0x123);
     }
@@ -285,7 +301,7 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr(&mut ram, 0x0011_4514.into(), PTEFlags::W)
+            .translate_addr::<false, true>(&mut ram, 0x0011_4514.into(), PTEFlags::W, PTEFlags::W)
             .unwrap();
         assert_eq!(paddr.0, 0x8111_4514);
     }
@@ -319,7 +335,7 @@ mod test {
 
         // try get instr, without X authority.
         let err = page_table
-            .translate_addr(&mut ram, 0x0000_0010.into(), PTEFlags::X)
+            .translate_addr::<false, true>(&mut ram, 0x0000_0010.into(), PTEFlags::X, PTEFlags::X)
             .unwrap_err();
         assert_eq!(err, PageTableError::PrivilegeFault);
     }

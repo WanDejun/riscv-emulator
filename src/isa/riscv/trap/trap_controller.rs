@@ -92,6 +92,10 @@ impl TrapController {
         mstatus.set_mpie(1);
         cpu.write_pc(cpu.csr.read_uncheck_privilege(csr_index::mepc).unwrap());
 
+        if mstatus.get_mpp() != 3 {
+            // MPP is not M-Mode, clear mprv.
+            mstatus.set_mprv(0);
+        }
         cpu.csr
             .set_current_privileged((mstatus.get_mpp() as u8).into());
         mstatus.set_mpp(0);

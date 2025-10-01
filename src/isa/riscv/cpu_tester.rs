@@ -57,19 +57,28 @@ impl TestCPUBuilder {
     }
 
     pub(super) fn mem<T: UnsignedInteger>(mut self, addr: WordType, value: T) -> Self {
-        self.cpu.memory.write(addr, value).unwrap();
+        self.cpu
+            .memory
+            .write(addr, value, &mut self.cpu.csr)
+            .unwrap();
         self
     }
 
     pub(super) fn mem_base<T: UnsignedInteger>(mut self, addr: WordType, value: T) -> Self {
-        self.cpu.memory.write(BASE_ADDR + addr, value).unwrap();
+        self.cpu
+            .memory
+            .write(BASE_ADDR + addr, value, &mut self.cpu.csr)
+            .unwrap();
         self
     }
 
     pub(super) fn program(mut self, instrs: &[u32]) -> Self {
         let mut addr = BASE_ADDR;
         for instr in instrs {
-            self.cpu.memory.write(addr, *instr).unwrap();
+            self.cpu
+                .memory
+                .write(addr, *instr, &mut self.cpu.csr)
+                .unwrap();
             addr += 4;
         }
         self
@@ -126,7 +135,11 @@ impl<'a> CPUChecker<'a> {
         T: UnsignedInteger,
     {
         assert_eq!(
-            self.cpu.memory.read::<T>(addr).unwrap().into(),
+            self.cpu
+                .memory
+                .read::<T>(addr, &mut self.cpu.csr)
+                .unwrap()
+                .into(),
             value,
             "Memory value incorrect at pos {}",
             addr
