@@ -40,6 +40,7 @@ fn main() {
         m.insert("rv_system", "RVSystem");
         m.insert("rv_f", "RV32F");
         m.insert("rv64_f", "RV64F");
+        m.insert("rv_s", "RVS");
         m
     };
 
@@ -75,7 +76,10 @@ fn main() {
                 .map(|f| f.as_str().unwrap())
                 .collect::<Vec<_>>();
 
-            let format = if fields == ["rd", "rs1", "rs2"] || fields == ["rd", "rs1"] {
+            let format = if fields == ["rd", "rs1", "rs2"]
+                || fields == ["rd", "rs1"]
+                || fields == ["rs1", "rs2"]
+            {
                 "R"
             } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
                 "R_rm"
@@ -116,7 +120,8 @@ fn main() {
             let use_mask = fields.contains(&"shamtd")
                 || fields.contains(&"shamtw")
                 || fields.is_empty()
-                || fields.contains(&"rm");
+                || fields.contains(&"rm")
+                || ext == "rv_s";
 
             let s = format!(
                 "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",

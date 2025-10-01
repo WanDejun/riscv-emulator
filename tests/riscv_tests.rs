@@ -85,23 +85,30 @@ fn run_test(elf: &Path) -> bool {
         (run_result, timeout)
     });
 
+    let width = 48;
+
     match result {
         Err(e) => {
-            eprintln!("Test {:?}\t{}: {:?}", elf, "panicked".red(), e);
+            eprintln!(
+                "Test {:<width$}{}: {:?}",
+                elf.display(),
+                "panicked".red(),
+                e
+            );
             false
         }
 
         Ok((false, timeout)) => {
             if timeout {
-                eprintln!("Test {:?}\t{}", elf, "timedout".red());
+                eprintln!("Test {:<width$}{}", elf.display(), "timedout".red());
             } else {
-                eprintln!("Test {:?}\t{}", elf, "failed".red());
+                eprintln!("Test {:<width$}{}", elf.display(), "failed".red());
             }
             false
         }
 
         Ok((true, _)) => {
-            eprintln!("Test {:?}\t{}", elf, "passed".green());
+            eprintln!("Test {:<width$}{}", elf.display(), "passed".green());
             true
         }
     }
@@ -146,7 +153,7 @@ fn run_rv64ui_p_tests() {
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
 fn run_rv64um_p_tests() {
-    run_test_group_exclude("rv64um-p-", &[]);
+    run_test_group("rv64um-p-");
 }
 
 #[test]
@@ -154,12 +161,18 @@ fn run_rv64um_p_tests() {
 #[cfg(feature = "riscv-tests")]
 fn run_rv64mi_p_tests() {
     run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
-    // assert!(run_test(Path::new("riscv-tests/isa/rv64mi-p-ma_fetch")));
 }
 
 #[test]
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
-fn run_rv32uf_p_tests() {
-    run_test_group_exclude("rv64uf-p-", &["fdiv", "fmadd", "fmin"]);
+fn run_rv64uf_p_tests() {
+    run_test_group("rv64uf-p-");
+}
+
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_rv64si_p_tests() {
+    run_test_group_exclude("rv64si-p-", &["sbreak"]);
 }

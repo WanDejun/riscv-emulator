@@ -11,7 +11,7 @@ use crate::{
         icache::{ICache, SetICache},
         riscv::{
             RiscvTypes,
-            csr_reg::{CsrRegFile, csr_macro::*},
+            csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
             mmu::VirtAddrManager,
@@ -30,19 +30,52 @@ pub struct RV32CPU {
     pub(super) icache: SetICache<RiscvTypes, 64, 8>,
     pub(super) fpu: SoftFPU,
     pub icache_cnt: usize,
+
+    /// The trap value pending to be written to `mtval`/`stval`.
+    pub(super) pending_tval: Option<WordType>,
 }
 
 impl RV32CPU {
     pub fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
+        let mut csr = CsrRegFile::new();
+
+        // TODO: Record extensions in Decoder.
+        let ext = "FIMSU"
+            .chars()
+            .into_iter()
+            .map(|c| c as WordType - 'A' as WordType)
+            .fold(0, |acc, c| acc | (1 << c));
+        csr.ctx.extension = ext;
+
+        let mxl = if WordType::BITS == 32 {
+            1
+        } else {
+            debug_assert!(WordType::BITS == 64);
+            2
+        };
+
+        csr.get_by_type_existing::<Misa>()
+            .set_extension_directly(ext);
+        csr.get_by_type_existing::<Misa>().set_mxl_directly(mxl);
+        csr.get_by_type_existing::<Mstatus>().set_sxl_directly(mxl);
+        csr.get_by_type_existing::<Mstatus>().set_uxl_directly(mxl);
+        csr.get_by_type_existing::<Sstatus>().set_uxl_directly(mxl);
+
+        debug_assert!(csr.get_by_type_existing::<Mstatus>().get_uxl() == mxl);
+        debug_assert!(csr.get_by_type_existing::<Mstatus>().get_sxl() == mxl);
+
+        csr.set_current_privileged(PrivilegeLevel::M);
+
         Self {
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
-            csr: CsrRegFile::new(),
+            csr: csr,
             icache: SetICache::new(),
             fpu: SoftFPU::new(),
             icache_cnt: 0,
+            pending_tval: None,
         }
     }
 
@@ -57,20 +90,24 @@ impl RV32CPU {
         rst
     }
 
-    // TODO: Move or delete this when the debugger is implemented
-    fn debug_reg_string(&self) -> String {
-        let mut s = String::new();
-        for i in 0..REGFILE_CNT {
-            if self.reg_file[i] == 0 {
-                continue;
-            }
-
-            s.push_str(&format!("{}: 0x{:x}", REG_NAME[i], self.reg_file[i]));
-            if i != REGFILE_CNT - 1 {
-                s.push_str(", ");
-            }
+    /// Write CSR and update context correctly.
+    ///
+    /// XXX: Use this function instead of `self.csr.write`, unless you are sure about what you are doing.
+    ///
+    /// You may need [`CsrRegFile::write_directly`] in some cases.
+    pub(crate) fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), Exception> {
+        if let None = self.csr.write(addr, data) {
+            log::warn!("Failed to write CSR {:#x} with data {:#x}", addr, data);
+            return Err(Exception::IllegalInstruction);
         }
-        s
+
+        if addr == Satp::get_index() {
+            let satp = self.csr.get_by_type_existing::<Satp>();
+            self.memory.set_mode(satp.get_mode() as u8);
+            self.memory.set_root_ppn(satp.get_ppn() as u64);
+        }
+
+        Ok(())
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
@@ -80,7 +117,6 @@ impl RV32CPU {
         }
 
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
-            log::trace!("Cache hit at pc: {:#x}", self.pc);
             self.icache_cnt += 1;
             decode_instr
         } else {
@@ -95,11 +131,16 @@ impl RV32CPU {
                 return Ok(());
             }
             let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
-            log::trace!("Raw instruction: {:#x} at pc {:#x}", instr_bytes, self.pc);
+            log::trace!(
+                "I-Cache not hit, raw instruction: {:#x} at {:#x}",
+                instr_bytes,
+                self.pc
+            );
 
             // ID
             let decoder_result = self.decoder.decode(instr_bytes);
             if let None = decoder_result {
+                log::warn!("Illegal instruction: {:#x} at {:#x}", instr_bytes, self.pc);
                 TrapController::send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
@@ -126,8 +167,11 @@ impl RV32CPU {
             Ok(()) => {} // there is nothing to do.
         }
 
-        log::trace!("Regs: {}", self.debug_reg_string());
         return Ok(());
+    }
+
+    pub fn clear_all_cache(&mut self) {
+        self.icache.clear();
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
@@ -149,8 +193,9 @@ impl IRQHandler for RV32CPU {
                 }
             }
 
-            // TODO: Handle other interrupts
-            _ => {}
+            _ => {
+                todo!("IRQ handling not implemented yet.")
+            }
         }
     }
 }
@@ -163,7 +208,7 @@ mod tests {
     use crate::{
         isa::riscv::{cpu_tester::*, csr_reg::csr_index},
         ram_config,
-        utils::{negative_of, sign_extend},
+        utils::{UnsignedInteger, negative_of, sign_extend},
     };
 
     #[test]
@@ -181,13 +226,11 @@ mod tests {
             |checker| checker.reg(2, 5).pc(0x2004),
         );
 
-        for _i in 1..=100 {
+        for _ in 1..=100 {
             tester.test_rand_r(RiscvInstr::ADD, |lhs, rhs| lhs.wrapping_add(rhs));
             tester.test_rand_r(RiscvInstr::SUB, |lhs, rhs| lhs.wrapping_sub(rhs));
             tester.test_rand_i(RiscvInstr::ADDI, |lhs, imm| lhs.wrapping_add(imm));
 
-            // TODO: Add some handmade data,
-            // because tests and actual codes are actually written in similar ways.
             tester.test_rand_i(RiscvInstr::SLTI, |lhs, imm| {
                 ((lhs.cast_signed()) < (sign_extend(imm, 12).cast_signed())) as WordType
             });
@@ -195,11 +238,7 @@ mod tests {
                 ((lhs) < (sign_extend(imm, 12))) as WordType
             });
         }
-    }
 
-    #[test]
-    fn test_exec_arith_decode() {
-        // TODO: add checks for boundary cases
         run_test_exec_decode(
             0x02520333, // mul x6, x4, x5
             |builder| builder.reg(4, 5).reg(5, 10).pc(0x1000),
@@ -292,12 +331,16 @@ mod tests {
 
     #[test]
     fn test_csr() {
+        // TODO: This test is disabled because some bits in mstatus are `WPRI`,
+        // and these bits should always be 0.
+        // Choose another CSR or number.
+
         // 1) CSRRW x11, mstatus(0x300), x5
-        run_test_exec_decode(
-            0x300295f3,
-            |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234).pc(0x1000),
-            |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA).pc(0x1004),
-        );
+        // run_test_exec_decode(
+        //     0x300295f3,
+        //     |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234).pc(0x1000),
+        //     |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA).pc(0x1004),
+        // );
 
         // 2) CSRRS x12, mtvec(0x305), x6
         run_test_exec_decode(
@@ -437,6 +480,29 @@ mod tests {
             0xc0051553, // fcvt.w.s a0,fa0,rtz
             |builder| builder.reg_f32(10, f32::from_bits(0xffffffff)),
             |checker| checker.reg(10, i32::MAX as WordType),
+        );
+    }
+
+    #[test]
+    fn test_default_csr_value() {
+        let cpu = TestCPUBuilder::new().build();
+
+        #[cfg(feature = "riscv32")]
+        assert_eq!(
+            cpu.csr
+                .read_uncheck_privilege(csr_index::mstatus)
+                .unwrap()
+                .extract_bits(32, 33),
+            1
+        );
+
+        #[cfg(feature = "riscv64")]
+        assert_eq!(
+            cpu.csr
+                .read_uncheck_privilege(csr_index::mstatus)
+                .unwrap()
+                .extract_bits(32, 33),
+            2
         );
     }
 }

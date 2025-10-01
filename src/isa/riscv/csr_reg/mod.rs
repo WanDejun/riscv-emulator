@@ -1,9 +1,18 @@
+#[macro_use]
+mod validator;
+
 pub mod csr_macro;
 
 use std::{cmp::Ordering, collections::HashMap};
 
-use crate::{config::arch_config::WordType, isa::riscv::csr_reg::csr_macro::CSR_REG_TABLE};
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv::csr_reg::{csr_macro::CSR_REG_TABLE, validator::Validator},
+};
 
+/// Constants in this module are not complete. Use `get_index` static method for each CSR type, like [`Mstatus::get_index`].
+// TODO: Consider replace all uses of `csr_index` with the corresponding `CSRType::get_index`, 
+// then remove the `csr_index` module.
 #[rustfmt::skip]
 #[allow(non_upper_case_globals, unused)]
 pub(crate) mod csr_index {
@@ -125,16 +134,97 @@ impl From<u8> for PrivilegeLevel {
 
 const DEFAULT_PRIVILEGE_LEVEL: PrivilegeLevel = PrivilegeLevel::M;
 
-pub(crate) trait CsrReg: From<*mut WordType> {
+pub(crate) trait NamedCsrReg {
+    fn new(data: *mut CsrReg, ctx: *mut CsrContext) -> Self;
     fn get_index() -> WordType;
-    fn clear_by_mask(&mut self, mask: WordType);
-    fn set_by_mask(&mut self, mask: WordType);
     fn data(&self) -> WordType;
 }
 
+/// Write `value` to the bits specified by `mask`.
+pub(crate) struct CsrWriteOp {
+    mask: WordType,
+}
+
+impl CsrWriteOp {
+    #[inline]
+    fn new(mask: WordType) -> CsrWriteOp {
+        CsrWriteOp { mask }
+    }
+
+    #[inline]
+    fn new_write_all() -> CsrWriteOp {
+        CsrWriteOp { mask: !0 }
+    }
+
+    #[inline]
+    fn apply(&self, target: &mut WordType, value: WordType) {
+        *target = self.get_new_value(*target, value);
+    }
+
+    #[inline]
+    fn get_new_value(&self, old_value: WordType, value: WordType) -> WordType {
+        (old_value & !self.mask) | (value & self.mask)
+    }
+
+    /// Merge two write operations into one.
+    ///
+    /// XXX: You'd better not to pass overlapped masks, but there's no check for this.
+    #[inline]
+    fn merge(&self, rhs: &CsrWriteOp) -> CsrWriteOp {
+        CsrWriteOp {
+            mask: self.mask | rhs.mask,
+        }
+    }
+}
+
+pub(crate) struct CsrContext {
+    pub extension: WordType, // Used in `misa`
+    pub xlen: u8,            // 32 or 64
+}
+
+impl CsrContext {
+    fn new() -> CsrContext {
+        CsrContext {
+            extension: 0,
+            xlen: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CsrReg {
+    value: WordType,
+    validator: Option<Validator>,
+}
+
+impl CsrReg {
+    fn new(value: WordType, validator: Option<Validator>) -> CsrReg {
+        CsrReg { value, validator }
+    }
+
+    fn value(&self) -> WordType {
+        self.value
+    }
+
+    fn write(&mut self, new_value: WordType, context: &CsrContext) {
+        if let Some(validator) = self.validator {
+            let op = validator(new_value, context);
+            op.apply(&mut self.value, new_value);
+        } else {
+            self.value = new_value;
+        }
+    }
+
+    /// Write directly without any validation.
+    fn write_directly(&mut self, new_value: WordType) {
+        self.value = new_value;
+    }
+}
+
 pub(crate) struct CsrRegFile {
-    table: HashMap<WordType, WordType>,
+    table: HashMap<WordType, CsrReg>,
     cpl: PrivilegeLevel, // current privileged level
+    pub(super) ctx: CsrContext,
 }
 
 impl CsrRegFile {
@@ -142,14 +232,16 @@ impl CsrRegFile {
         Self::from(CSR_REG_TABLE)
     }
 
-    pub fn from(csr_table: &[(WordType, WordType)]) -> Self {
+    pub fn from(csr_table: &[(WordType, WordType, Validator)]) -> Self {
         let mut table = HashMap::new();
-        for (addr, default_value) in csr_table.iter() {
-            table.insert(*addr, *default_value);
+        for (addr, default_value, validator) in csr_table.iter() {
+            table.insert(*addr, CsrReg::new(*default_value, Some(*validator)));
         }
+
         Self {
             table,
             cpl: DEFAULT_PRIVILEGE_LEVEL,
+            ctx: CsrContext::new(),
         }
     }
 
@@ -160,7 +252,14 @@ impl CsrRegFile {
         self.read_uncheck_privilege(addr)
     }
 
-    pub fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
+    /// Write with privilege check and validation.
+    /// XXX: In most cases, you should use [`RV32CPU::write_csr`] in `executor.rs` instead of this function directly,
+    /// because writting to CSR may have other side-effects in CPU.
+    ///
+    /// [`RV32CPU::write_csr`]: crate::isa::riscv::executor::RV32CPU::write_csr
+    ///
+    /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
+    pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
         if !self.get_current_privileged().write_check_privilege(addr) {
             return None;
         }
@@ -169,41 +268,52 @@ impl CsrRegFile {
     }
 
     /// ONLY used in debugger. Read & write without side-effect.
+    /// TODO: Consider remove this.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
-        if let Some(val) = self.table.get_mut(&addr) {
-            let old = *val;
+        if let Some(reg) = self.table.get_mut(&addr) {
+            let old = *reg;
             if let Some(new) = new_value {
-                *val = new;
+                reg.write(new, &self.ctx);
             }
-            Some(old)
+            Some(old.value)
         } else {
             None
         }
     }
 
+    /// Write directly without any check or validation and have no other side effects.
+    /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
+    pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
+        if let Some(reg) = self.table.get_mut(&addr) {
+            reg.write_directly(data);
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    /// Write without check for privilege level, but still have validation.
+    /// If you want to write without any check or validation, use [`Self::write_directly`] instead.
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
-        // Special-case fflags and frm; they are subfields of fcsr
+        // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
         if addr == csr_index::fflags {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                *fcsr = (*fcsr & !0b11111) | (data & 0b11111);
+                fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
             } // TODO: Raise error
         } else if addr == csr_index::frm {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                *fcsr = (*fcsr & !0b11100000) | ((data & 0b111) << 5);
+                fcsr.value = (fcsr.value & !0b11100000) | ((data & 0b111) << 5);
             } // TODO: Raise error
         } else if addr == csr_index::fcsr {
             if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
                 // Quoted from RISC-V manual:
                 // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
                 // implementations shall ignore writes to these bits and supply a zero value when read."
-                *fcsr = data & 0xFF;
+                fcsr.value = data & 0xFF;
             } // TODO: Raise error
-        } else if addr == csr_index::misa {
-            // Do nothing, "a value of zero can be returned to indicate the misa register has not been implemented"
-            // TODO: Implement misa
         } else {
             if let Some(val) = self.table.get_mut(&addr) {
-                *val = data
+                val.write(data, &self.ctx);
             } else {
                 // TODO: Raise error
             }
@@ -216,23 +326,44 @@ impl CsrRegFile {
             self.table
                 .get(&csr_index::fcsr)
                 .copied()
-                .map(|x| x & 0b11111)
+                .map(|reg| reg.value & 0b11111)
         } else if addr == csr_index::frm {
             self.table
                 .get(&csr_index::fcsr)
                 .copied()
-                .map(|x| (x >> 5) & 0b111)
+                .map(|reg| (reg.value >> 5) & 0b111)
         } else {
-            self.table.get(&addr).copied()
+            self.table.get(&addr).copied().map(|reg| reg.value)
         }
     }
 
+    /// NOTE: Given that this the CSR type is known, so this function won't check privilege level.
+    /// If you ensure the CSR exists, use [`Self::get_by_type_existing`] instead for better performance.
     pub fn get_by_type<T>(&mut self) -> Option<T>
     where
-        T: CsrReg,
+        T: NamedCsrReg,
     {
-        let val = self.table.get_mut(&T::get_index())?;
-        Some(T::from(val as *mut u64))
+        let reg = self.table.get_mut(&T::get_index())?;
+        Some(NamedCsrReg::new(
+            reg as *mut CsrReg,
+            &mut self.ctx as *mut CsrContext,
+        ))
+    }
+
+    /// Similar to `get_by_type`, but this function assumes the CSR definitely exists.
+    ///
+    /// - In debug builds, this function will panic if the CSR does not exist.
+    /// - In release builds, this function will skip the runtime check for performance.
+    /// TODO: Almost all old code can assumes the CSR exists, replace them with this function.
+    pub fn get_by_type_existing<T>(&mut self) -> T
+    where
+        T: NamedCsrReg,
+    {
+        if cfg!(debug_assertions) {
+            self.get_by_type::<T>().unwrap()
+        } else {
+            unsafe { self.get_by_type::<T>().unwrap_unchecked() }
+        }
     }
 
     pub fn get_current_privileged(&self) -> PrivilegeLevel {
@@ -240,6 +371,7 @@ impl CsrRegFile {
     }
 
     pub fn set_current_privileged(&mut self, new_level: PrivilegeLevel) {
+        log::debug!("Privilege level change: {:?} -> {:?}", self.cpl, new_level);
         self.cpl = new_level
     }
 }

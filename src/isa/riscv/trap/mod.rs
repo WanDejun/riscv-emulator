@@ -121,9 +121,8 @@ impl Exception {
         match err {
             MemError::LoadMisaligned => Exception::InstructionMisaligned,
             MemError::LoadFault => Exception::InstructionFault,
-            _ => {
-                unreachable!()
-            }
+            MemError::LoadPageFault => Exception::InstructionPageFault,
+            _ => unreachable!("Invalid instruction fetch error: {:?}", err),
         }
     }
 }

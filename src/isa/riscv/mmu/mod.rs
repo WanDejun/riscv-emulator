@@ -6,7 +6,10 @@ use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
     device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
-    isa::riscv::mmu::page_table::{PTEFlags, PageTable},
+    isa::riscv::mmu::{
+        config::PAGE_SIZE,
+        page_table::{PTEFlags, PageTable},
+    },
     ram::Ram,
 };
 
@@ -75,6 +78,16 @@ impl VirtAddrManager {
         } else {
             Err(MemError::StorePageFault)
         }
+    }
+
+    pub fn set_mode(&mut self, mode: u8) {
+        self.page_table.set_mode(mode);
+    }
+
+    pub fn set_root_ppn(&mut self, ppn: u64) {
+        // FIXME: This function actually accepts address (ppn * PAGE_SIZE) due to its chaos design.
+        self.page_table
+            .set_root_ppn_by_addr((ppn * PAGE_SIZE).into());
     }
 
     pub fn sync(&mut self) {
