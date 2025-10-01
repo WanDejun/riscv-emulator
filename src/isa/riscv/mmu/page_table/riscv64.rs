@@ -138,10 +138,11 @@ impl PageTable {
     pub fn set_mode(&mut self, mode: u8) {
         self.mode = match mode {
             0 => VirtualMemoryMode::None,
-            8 => VirtualMemoryMode::Page32bit,
-            9 => VirtualMemoryMode::Page39bit,
-            10 => VirtualMemoryMode::Page48bit,
-            11 => VirtualMemoryMode::Page57bit,
+            1 => VirtualMemoryMode::Page32bit,
+            8 => VirtualMemoryMode::Page39bit,
+            9 => VirtualMemoryMode::Page48bit,
+            10 => VirtualMemoryMode::Page57bit,
+            // 11 => VirtualMemoryMode::Page64bit,
             _ => {
                 // This is not allow to happen because satp.mode is WARL.
                 log::error!("MMU receive unsupported virtual memory mode: {}.", mode);

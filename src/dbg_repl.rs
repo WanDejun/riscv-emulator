@@ -85,7 +85,7 @@ enum PrintCmd {
     },
     Mem {
         addr: String,
-        #[arg(short, long, default_value_t = 4)]
+        #[arg(short, long, default_value_t = 16)]
         len: u32,
     },
     Csr {
@@ -386,7 +386,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
     }
 
     fn print_mem(&mut self, addr: WordType, len: u32) {
-        const BYTE_PER_LINE: u32 = 8;
+        const BYTE_PER_LINE: u32 = 16;
 
         let mut curr_addr = addr;
         let mut i = 0 as u32;
@@ -397,8 +397,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 }
                 print!("{}: ", format_addr(curr_addr));
             }
-            curr_addr = curr_addr + (i as WordType);
             print!("{} ", self.read_mem_byte_formatted(curr_addr));
+            curr_addr += 1;
             i += 1;
         }
 
