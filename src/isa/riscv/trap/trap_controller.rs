@@ -160,13 +160,39 @@ impl TrapController {
     //                 Common
     // ======================================
 
-    pub fn send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+    pub fn try_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) -> bool {
         if cpu.csr.get_current_privileged() == PrivilegeLevel::M
             || Self::is_delegated_m_mode(cpu, cause) == false
         {
-            Self::send_trap_signal_m_mode(cpu, cause, trap_value);
+            match cause {
+                Trap::Exception(_) => {
+                    Self::send_trap_signal_m_mode(cpu, cause, trap_value);
+                    true
+                }
+                Trap::Interrupt(_) => {
+                    if cpu.csr.get_by_type_existing::<Mstatus>().get_mie() == 1 {
+                        Self::send_trap_signal_m_mode(cpu, cause, trap_value);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
         } else {
-            Self::send_trap_signal_s_mode(cpu, cause, trap_value)
+            match cause {
+                Trap::Exception(_) => {
+                    Self::send_trap_signal_s_mode(cpu, cause, trap_value);
+                    true
+                }
+                Trap::Interrupt(_) => {
+                    if cpu.csr.get_by_type_existing::<Mstatus>().get_sie() == 1 {
+                        Self::send_trap_signal_s_mode(cpu, cause, trap_value);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
         }
     }
 

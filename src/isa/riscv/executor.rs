@@ -112,8 +112,9 @@ impl RV32CPU {
 
     pub fn step(&mut self) -> Result<(), Exception> {
         if let Some(interrupt) = TrapController::check_interrupt(self) {
-            TrapController::send_trap_signal(self, Trap::Interrupt(interrupt), 0);
-            return Ok(());
+            if TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0) {
+                return Ok(());
+            }
         }
 
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
@@ -123,7 +124,7 @@ impl RV32CPU {
             // IF
             let instr_bytes = self.memory.get_instr_code::<u32>(self.pc, &mut self.csr);
             if let Err(err) = instr_bytes {
-                TrapController::send_trap_signal(
+                TrapController::try_send_trap_signal(
                     self,
                     Trap::Exception(Exception::from_instr_fetch_err(err)),
                     0,
@@ -141,7 +142,7 @@ impl RV32CPU {
             let decoder_result = self.decoder.decode(instr_bytes);
             if let None = decoder_result {
                 log::warn!("Illegal instruction: {:#x} at {:#x}", instr_bytes, self.pc);
-                TrapController::send_trap_signal(
+                TrapController::try_send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
                     instr_bytes as WordType,
@@ -161,7 +162,7 @@ impl RV32CPU {
         match excute_result {
             Err(Exception::Breakpoint) => return excute_result,
             Err(nr) => {
-                TrapController::send_trap_signal(self, Trap::Exception(nr), 0);
+                TrapController::try_send_trap_signal(self, Trap::Exception(nr), 0);
                 return Ok(());
             }
             Ok(()) => {} // there is nothing to do.

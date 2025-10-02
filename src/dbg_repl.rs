@@ -409,7 +409,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
     fn print_csr(&mut self, csr_addr: WordType) {
         if let Some(v) = self.dbg.read_csr(csr_addr) {
-            println!("{}", format_data(v))
+            #[cfg(feature = "riscv64")]
+            println!("{}", format_data_64(v));
+            #[cfg(feature = "riscv32")]
+            println!("{}", format_data(v));
         } else {
             println!("Illegal CSR.")
         }
@@ -552,6 +555,11 @@ fn format_addr(word: WordType) -> impl std::fmt::Display {
 
 fn format_data(data: WordType) -> impl std::fmt::Display {
     palette.data(&format!("0x{:08x}", data)).to_string()
+}
+
+// TODO: format into 0x01234_4567_89ab_cdef
+fn format_data_64(data: WordType) -> impl std::fmt::Display {
+    palette.data(&format!("0x{:016x}", data)).to_string()
 }
 
 pub trait AsmFormattable<I: ISATypes> {
