@@ -37,7 +37,7 @@ pub(crate) mod csr_index {
 #[repr(u8)]
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 /// Only support machine_mode now.
-pub(crate) enum PrivilegeLevel {
+pub enum PrivilegeLevel {
     U = 0,
     S = 1,
     V = 2,

@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use crate::{config::arch_config::WordType, device::MemError, utils::UnsignedInteger};
+use crate::{
+    config::arch_config::WordType, device::MemError, isa::riscv::csr_reg::PrivilegeLevel,
+    utils::UnsignedInteger,
+};
 
 pub mod icache;
 pub mod riscv;
@@ -18,6 +21,8 @@ pub trait DebugTarget<I: ISATypes> {
     fn write_reg(&mut self, idx: u8, value: WordType);
 
     fn read_float_reg(&self, idx: u8) -> f64;
+
+    fn get_current_privilege(&self) -> PrivilegeLevel;
 
     fn read_mem<T: UnsignedInteger>(&mut self, addr: WordType) -> Result<T, MemError>;
     fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError>;

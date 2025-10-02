@@ -10,7 +10,7 @@ use riscv_emulator::{
         ISATypes, InstrLen,
         riscv::{
             RiscvTypes,
-            csr_reg::csr_macro::CSR_NAME,
+            csr_reg::{PrivilegeLevel, csr_macro::CSR_NAME},
             debugger::{DebugEvent, Debugger},
             decoder::DecodeInstr,
             instruction::RVInstrInfo,
@@ -94,6 +94,7 @@ enum PrintCmd {
     FReg {
         reg: String,
     },
+    Priv,
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,6 +112,7 @@ enum PrintObject {
     Mem(WordType, u32),
     CSR(WordType),
     FReg(u8),
+    Privilege,
 }
 
 pub struct DebugREPL<'a, I: ISATypes> {
@@ -203,6 +205,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 PrintObject::Mem(addr, len) => self.print_mem(addr, len),
                 PrintObject::CSR(addr) => self.print_csr(addr),
                 PrintObject::FReg(idx) => self.print_float_reg(idx)?,
+                PrintObject::Privilege => self.print_privilege(),
             }
         }
 
@@ -230,6 +233,9 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Print(PrintCmd::FReg { reg }) => {
                 self.print_float_reg(parse_float_reg(&reg)?)?;
             }
+            Cli::Print(PrintCmd::Priv) => {
+                self.print_privilege();
+            }
 
             Cli::Display(PrintCmd::Pc) => {
                 self.watch_list.push(PrintObject::Pc);
@@ -248,6 +254,9 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Display(PrintCmd::FReg { reg }) => {
                 self.watch_list
                     .push(PrintObject::FReg(parse_float_reg(&reg)?));
+            }
+            Cli::Display(PrintCmd::Priv) => {
+                self.watch_list.push(PrintObject::Privilege);
             }
 
             Cli::Undisplay(PrintCmd::Pc) => {
@@ -272,6 +281,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 let reg_idx = parse_float_reg(&reg)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::FReg(reg_idx));
+            }
+            Cli::Undisplay(PrintCmd::Priv) => {
+                self.watch_list
+                    .retain(|&item| item != PrintObject::Privilege);
             }
 
             Cli::History { count } => {
@@ -418,6 +431,11 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         }
     }
 
+    fn print_privilege(&mut self) {
+        let privilege = self.dbg.get_current_privilege();
+        println!("{}", format_privilege(privilege))
+    }
+
     fn read_mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
         self.dbg
             .read_mem::<u8>(addr)
@@ -490,6 +508,10 @@ impl OutputPalette {
     fn invalid(&self, value: &str) -> impl std::fmt::Display {
         value.red()
     }
+
+    fn privilege(&self, value: &str) -> impl std::fmt::Display {
+        value.dark_grey()
+    }
 }
 
 // helpers
@@ -555,6 +577,10 @@ fn format_addr(word: WordType) -> impl std::fmt::Display {
 
 fn format_data(data: WordType) -> impl std::fmt::Display {
     palette.data(&format!("0x{:08x}", data)).to_string()
+}
+
+fn format_privilege(privilege: PrivilegeLevel) -> impl std::fmt::Display {
+    palette.privilege(&format!("{:?}", privilege)).to_string()
 }
 
 // TODO: format into 0x01234_4567_89ab_cdef

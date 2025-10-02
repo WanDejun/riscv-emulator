@@ -10,7 +10,10 @@ use crate::{
     isa::{
         DebugTarget, DecoderTrait, HasBreakpointException, ISATypes,
         icache::ICache,
-        riscv::{RiscvTypes, decoder::DecodeInstr, executor::RV32CPU, trap::Exception},
+        riscv::{
+            RiscvTypes, csr_reg::PrivilegeLevel, decoder::DecodeInstr, executor::RV32CPU,
+            trap::Exception,
+        },
     },
     utils::UnsignedInteger,
 };
@@ -73,6 +76,10 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
 
     fn write_mem<T: UnsignedInteger>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
         self.memory.write_by_paddr::<T>(addr, data)
+    }
+
+    fn get_current_privilege(&self) -> PrivilegeLevel {
+        self.csr.get_current_privileged()
     }
 
     fn read_float_reg(&self, idx: u8) -> f64 {
@@ -277,6 +284,10 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
             .debug_csr(addr, Some(data))
             .ok_or(DebugError::<I>::CSRNotExist(addr))?;
         Ok(())
+    }
+
+    pub fn get_current_privilege(&mut self) -> PrivilegeLevel {
+        self.target.get_current_privilege()
     }
 
     pub fn decoded_info(&mut self, raw: I::RawInstr) -> Option<I::DecodeRst> {
