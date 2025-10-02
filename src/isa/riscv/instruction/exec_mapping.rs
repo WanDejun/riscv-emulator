@@ -6,6 +6,7 @@ use crate::{
     isa::{
         DebugTarget,
         riscv::{
+            csr_reg::{PrivilegeLevel, csr_macro::Mstatus},
             executor::RV32CPU,
             instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
             trap::{Exception, trap_controller::TrapController},
@@ -158,6 +159,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::CSRRSI => exec_csr_bit::<true, true>,
 
         RiscvInstr::MRET => |_info, cpu| {
+            if cpu.get_current_privilege() != PrivilegeLevel::M {
+                return Err(Exception::IllegalInstruction);
+            }
             TrapController::mret(cpu);
             Ok(())
         },
@@ -217,11 +221,29 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // RV_S
         //---------------------------------------
         RiscvInstr::SRET => |_info, cpu| {
+            if cpu.get_current_privilege() < PrivilegeLevel::S {
+                return Err(Exception::IllegalInstruction);
+            }
+            if cpu.get_current_privilege() == PrivilegeLevel::S
+                && cpu.csr.get_by_type_existing::<Mstatus>().get_tsr() == 1
+            {
+                return Err(Exception::IllegalInstruction);
+            }
+
             TrapController::sret(cpu);
             Ok(())
         },
 
         RiscvInstr::SFENCE_VMA => |_info, cpu| {
+            if cpu.get_current_privilege() < PrivilegeLevel::S {
+                return Err(Exception::IllegalInstruction);
+            }
+            if cpu.get_current_privilege() == PrivilegeLevel::S
+                && cpu.csr.get_by_type_existing::<Mstatus>().get_tvm() == 1
+            {
+                return Err(Exception::IllegalInstruction);
+            }
+
             cpu.clear_all_cache();
             cpu.write_pc(cpu.pc.wrapping_add(4));
             Ok(())

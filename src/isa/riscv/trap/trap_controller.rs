@@ -51,7 +51,7 @@ impl TrapController {
         cpu.csr
             .get_by_type::<Mstatus>()
             .unwrap()
-            .set_mpp(cpu.csr.get_current_privileged() as u8 as WordType);
+            .set_mpp(cpu.csr.get_current_privilege() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr
             .write_uncheck_privilege(Mcause::get_index(), cause.into());
@@ -107,7 +107,7 @@ impl TrapController {
     fn send_trap_signal_s_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr
             .get_by_type_existing::<Sstatus>()
-            .set_spp(cpu.csr.get_current_privileged() as u8 as WordType);
+            .set_spp(cpu.csr.get_current_privilege() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::S);
 
         cpu.csr
@@ -161,7 +161,7 @@ impl TrapController {
     // ======================================
 
     pub fn try_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) -> bool {
-        if cpu.csr.get_current_privileged() == PrivilegeLevel::M
+        if cpu.csr.get_current_privilege() == PrivilegeLevel::M
             || Self::is_delegated_m_mode(cpu, cause) == false
         {
             match cause {

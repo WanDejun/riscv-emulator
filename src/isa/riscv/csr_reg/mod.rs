@@ -247,7 +247,7 @@ impl CsrRegFile {
 
     #[must_use]
     pub fn read(&self, addr: WordType) -> Option<WordType> {
-        if !self.get_current_privileged().read_check_privilege(addr) {
+        if !self.get_current_privilege().read_check_privilege(addr) {
             return None;
         }
         self.read_uncheck_privilege(addr)
@@ -262,7 +262,7 @@ impl CsrRegFile {
     /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
     #[must_use]
     pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
-        if !self.get_current_privileged().write_check_privilege(addr) {
+        if !self.get_current_privilege().write_check_privilege(addr) {
             return None;
         }
         self.write_uncheck_privilege(addr, data);
@@ -369,7 +369,7 @@ impl CsrRegFile {
         }
     }
 
-    pub fn get_current_privileged(&self) -> PrivilegeLevel {
+    pub fn get_current_privilege(&self) -> PrivilegeLevel {
         self.cpl
     }
 
