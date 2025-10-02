@@ -7,7 +7,10 @@ use std::{cmp::Ordering, collections::HashMap};
 
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::csr_reg::{csr_macro::CSR_REG_TABLE, validator::Validator},
+    isa::riscv::csr_reg::{
+        csr_macro::{CSR_REG_TABLE, Mstatus, Satp},
+        validator::Validator,
+    },
 };
 
 /// Constants in this module are not complete. Use `get_index` static method for each CSR type, like [`Mstatus::get_index`].
@@ -91,34 +94,7 @@ const CSR_PRIVILEGE_TABLE: &[(WordType, PrivilegeLevel)] = &[
     (0xFC0, PrivilegeLevel::M), // 0xFFF (Custom)
 ];
 
-impl PrivilegeLevel {
-    /// true for legal.
-    /// false for illegal.
-    pub fn read_check_privilege(self, csr_addr: WordType) -> bool {
-        match CSR_PRIVILEGE_TABLE.binary_search_by(|&(k, _)| {
-            if k > csr_addr {
-                Ordering::Greater
-            } else if k == csr_addr {
-                Ordering::Equal
-            } else {
-                Ordering::Less
-            }
-        }) {
-            Ok(i) => self >= CSR_PRIVILEGE_TABLE[i].1,
-            Err(i) => self >= CSR_PRIVILEGE_TABLE[i - 1].1,
-        }
-    }
-
-    /// true for legal.
-    /// false for illegal.
-    pub fn write_check_privilege(self, csr_addr: WordType) -> bool {
-        if csr_addr >= 0xC00 {
-            false
-        } else {
-            self.read_check_privilege(csr_addr)
-        }
-    }
-}
+impl PrivilegeLevel {}
 
 impl From<u8> for PrivilegeLevel {
     fn from(value: u8) -> PrivilegeLevel {
@@ -245,15 +221,43 @@ impl CsrRegFile {
         }
     }
 
+    fn is_read_priv_legal(&mut self, csr_addr: WordType) -> bool {
+        if csr_addr == Satp::get_index() && self.get_by_type_existing::<Mstatus>().get_tvm() == 1 {
+            return false;
+        }
+
+        match CSR_PRIVILEGE_TABLE.binary_search_by(|&(k, _)| {
+            if k > csr_addr {
+                Ordering::Greater
+            } else if k == csr_addr {
+                Ordering::Equal
+            } else {
+                Ordering::Less
+            }
+        }) {
+            Ok(i) => self.privelege_level() >= CSR_PRIVILEGE_TABLE[i].1,
+            Err(i) => self.privelege_level() >= CSR_PRIVILEGE_TABLE[i - 1].1,
+        }
+    }
+
+    fn is_write_priv_legal(&mut self, csr_addr: WordType) -> bool {
+        if csr_addr >= 0xC00 {
+            false
+        } else {
+            self.is_read_priv_legal(csr_addr)
+        }
+    }
+
     #[must_use]
-    pub fn read(&self, addr: WordType) -> Option<WordType> {
-        if !self.get_current_privilege().read_check_privilege(addr) {
+    pub fn read(&mut self, addr: WordType) -> Option<WordType> {
+        if !self.is_read_priv_legal(addr) {
             return None;
         }
         self.read_uncheck_privilege(addr)
     }
 
     /// Write with privilege check and validation.
+    ///
     /// XXX: In most cases, you should use [`RV32CPU::write_csr`] in `executor.rs` instead of this function directly,
     /// because writting to CSR may have other side-effects in CPU.
     ///
@@ -262,7 +266,7 @@ impl CsrRegFile {
     /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
     #[must_use]
     pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
-        if !self.get_current_privilege().write_check_privilege(addr) {
+        if !self.is_write_priv_legal(addr) {
             return None;
         }
         self.write_uncheck_privilege(addr, data);
@@ -369,7 +373,7 @@ impl CsrRegFile {
         }
     }
 
-    pub fn get_current_privilege(&self) -> PrivilegeLevel {
+    pub fn privelege_level(&self) -> PrivilegeLevel {
         self.cpl
     }
 

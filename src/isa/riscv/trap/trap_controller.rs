@@ -51,39 +51,25 @@ impl TrapController {
         cpu.csr
             .get_by_type::<Mstatus>()
             .unwrap()
-            .set_mpp(cpu.csr.get_current_privilege() as u8 as WordType);
+            .set_mpp(cpu.csr.privelege_level() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr
             .write_uncheck_privilege(Mcause::get_index(), cause.into());
         cpu.csr.write_uncheck_privilege(Mepc::get_index(), cpu.pc);
 
-        let tval = if let Some(tval) = cpu.pending_tval {
-            cpu.pending_tval = None;
-            tval
-        } else {
-            trap_value
-        };
-
+        let tval = cpu.pending_tval.take().unwrap_or(trap_value);
         cpu.csr.write_uncheck_privilege(csr_index::mtval, tval);
 
-        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
+        let mstatus = cpu.csr.get_by_type_existing::<Mstatus>();
         mstatus.set_mpie(mstatus.get_mie());
         mstatus.set_mie(0);
 
-        let mtvec = cpu.csr.get_by_type::<Mtvec>().unwrap();
-        if mtvec.get_mode() == 0 {
-            // Direct Mode
-            cpu.write_pc(mtvec.get_base() << 2);
-        } else {
-            // Vector Mode
-            debug_assert!(mtvec.get_mode() == 1);
-
-            let offset: WordType = match cause {
-                Trap::Exception(nr) => nr.into(),
-                Trap::Interrupt(nr) => nr.into(),
-            };
-            cpu.write_pc((mtvec.get_base() << 2) + offset * 4);
-        }
+        let mtvec = cpu.csr.get_by_type_existing::<Mtvec>();
+        cpu.write_pc(Self::next_pc_by_tvec(
+            cause,
+            mtvec.get_mode(),
+            mtvec.get_base(),
+        ));
     }
 
     pub fn mret(cpu: &mut RV32CPU) {
@@ -107,7 +93,7 @@ impl TrapController {
     fn send_trap_signal_s_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
         cpu.csr
             .get_by_type_existing::<Sstatus>()
-            .set_spp(cpu.csr.get_current_privilege() as u8 as WordType);
+            .set_spp(cpu.csr.privelege_level() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::S);
 
         cpu.csr
@@ -115,13 +101,7 @@ impl TrapController {
             .unwrap();
         cpu.csr.write_directly(Sepc::get_index(), cpu.pc).unwrap();
 
-        let tval = if let Some(tval) = cpu.pending_tval {
-            cpu.pending_tval = None;
-            tval
-        } else {
-            trap_value
-        };
-
+        let tval = cpu.pending_tval.take().unwrap_or(trap_value);
         cpu.csr.write_directly(Stval::get_index(), tval).unwrap();
 
         let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
@@ -129,19 +109,11 @@ impl TrapController {
         sstatus.set_sie(0);
 
         let stvec = cpu.csr.get_by_type_existing::<Stvec>();
-        if stvec.get_mode() == 0 {
-            // Direct Mode
-            cpu.write_pc(stvec.get_base() << 2);
-        } else {
-            // Vector Mode
-            debug_assert!(stvec.get_mode() == 1);
-
-            let offset: WordType = match cause {
-                Trap::Exception(nr) => nr.into(),
-                Trap::Interrupt(nr) => nr.into(),
-            };
-            cpu.write_pc((stvec.get_base() << 2) + offset * 4);
-        }
+        cpu.write_pc(Self::next_pc_by_tvec(
+            cause,
+            stvec.get_mode(),
+            stvec.get_base(),
+        ));
     }
 
     pub fn sret(cpu: &mut RV32CPU) {
@@ -161,7 +133,7 @@ impl TrapController {
     // ======================================
 
     pub fn try_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) -> bool {
-        if cpu.csr.get_current_privilege() == PrivilegeLevel::M
+        if cpu.csr.privelege_level() == PrivilegeLevel::M
             || Self::is_delegated_m_mode(cpu, cause) == false
         {
             match cause {
@@ -219,6 +191,27 @@ impl TrapController {
         }
 
         unreachable!()
+    }
+
+    /// Get the next pc value according to the trap vector (like `mtvec` or `stvec`).
+    #[must_use]
+    fn next_pc_by_tvec(cause: Trap, mode: WordType, base: WordType) -> WordType {
+        match (mode, cause) {
+            (0, _) | (1, Trap::Exception(_)) => {
+                // Direct Mode
+                base << 2
+            }
+
+            (1, Trap::Interrupt(ir)) => {
+                // Vector Mode
+                let offset: WordType = ir.into();
+                (base << 2) + offset * 4
+            }
+
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }
 
@@ -414,6 +407,20 @@ mod test {
             &[0x34011173], // csrrw sp, mscratch, sp
             |builder| builder.csr(csr_index::mscratch, 0x114514).reg(2, 0x0721),
             |checker| checker.csr(csr_index::mscratch, 0x0721).reg(2, 0x114514),
+        );
+    }
+
+    #[test]
+    fn test_next_pc_by_tvec() {
+        let base = 0x12345 as WordType;
+        assert_eq!(
+            TrapController::next_pc_by_tvec(Trap::Exception(Exception::InstructionFault), 1, base),
+            base << 2
+        );
+
+        assert_eq!(
+            TrapController::next_pc_by_tvec(Trap::Interrupt(Interrupt::MachineTimer), 1, base),
+            (base << 2) + 0x1c
         );
     }
 }

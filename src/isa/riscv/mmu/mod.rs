@@ -28,7 +28,7 @@ enum MemAccessView {
 
 impl MemAccessView {
     fn new(csr: &mut CsrRegFile) -> Self {
-        match csr.get_current_privilege() {
+        match csr.privelege_level() {
             PrivilegeLevel::M => {
                 let mstatus = csr.get_by_type_existing::<Mstatus>();
 
@@ -162,7 +162,7 @@ impl VirtAddrManager {
     where
         T: crate::utils::UnsignedInteger,
     {
-        let privilege = csr.get_current_privilege();
+        let privilege = csr.privelege_level();
         let masks;
         let flags;
 
@@ -218,7 +218,7 @@ impl VirtAddrManager {
     where
         T: crate::utils::UnsignedInteger,
     {
-        let privilege = csr.get_current_privilege();
+        let privilege = csr.privelege_level();
         let masks;
         let flags;
 

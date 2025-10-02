@@ -146,7 +146,12 @@ pub(in crate::isa::riscv) fn get_exec_func(
         },
 
         RiscvInstr::EBREAK => |_info, _cpu| Err(Exception::Breakpoint),
-        RiscvInstr::ECALL => |_info, _cpu| Err(Exception::MachineEnvCall),
+        RiscvInstr::ECALL => |_info, _cpu| match _cpu.get_current_privilege() {
+            PrivilegeLevel::U => Err(Exception::UserEnvCall),
+            PrivilegeLevel::S => Err(Exception::SupervisorEnvCall),
+            PrivilegeLevel::M => Err(Exception::MachineEnvCall),
+            _ => todo!(),
+        },
 
         // We are executing in order, so don't need to do anything.
         RiscvInstr::FENCE => exec_nop,

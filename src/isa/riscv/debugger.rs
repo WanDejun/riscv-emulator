@@ -79,7 +79,7 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
     }
 
     fn get_current_privilege(&self) -> PrivilegeLevel {
-        self.csr.get_current_privilege()
+        self.csr.privelege_level()
     }
 
     fn read_float_reg(&self, idx: u8) -> f64 {
