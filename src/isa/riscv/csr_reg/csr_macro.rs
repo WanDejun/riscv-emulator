@@ -353,6 +353,10 @@ gen_csr_regfile! {
         0, XLEN, mip;
     ];
 
+    Minstret, "minstret", 0xB02, 0x00, [
+        0, XLEN, minstret;
+    ];
+
     Mvendorid, "mvendorid", 0xF11, 0x00, [
         0, XLEN, mvendorid, validate_readonly;
     ];

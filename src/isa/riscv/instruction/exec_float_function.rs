@@ -4,7 +4,10 @@ use crate::{
     config::arch_config::WordType,
     fpu::{Round, soft_float::*},
     isa::riscv::{
-        csr_reg::{csr_index, csr_macro::Fcsr},
+        csr_reg::{
+            csr_index,
+            csr_macro::{Fcsr, Minstret},
+        },
         executor::RV32CPU,
         instruction::RVInstrInfo,
         trap::Exception,
@@ -73,6 +76,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -95,6 +99,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -122,6 +127,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -143,6 +149,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -162,6 +169,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -183,6 +191,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -208,6 +217,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -233,6 +243,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -260,6 +271,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -287,6 +299,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -307,6 +320,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -322,6 +336,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -346,6 +361,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -358,6 +374,7 @@ pub(super) fn exec_mv_x_from_f64(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -373,6 +390,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -388,6 +406,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -403,5 +422,6 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }

@@ -6,7 +6,10 @@ use crate::{
     isa::{
         DebugTarget,
         riscv::{
-            csr_reg::{PrivilegeLevel, csr_macro::Mstatus},
+            csr_reg::{
+                PrivilegeLevel,
+                csr_macro::{Minstret, Mstatus},
+            },
             executor::RV32CPU,
             instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
             trap::{Exception, trap_controller::TrapController},
@@ -101,6 +104,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             } else {
                 std::unreachable!();
             }
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
 
@@ -121,6 +125,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                 std::unreachable!();
             }
 
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
 
@@ -129,6 +134,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                 cpu.reg_file
                     .write(rd, cpu.pc.wrapping_add(sign_extend(imm, 32)));
                 cpu.pc = cpu.pc.wrapping_add(4);
+                cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
                 Ok(())
             } else {
                 std::unreachable!();
@@ -139,6 +145,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             if let RVInstrInfo::U { rd, imm } = inst_info {
                 cpu.reg_file.write(rd, sign_extend(imm, 32));
                 cpu.pc = cpu.pc.wrapping_add(4);
+                cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
                 Ok(())
             } else {
                 std::unreachable!();
@@ -168,6 +175,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
                 return Err(Exception::IllegalInstruction);
             }
             TrapController::mret(cpu);
+
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
         RiscvInstr::WFI => exec_nop,
@@ -236,6 +245,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
 
             TrapController::sret(cpu);
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
 
@@ -251,6 +261,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
             cpu.clear_all_cache();
             cpu.write_pc(cpu.pc.wrapping_add(4));
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
     }

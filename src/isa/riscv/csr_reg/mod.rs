@@ -2,6 +2,7 @@
 mod validator;
 
 pub mod csr_macro;
+pub mod m_utils;
 
 use std::{cmp::Ordering, collections::HashMap};
 

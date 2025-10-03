@@ -4,7 +4,12 @@ pub(super) use super::exec_float_function::*;
 
 use crate::{
     config::arch_config::{SignedWordType, WordType},
-    isa::riscv::{executor::RV32CPU, instruction::RVInstrInfo, trap::Exception},
+    isa::riscv::{
+        csr_reg::{NamedCsrReg, csr_macro::Minstret},
+        executor::RV32CPU,
+        instruction::RVInstrInfo,
+        trap::Exception,
+    },
     utils::{
         TruncateFrom, TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32,
         wrapping_add_as_signed,
@@ -44,6 +49,7 @@ where
 
     cpu.reg_file.write(rd, rst);
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
 
     Ok(())
 }
@@ -72,6 +78,7 @@ where
         std::unreachable!();
     }
 
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -106,6 +113,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -127,6 +135,7 @@ where
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
@@ -149,6 +158,10 @@ pub(super) fn exec_csrw<const UIMM: bool>(
         }
 
         cpu.write_csr(imm, new_val)?;
+
+        if imm != Minstret::get_index() {
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+        }
     }
 
     cpu.pc = cpu.pc.wrapping_add(4);
@@ -174,6 +187,10 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
         if rhs != 0 {
             let data = if SET { value | rhs } else { value & !rhs };
             cpu.write_csr(imm, data)?;
+
+            if imm != Minstret::get_index() {
+                cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+            }
         }
     }
 
@@ -184,6 +201,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
 
 pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception> {
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
 
