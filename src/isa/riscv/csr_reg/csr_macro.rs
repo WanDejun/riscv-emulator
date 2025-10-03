@@ -93,11 +93,17 @@ macro_rules! gen_csr_reg {
     };
 }
 
-macro_rules! gen_csr_name_hashmap {
+macro_rules! gen_CSR_ADDRESS_hashmap {
     ($(($name: literal, $addr: expr)),* $(,)? ) => {
-        pub const CSR_NAME: phf::Map<&'static str, WordType> = phf_map! {
+        pub const CSR_ADDRESS: phf::Map<&'static str, WordType> = phf_map! {
             $(
                 $name => $addr
+            ),*
+        };
+
+        pub const CSR_NAME: phf::Map<WordType, &'static str> = phf_map! {
+            $(
+                $addr => $name
             ),*
         };
     };
@@ -134,7 +140,7 @@ macro_rules! gen_csr_regfile {
             ),*
         ];
 
-        gen_csr_name_hashmap!($(($name_str, $addr)),*);
+        gen_CSR_ADDRESS_hashmap!($(($name_str, $addr)),*);
     };
 
     // These branches are used to choose the validator.
@@ -152,7 +158,7 @@ gen_csr_regfile! {
     // ==================================
     //            U-Mode CSR
     // ==================================
-    Fcsr, "fcsr", 0x003, 0x00, [
+    Fcsr, "fcsr", 0x003u64, 0x00, [
         0, 5, fflags;
         0, 1, nx;
         1, 1, uf;
@@ -167,7 +173,7 @@ gen_csr_regfile! {
     // ==================================
     //            S-Mode CSR
     // ==================================
-    Sstatus, "sstatus", 0x100, 0x00, [
+    Sstatus, "sstatus", 0x100u64, 0x00, [
         1,  1, sie;
         5,  1, spie;
         6,  1, ube;
@@ -183,7 +189,7 @@ gen_csr_regfile! {
         -1, 1, sd;
     ];
 
-    Sie, "sie", 0x104, 0x00, [
+    Sie, "sie", 0x104u64, 0x00, [
         0,  1, usie; // User Software Interrupt Enable
         1,  1, ssie;
         4,  1, utie; // User Time     Interrupt Enable
@@ -193,30 +199,30 @@ gen_csr_regfile! {
         0, XLEN, mip;
     ];
 
-    Stvec, "stvec", 0x105, 0x00, [
+    Stvec, "stvec", 0x105u64, 0x00, [
         0, 2, mode;
         2, XLEN - 2, base;
     ];
 
-    Sscratch, "sscratch", 0x140, 0x00, [
+    Sscratch, "sscratch", 0x140u64, 0x00, [
         0, XLEN, mscratch;
     ];
 
-    Sepc, "sepc", 0x141, 0x00, [
+    Sepc, "sepc", 0x141u64, 0x00, [
         0, XLEN, sepc;
     ];
 
-    Scause, "scause", 0x142, 0x00, [
+    Scause, "scause", 0x142u64, 0x00, [
         0, XLEN - 1, exception_code;
         -1, 1, interrupt;
         0, XLEN, scause;
     ];
 
-    Stval, "stval", 0x143, 0x00, [
+    Stval, "stval", 0x143u64, 0x00, [
         0, XLEN, stval;
     ];
 
-    Sip, "sip", 0x144, 0x00, [
+    Sip, "sip", 0x144u64, 0x00, [
         0,  1, usip; // User Software Interrupt Pending.
         1,  1, ssip;
         // 2,  1, hsip;
@@ -230,7 +236,7 @@ gen_csr_regfile! {
     ];
 
     // TODO: riscv-32 support.
-    Satp, "satp", 0x180, 0x00, [
+    Satp, "satp", 0x180u64, 0x00, [
         0, 44, ppn;
         44, 16, asid;
         60, 4, mode;  // TODO: Validate mode.
@@ -239,7 +245,7 @@ gen_csr_regfile! {
     // ==================================
     //            M-Mode CSR
     // ==================================
-    Mstatus, "mstatus", 0x300, 0x00, [
+    Mstatus, "mstatus", 0x300u64, 0x00, [
         1,  1, sie;
         3,  1, mie;
         5,  1, spie;
@@ -270,12 +276,12 @@ gen_csr_regfile! {
         -1, 1, sd;
     ];
 
-    Misa, "misa", 0x301, 0x00, [
+    Misa, "misa", 0x301u64, 0x00, [
         0, 25, extension, validate_readonly;  // TODO: We don't support changing extension yet.
         -2, 2, mxl, validate_readonly;
     ];
 
-    Medeleg, "medeleg", 0x302, 0x00, [
+    Medeleg, "medeleg", 0x302u64, 0x00, [
         0, 1, instruction_misaligned;
         1, 1, instruction_fault;
         2, 1, illegal_instruction;
@@ -295,14 +301,14 @@ gen_csr_regfile! {
     ];
 
     // see mip.
-    Mideleg, "mideleg", 0x303, 0x00, [
+    Mideleg, "mideleg", 0x303u64, 0x00, [
         1, 1, ssip; // Delegate Supervisor Software Interrupt.
         5, 1, stip; // Delegate Supervisor Time     Interrupt.
         9, 1, seip; // Delegate Supervisor External Interrupt.
         0, XLEN, mideleg;
     ];
 
-    Mie, "mie", 0x304, 0x00, [
+    Mie, "mie", 0x304u64, 0x00, [
         0,  1, usie; // User Software Interrupt Enable
         1,  1, ssie;
         2,  1, msie;
@@ -315,29 +321,29 @@ gen_csr_regfile! {
         0, XLEN, mip;
     ];
 
-    Mtvec, "mtvec", 0x305, 0x00, [
+    Mtvec, "mtvec", 0x305u64, 0x00, [
         0, 2, mode, validate_range::<0, 2, 0, 1>;
         2, XLEN - 2, base;
     ];
 
-    Mscratch, "mscratch", 0x340, 0x00, [
+    Mscratch, "mscratch", 0x340u64, 0x00, [
         0, XLEN, mscratch;
     ];
 
-    Mepc, "mepc", 0x341, 0x00, [
+    Mepc, "mepc", 0x341u64, 0x00, [
         0, XLEN, mepc;
     ];
 
-    Mcause, "mcause", 0x342, 0x00, [
+    Mcause, "mcause", 0x342u64, 0x00, [
         0, XLEN - 1, exception_code;
         -1, 1, interrupt;
     ];
 
-    Mtval, "mtval", 0x343, 0x00, [
+    Mtval, "mtval", 0x343u64, 0x00, [
         0, XLEN, mtval;
     ];
 
-    Mip, "mip", 0x344, 0x00, [
+    Mip, "mip", 0x344u64, 0x00, [
         0,  1, usip; // User Software Interrupt Pending.
         1,  1, ssip;
         // 2,  1, hsip;
@@ -353,23 +359,23 @@ gen_csr_regfile! {
         0, XLEN, mip;
     ];
 
-    Minstret, "minstret", 0xB02, 0x00, [
+    Minstret, "minstret", 0xB02u64, 0x00, [
         0, XLEN, minstret;
     ];
 
-    Mvendorid, "mvendorid", 0xF11, 0x00, [
+    Mvendorid, "mvendorid", 0xF11u64, 0x00, [
         0, XLEN, mvendorid, validate_readonly;
     ];
 
-    Marchid, "marchid", 0xF12, 0x00, [
+    Marchid, "marchid", 0xF12u64, 0x00, [
         0, XLEN, marchid, validate_readonly;
     ];
 
-    Mimpid, "mimpid", 0xF13, 0x00, [
+    Mimpid, "mimpid", 0xF13u64, 0x00, [
         0, XLEN, mimpid, validate_readonly;
     ];
 
-    Mhartid, "mhartid", 0xF14, 0x00, [
+    Mhartid, "mhartid", 0xF14u64, 0x00, [
         0, XLEN, mhartid, validate_readonly;
     ];
 }

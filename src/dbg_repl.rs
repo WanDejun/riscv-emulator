@@ -10,10 +10,13 @@ use riscv_emulator::{
         ISATypes, InstrLen,
         riscv::{
             RiscvTypes,
-            csr_reg::{PrivilegeLevel, csr_macro::CSR_NAME},
+            csr_reg::{
+                PrivilegeLevel,
+                csr_macro::{CSR_ADDRESS, CSR_NAME},
+            },
             debugger::{DebugEvent, Debugger},
             decoder::DecodeInstr,
-            instruction::RVInstrInfo,
+            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
         },
     },
 };
@@ -493,6 +496,10 @@ impl OutputPalette {
         reg.magenta()
     }
 
+    fn csr(&self, csr: &str) -> impl std::fmt::Display {
+        csr.dark_grey()
+    }
+
     fn instr(&self, instr: &str) -> impl std::fmt::Display {
         instr.green()
     }
@@ -556,7 +563,7 @@ fn parse_float_reg(s: &str) -> Result<u8, String> {
 
 fn parse_csr(s: &str) -> Result<WordType, String> {
     let t = s.trim();
-    if let Some(index) = CSR_NAME.get(t) {
+    if let Some(index) = CSR_ADDRESS.get(t) {
         return Ok(*index);
     }
 
@@ -609,15 +616,43 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
         match info {
             // TODO: Cannot tell float register and common register.
             // Implement a disassembler for this.
-            RVInstrInfo::I { rd, rs1, imm } => {
-                format!(
-                    "{} {},{},{} - type I",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.data(imm.to_string().as_str()),
-                )
-            }
+            RVInstrInfo::I { rd, rs1, imm } => match instr {
+                RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
+                    format!(
+                        "{} {},{},{} - type I",
+                        palette.instr(instr.name()),
+                        palette.reg(REG_NAME[rd as usize]),
+                        palette.csr(
+                            CSR_NAME
+                                .get(&imm)
+                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                        ),
+                        palette.reg(REG_NAME[rs1 as usize]),
+                    )
+                }
+                RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
+                    format!(
+                        "{} {},{},{} - type I",
+                        palette.instr(instr.name()),
+                        palette.reg(REG_NAME[rd as usize]),
+                        palette.csr(
+                            CSR_NAME
+                                .get(&imm)
+                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                        ),
+                        palette.data(rs1.to_string().as_str()),
+                    )
+                }
+                _ => {
+                    format!(
+                        "{} {},{},{} - type I",
+                        palette.instr(instr.name()),
+                        palette.reg(REG_NAME[rd as usize]),
+                        palette.reg(REG_NAME[rs1 as usize]),
+                        palette.data(imm.to_string().as_str()),
+                    )
+                }
+            },
 
             RVInstrInfo::R { rs1, rs2, rd } => {
                 format!(
