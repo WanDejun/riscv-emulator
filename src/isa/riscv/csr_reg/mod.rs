@@ -4,7 +4,7 @@ mod validator;
 pub mod csr_macro;
 pub mod m_utils;
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::cmp::Ordering;
 
 use crate::{
     config::arch_config::WordType,
@@ -110,6 +110,7 @@ impl From<u8> for PrivilegeLevel {
 }
 
 const DEFAULT_PRIVILEGE_LEVEL: PrivilegeLevel = PrivilegeLevel::M;
+const CSR_SIZE: WordType = 1 << 12;
 
 pub(crate) trait NamedCsrReg {
     fn new(data: *mut CsrReg, ctx: *mut CsrContext) -> Self;
@@ -172,11 +173,16 @@ impl CsrContext {
 pub(crate) struct CsrReg {
     value: WordType,
     validator: Option<Validator>,
+    vaild: bool,
 }
 
 impl CsrReg {
-    fn new(value: WordType, validator: Option<Validator>) -> CsrReg {
-        CsrReg { value, validator }
+    fn new(value: WordType, validator: Option<Validator>, vaild: bool) -> CsrReg {
+        CsrReg {
+            value,
+            validator,
+            vaild,
+        }
     }
 
     fn value(&self) -> WordType {
@@ -198,8 +204,14 @@ impl CsrReg {
     }
 }
 
+impl Default for CsrReg {
+    fn default() -> Self {
+        Self::new(0, None, false)
+    }
+}
+
 pub(crate) struct CsrRegFile {
-    table: HashMap<WordType, CsrReg>,
+    table: [CsrReg; CSR_SIZE as usize],
     cpl: PrivilegeLevel, // current privileged level
     pub(super) ctx: CsrContext,
 }
@@ -210,9 +222,9 @@ impl CsrRegFile {
     }
 
     pub fn from(csr_table: &[(WordType, WordType, Validator)]) -> Self {
-        let mut table = HashMap::new();
+        let mut table = [CsrReg::default(); CSR_SIZE as usize];
         for (addr, default_value, validator) in csr_table.iter() {
-            table.insert(*addr, CsrReg::new(*default_value, Some(*validator)));
+            table[*addr as usize] = CsrReg::new(*default_value, Some(*validator), true);
         }
 
         Self {
@@ -277,14 +289,19 @@ impl CsrRegFile {
     /// ONLY used in debugger. Read & write without side-effect.
     /// TODO: Consider remove this.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
-        if let Some(reg) = self.table.get_mut(&addr) {
+        if addr >= CSR_SIZE {
+            return None;
+        }
+        let reg = &mut self.table[addr as usize];
+
+        if !reg.vaild {
+            None
+        } else {
             let old = *reg;
             if let Some(new) = new_value {
                 reg.write(new, &self.ctx);
             }
             Some(old.value)
-        } else {
-            None
         }
     }
 
@@ -292,11 +309,16 @@ impl CsrRegFile {
     /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
     #[must_use]
     pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
-        if let Some(reg) = self.table.get_mut(&addr) {
+        if addr >= CSR_SIZE {
+            return None;
+        }
+        let reg = &mut self.table[addr as usize];
+
+        if !reg.vaild {
+            None
+        } else {
             reg.write_directly(data);
             Some(())
-        } else {
-            None
         }
     }
 
@@ -304,23 +326,29 @@ impl CsrRegFile {
     /// If you want to write without any check or validation, use [`Self::write_directly`] instead.
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
         // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
-        if addr == csr_index::fflags {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+        if addr >= CSR_SIZE {
+            return;
+        } else if addr == csr_index::fflags {
+            let fcsr = &mut self.table[csr_index::fcsr as usize];
+            if fcsr.vaild {
                 fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
             } // TODO: Raise error
         } else if addr == csr_index::frm {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+            let fcsr = &mut self.table[csr_index::fcsr as usize];
+            if fcsr.vaild {
                 fcsr.value = (fcsr.value & !0b11100000) | ((data & 0b111) << 5);
             } // TODO: Raise error
         } else if addr == csr_index::fcsr {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
+            let fcsr = &mut self.table[csr_index::fcsr as usize];
+            if fcsr.vaild {
                 // Quoted from RISC-V manual:
                 // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
                 // implementations shall ignore writes to these bits and supply a zero value when read."
                 fcsr.value = data & 0xFF;
             } // TODO: Raise error
         } else {
-            if let Some(val) = self.table.get_mut(&addr) {
+            let val = &mut self.table[addr as usize];
+            if val.vaild {
                 val.write(data, &self.ctx);
             } else {
                 // TODO: Raise error
@@ -330,18 +358,16 @@ impl CsrRegFile {
 
     pub fn read_uncheck_privilege(&self, addr: WordType) -> Option<WordType> {
         // Special-case fflags and frm; they are subfields of fcsr
-        if addr == csr_index::fflags {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|reg| reg.value & 0b11111)
+        if addr >= CSR_SIZE {
+            return None;
+        } else if addr == csr_index::fflags {
+            Some(self.table[csr_index::fcsr as usize].value & 0b11111)
         } else if addr == csr_index::frm {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|reg| (reg.value >> 5) & 0b111)
+            Some((self.table[csr_index::fcsr as usize].value >> 5) & 0b111)
+        } else if self.table[addr as usize].vaild {
+            Some(self.table[addr as usize].value)
         } else {
-            self.table.get(&addr).copied().map(|reg| reg.value)
+            None
         }
     }
 
@@ -351,7 +377,7 @@ impl CsrRegFile {
     where
         T: NamedCsrReg,
     {
-        let reg = self.table.get_mut(&T::get_index())?;
+        let reg = &mut self.table[T::get_index() as usize];
         Some(NamedCsrReg::new(
             reg as *mut CsrReg,
             &mut self.ctx as *mut CsrContext,
