@@ -3,7 +3,10 @@ use std::{cell::UnsafeCell, rc::Rc};
 use crate::{
     board::virt::{IRQLine, IRQSource},
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError},
+    device::{
+        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        config::{CLINT_BASE, CLINT_SIZE},
+    },
     utils::{concat_to_u64, negative_of},
     vclock::{Timer, VirtualClockRef},
 };
@@ -157,6 +160,15 @@ impl Mem for Clint {
 impl DeviceTrait for Clint {
     fn sync(&mut self) {
         // Nothing to do
+    }
+}
+
+impl MemMappedDeviceTrait for Clint {
+    fn base() -> WordType {
+        CLINT_BASE
+    }
+    fn size() -> WordType {
+        CLINT_SIZE
     }
 }
 

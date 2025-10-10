@@ -6,6 +6,8 @@ use crate::{
 pub(crate) mod aclint;
 pub(crate) mod config;
 pub mod fast_uart;
+mod id_allocator;
+pub(crate) use id_allocator::*;
 pub(crate) mod mmio;
 pub(crate) mod power_manager;
 pub(crate) mod virtio;
@@ -33,6 +35,11 @@ pub trait Mem {
 // Check align requirement before device.read/write. Most of align requirement was checked in mmio.
 pub trait DeviceTrait: Mem {
     fn sync(&mut self);
+}
+
+pub trait MemMappedDeviceTrait: DeviceTrait {
+    fn base() -> WordType;
+    fn size() -> WordType;
 }
 
 // / Peripheral initialization

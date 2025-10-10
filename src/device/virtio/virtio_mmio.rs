@@ -6,7 +6,8 @@ use num_enum::TryFromPrimitive;
 
 use crate::{
     device::{
-        DeviceTrait, Mem, MemError,
+        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        config::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE},
         virtio::{config::*, virtio_device::VirtIODeviceTrait},
     },
     utils::{BIT_ONES_ARRAY, check_align},
@@ -353,8 +354,18 @@ impl Mem for VirtIOMMIO {
         Ok(())
     }
 }
+
 impl DeviceTrait for VirtIOMMIO {
     fn sync(&mut self) {}
+}
+
+impl MemMappedDeviceTrait for VirtIOMMIO {
+    fn base() -> crate::config::arch_config::WordType {
+        VIRTIO_MMIO_BASE
+    }
+    fn size() -> crate::config::arch_config::WordType {
+        VIRTIO_MMIO_SIZE
+    }
 }
 
 #[cfg(test)]

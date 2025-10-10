@@ -1,4 +1,7 @@
-use crate::device::{DeviceTrait, Mem, MemError};
+use crate::device::{
+    DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+    config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
+};
 use std::sync::atomic::AtomicU16;
 
 pub(crate) const POWER_OFF_CODE: u16 = 0x5555;
@@ -42,6 +45,16 @@ impl Mem for PowerManager {
 
 impl DeviceTrait for PowerManager {
     fn sync(&mut self) {}
+}
+
+impl MemMappedDeviceTrait for PowerManager {
+    fn base() -> crate::config::arch_config::WordType {
+        POWER_MANAGER_BASE
+    }
+
+    fn size() -> crate::config::arch_config::WordType {
+        POWER_MANAGER_SIZE
+    }
 }
 
 impl PowerManager {
