@@ -189,7 +189,7 @@ impl DeviceTrait for MemoryMapIO {
 #[cfg(test)]
 mod test {
     use crate::device::{
-        config::{POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR},
+        config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
         fast_uart::{FastUart16550, virtual_io::SimulationIO},
         peripheral_init,
         power_manager::PowerManager,
@@ -204,12 +204,12 @@ mod test {
         let power_manager = Device::PowerManager(PowerManager::new());
         let table = vec![
             MemoryMapItem::new(
-                POWER_MANAGER_ADDR,
+                POWER_MANAGER_BASE,
                 POWER_MANAGER_SIZE,
                 Rc::new(RefCell::new(power_manager)),
             ),
             MemoryMapItem::new(
-                UART1_ADDR,
+                UART_BASE,
                 UART_SIZE,
                 Rc::new(RefCell::new(Device::FastUart16550(uart1))),
             ),
@@ -238,12 +238,12 @@ mod test {
         let power_manager = Device::PowerManager(PowerManager::new());
         let table = vec![
             MemoryMapItem::new(
-                POWER_MANAGER_ADDR,
+                POWER_MANAGER_BASE,
                 POWER_MANAGER_SIZE,
                 Rc::new(RefCell::new(power_manager)),
             ),
             MemoryMapItem::new(
-                UART1_ADDR,
+                UART_BASE,
                 UART_SIZE,
                 Rc::new(RefCell::new(Device::FastUart16550(uart1))),
             ),
@@ -252,8 +252,8 @@ mod test {
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
         let _handles = peripheral_init();
 
-        mmio.write(UART1_ADDR + 0x00, 'a' as u8).unwrap();
-        assert_ne!((mmio.read::<u8>(UART1_ADDR + 5).unwrap() & 0x20), 0);
+        mmio.write(UART_BASE + 0x00, 'a' as u8).unwrap();
+        assert_ne!((mmio.read::<u8>(UART_BASE + 5).unwrap() & 0x20), 0);
         let data = io.receive_output_data();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0], 'a' as u8);

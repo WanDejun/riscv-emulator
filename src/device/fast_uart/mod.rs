@@ -23,6 +23,7 @@ use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
+use lazy_static::lazy_static;
 use log::error;
 
 #[cfg(test)]
@@ -32,7 +33,8 @@ use crate::{
     cli_coordinator::CliCoordinator,
     config::arch_config::WordType,
     device::{
-        DeviceTrait, Mem, MemError, config::UART_DEFAULT_DIV,
+        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
         fast_uart::virtual_io::SerialDestination,
     },
     handle_trait::HandleTrait,
@@ -336,6 +338,15 @@ impl DeviceTrait for FastUart16550 {
                 break;
             }
         }
+    }
+}
+
+impl MemMappedDeviceTrait for FastUart16550 {
+    fn base() -> WordType {
+        UART_BASE
+    }
+    fn size() -> WordType {
+        UART_SIZE
     }
 }
 

@@ -1,19 +1,37 @@
 ARCH := riscv64
-SRC := ./src
-INC := ./include
-LIB := ./lib
-OBJ := ./obj
-BIN := ./bin
-CC := $(ARCH)-elf-gcc
-C_FLAG := -ffreestanding -nostdlib -march=rv64imzicsr -mabi=lp64 -mcmodel=medany -I$(INC) -g
-LD := $(ARCH)-elf-ld
-LD_FLAG := -static -g
-QEMU := qemu-system-$(ARCH)
+SRC  := ./src
+INC  := ./include
+LIB  := ./lib
+OBJ  := ./obj
+BIN  := ./bin
+DUMP := ./dump
 
-TARGET ?= main
+# toolchain
+RV_CC ?= $(ARCH)-unknown-elf-gcc
+RV_CFLAG := -ffreestanding -nostdlib -march=rv64imzicsr -mabi=lp64 -mcmodel=medany -I$(INC) -g
+RV_LD ?= $(ARCH)-unknown-elf-ld
+RV_LDFLAG := -static -g
+RV_DUMP ?= $(ARCH)-unknown-elf-objdump
+RV_DUMPFLAG := -M no-aliases -S
+RV_OBJCOPY ?= $(ARCH)-unknown-elf-objcopy
 
-TARGETS := main fib prime matrix_mul io_bench trap_test virtio_blk_test
+# qemu
+QEMU ?= qemu-system-$(ARCH)
+
+# prompt
+VERBOSE ?= 0
+# ifeq ($(VERBOSE), 0)
+# 	Q := @
+# else
+RV_CC_PROMPT := RV_CC
+RV_LD_PROMPT := RV_LD
+RV_DUMP_PROMPT := RV_DUMP
+RV_OBJCOPY_PROMPT := RV_OBJCOPY
+
+TARGETS += main fib prime matrix_mul io_bench trap_test virtio_blk_test
 TARGET_ELFS := $(patsubst %,$(BIN)/%.elf,$(TARGETS))
+TARGET_DUMPS := $(patsubst %,$(DUMP)/%.dump,$(TARGETS))
+TARGET ?= main
 
 LIBS := io log boot trap trap_handler power
 LIBS_OBJ := $(patsubst %,$(OBJ)/%.o,$(LIBS))
@@ -21,37 +39,49 @@ LIBS_OBJ := $(patsubst %,$(OBJ)/%.o,$(LIBS))
 # proctect intermediate file.
 .PRECIOUS: $(OBJ)/%.o
 
-.PHONY: build_lib build run clean build_all
-DEFAULT_TARGET: build_all
+.PHONY: build_lib build run clean debug_makefile
+DEFAULT_TARGET: build dump_all
+echo_cmd = printf "%-10s %s\n" "$(1)" "$(strip $(2))"
 
-build_all: $(TARGET_ELFS)
+build: $(TARGET_ELFS)
 
 # trap.o
 $(OBJ)/trap.o: $(LIB)/trap.S
 	@ mkdir -p $(OBJ) $(BIN)
-	$(CC) $(C_FLAG) -c $< -o $@
+	@ $(call echo_cmd, $(RV_CC_PROMPT), $@)
+	@ $(RV_CC) $(RV_CFLAG) -c $< -o $@
 
 # boot.o
 $(OBJ)/boot.o: $(SRC)/boot.S
 	@ mkdir -p $(OBJ) $(BIN)
-	$(CC) $(C_FLAG) -c $< -o $@
+	@ $(call echo_cmd, $(RV_CC_PROMPT), $@)
+	@ $(RV_CC) $(RV_CFLAG) -c $< -o $@
 
 # default lib file.
 $(OBJ)/%.o: $(LIB)/%.c
 	@ mkdir $(OBJ) $(BIN) -p
-	$(CC) $(C_FLAG) -c $^ -o $@
-
-
-build: $(LIBS_OBJ) $(BIN)/$(TARGET).elf 
+	@ $(call echo_cmd, $(RV_CC_PROMPT), $@)
+	@ $(RV_CC) $(RV_CFLAG) -c $^ -o $@
 
 $(BIN)/%.elf: $(OBJ)/%.o $(LIBS_OBJ) linker.ld
 	@ mkdir -p $(OBJ) $(BIN)
-	$(LD) $(LD_FLAG) -T linker.ld -o $@ $(filter %.o,$^)
+	@ $(call echo_cmd, $(RV_LD_PROMPT), $@)
+	@ $(RV_LD) $(RV_LDFLAG) -T linker.ld -o $@ $(filter %.o,$^)
 	
 # default .c file
 $(OBJ)/%.o: $(SRC)/%.c
 	@ mkdir -p $(OBJ) $(BIN)
-	$(CC) $(C_FLAG) -c $< -o $@
+	@ $(call echo_cmd, $(RV_CC_PROMPT), $@)
+	@ $(RV_CC) $(RV_CFLAG) -c $< -o $@
+
+
+# dump target elf
+dump_all: $(TARGET_DUMPS)
+
+$(DUMP)/%.dump: $(BIN)/%.elf
+	@ mkdir -p $(DUMP)
+	@ $(call echo_cmd, $(RV_DUMP_PROMPT), $@)
+	@ $(RV_DUMP) -d $(RV_DUMPFLAG) $< > $@
 
 
 run: build

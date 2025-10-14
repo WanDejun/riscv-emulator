@@ -10,11 +10,9 @@ use crate::{
     board::{Board, BoardStatus},
     config::arch_config::WordType,
     device::{
+        self,
         aclint::Clint,
-        config::{
-            Device, POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, UART_SIZE, UART1_ADDR,
-            VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE,
-        },
+        config::{CLINT_BASE, CLINT_SIZE, Device, POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
         fast_uart::{
             FastUart16550,
             virtual_io::{SerialDestTrait, SerialDestination, SimulationIO, TerminalIO},
@@ -91,8 +89,9 @@ impl VirtBoard {
         let ram_ref = Rc::new(UnsafeCell::new(ram));
 
         // Construct devices
+        let mut uart_allocator = device::IdAllocator::new::<FastUart16550>(0, String::from("uart"));
+        let uart1_info = uart_allocator.get();
         let uart1 = Rc::new(RefCell::new(Device::FastUart16550(FastUart16550::new())));
-
         if let Device::FastUart16550(uart_inner) = &mut *uart1.borrow_mut() {
             Self::init_uart_dest(&uart_inner);
         }
@@ -107,13 +106,15 @@ impl VirtBoard {
         ))));
 
         let mut mmio_items = vec![
-            MemoryMapItem::new(POWER_MANAGER_ADDR, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(UART1_ADDR, UART_SIZE, uart1),
-            MemoryMapItem::new(0x200_0000, 0x10000, clint.clone()),
+            MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
+            MemoryMapItem::new(uart1_info.base, uart1_info.size, uart1),
+            MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
         ];
 
         // Add VirtIO device.
-        for (i, virtio_device_cfg) in EMULATOR_CONFIG.lock().unwrap().devices.iter().enumerate() {
+        let mut virtio_allocator =
+            device::IdAllocator::new::<VirtIOMMIO>(0, String::from("virtio"));
+        for virtio_device_cfg in EMULATOR_CONFIG.lock().unwrap().devices.iter() {
             let virtio_device = match virtio_device_cfg.dev_type {
                 VirtIODeviceID::Block => {
                     let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
@@ -129,9 +130,10 @@ impl VirtBoard {
                 }
             };
             let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
+            let virtio_info = virtio_allocator.get();
             mmio_items.push(MemoryMapItem::new(
-                VIRTIO_MMIO_BASE + i as WordType * VIRTIO_MMIO_SIZE,
-                VIRTIO_MMIO_SIZE,
+                virtio_info.base,
+                virtio_info.size,
                 Rc::new(RefCell::new(Device::VirtIOMMIO(virtio_mmio_device))),
             ));
         }

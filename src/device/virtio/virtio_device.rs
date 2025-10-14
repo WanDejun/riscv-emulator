@@ -32,13 +32,13 @@ pub(crate) trait VirtIODeviceTrait {
     fn write_config(&mut self, idx: u64, data: u32);
 }
 
-pub struct DeviceIDAllocator(AtomicU16);
+pub(super) struct DeviceIDAllocator(AtomicU16);
 
 impl DeviceIDAllocator {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self(AtomicU16::new(0))
     }
-    pub fn alloc(&mut self) -> u16 {
+    pub(super) fn alloc(&mut self) -> u16 {
         self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel)
     }
 }
