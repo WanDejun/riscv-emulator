@@ -59,10 +59,10 @@ impl RV32CPU {
         csr.get_by_type_existing::<Misa>().set_mxl_directly(mxl);
         csr.get_by_type_existing::<Mstatus>().set_sxl_directly(mxl);
         csr.get_by_type_existing::<Mstatus>().set_uxl_directly(mxl);
-        csr.get_by_type_existing::<Sstatus>().set_uxl_directly(mxl);
 
         debug_assert!(csr.get_by_type_existing::<Mstatus>().get_uxl() == mxl);
         debug_assert!(csr.get_by_type_existing::<Mstatus>().get_sxl() == mxl);
+        debug_assert!(csr.get_by_type_existing::<Sstatus>().get_uxl() == mxl);
 
         csr.set_current_privileged(PrivilegeLevel::M);
 
@@ -111,6 +111,13 @@ impl RV32CPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
+        let rst = self.step_impl();
+        let mcycle = self.csr.get_by_type_existing::<Mcycle>();
+        mcycle.set_mcycle_directly(mcycle.data().wrapping_add(1));
+        rst
+    }
+
+    fn step_impl(&mut self) -> Result<(), Exception> {
         if let Some(interrupt) = TrapController::check_interrupt(self) {
             if TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0) {
                 return Ok(());

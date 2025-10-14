@@ -11,6 +11,9 @@ macro_rules! gen_csr_reg {
         $name:ident, $addr:expr,
         [ $( $bit:expr, $len:expr, $fname:ident ),*  $(,)? ]
     ) => {
+        /// A struct representing a CSR register.
+        ///
+        /// XXX: All shadow CSR's validator won't work with this API. Use `CsrReg::write` directly instead.
         pub struct $name {
             reg: *mut CsrReg,
             ctx: *mut CsrContext,
@@ -93,7 +96,7 @@ macro_rules! gen_csr_reg {
     };
 }
 
-macro_rules! gen_CSR_ADDRESS_hashmap {
+macro_rules! gen_csr_address_hashmap {
     ($(($name: literal, $addr: expr)),* $(,)? ) => {
         pub const CSR_ADDRESS: phf::Map<&'static str, WordType> = phf_map! {
             $(
@@ -117,22 +120,25 @@ macro_rules! gen_CSR_ADDRESS_hashmap {
 macro_rules! gen_csr_regfile {
     (
         $( $name:ident, $name_str: literal, $addr:expr, $default:expr,
-            [ $( $bit:expr, $len:expr, $fname:ident $(, $validator:expr)?);* $(;)? ] );* $(;)?
+            $(@shadow $shadow_of:ident, )?
+            [ $( $bit:expr, $len:expr, $fname:ident $(, $validator:expr)?);* $(;)? ]
+        );* $(;)?
     ) => {
+        // Generate each CSR struct.
         $(
             gen_csr_reg!($name, $addr, [ $( $bit, $len, $fname ),* ]);
         )*
 
-        // Generate validators for each csr.
-            $(
-                fn ${concat(_validate_, $name_str)}(value: WordType, ctx: &CsrContext) -> CsrWriteOp {
-                    combine_validators!{ value, ctx
-                        $(,
-                            gen_csr_regfile!(@choose $name, $fname $(, $validator)?)
-                        )*
-                    }
+        // Generate validators for each CSR.
+        $(
+            fn ${concat(_validate_, $name_str)}(value: WordType, ctx: &CsrContext) -> CsrWriteOp {
+                combine_validators!{ value, ctx
+                    $(,
+                        gen_csr_regfile!(@choose_validator $name, $fname $(, $validator)?)
+                    )*
                 }
-            )*
+            }
+        )*
 
         pub(crate) const CSR_REG_TABLE: &[(WordType, WordType, Validator)] = &[
             $(
@@ -140,14 +146,28 @@ macro_rules! gen_csr_regfile {
             ),*
         ];
 
-        gen_CSR_ADDRESS_hashmap!($(($name_str, $addr)),*);
+        gen_csr_address_hashmap!($(($name_str, $addr)),*);
+
+        /// Resolve the shadow CSR address to its base CSR address.
+        pub(super) fn resolve_shadow_addr(addr: WordType) -> Option<WordType> {
+            match addr {
+                $(
+                    $addr => gen_csr_regfile!(@resolve_shadow $addr $(, $shadow_of)?),
+                )*
+                _ => None,
+            }
+        }
     };
 
-    // These branches are used to choose the validator.
-    (@choose $name:ident, $fname:ident, $v:expr) => { $v };
+    // These branches are used to find the base CSR address by the shadow CSR address.
+    (@resolve_shadow $addr:expr, $shadow_of:ident) => { Some($shadow_of::get_index()) };
+    (@resolve_shadow $addr:expr) => { None };
 
-    // By default, use validate_write_any.
-    (@choose $name:ident, $fname:ident) => {
+    // These branches are used to choose validator.
+    (@choose_validator $name:ident, $fname:ident, $v:expr) => { $v };
+
+    // By default, use `validate_write_any`.
+    (@choose_validator $name:ident, $fname:ident) => {
         validate_write_any::<{$name::${concat($fname, _start)}}, {$name::${concat($fname, _end)}}>
     };
 
@@ -170,10 +190,14 @@ gen_csr_regfile! {
         5, 3, rm;
     ];
 
+    Cycle, "cycle", 0xC01u64, 0x00, @shadow Mcycle, [
+        0, XLEN, cycle, validate_readonly;
+    ];
+
     // ==================================
     //            S-Mode CSR
     // ==================================
-    Sstatus, "sstatus", 0x100u64, 0x00, [
+    Sstatus, "sstatus", 0x100u64, 0x00, @shadow Mstatus, [
         1,  1, sie;
         5,  1, spie;
         6,  1, ube;
@@ -326,6 +350,10 @@ gen_csr_regfile! {
         2, XLEN - 2, base;
     ];
 
+    Mcountinhibit, "mcountinhibit", 0x320u64, 0x00, [
+        0, XLEN, mcountinhibit, validate_readonly;
+    ];
+
     Mscratch, "mscratch", 0x340u64, 0x00, [
         0, XLEN, mscratch;
     ];
@@ -357,6 +385,10 @@ gen_csr_regfile! {
         // 10, 1, heip;
         11, 1, meip;
         0, XLEN, mip;
+    ];
+
+    Mcycle, "mcycle", 0xB00u64, 0x00, [
+        0, XLEN, mcycle;
     ];
 
     Minstret, "minstret", 0xB02u64, 0x00, [

@@ -9,7 +9,7 @@ use std::{cmp::Ordering, collections::HashMap};
 use crate::{
     config::arch_config::WordType,
     isa::riscv::csr_reg::{
-        csr_macro::{CSR_REG_TABLE, Mstatus, Satp},
+        csr_macro::{CSR_REG_TABLE, Mstatus, Satp, resolve_shadow_addr},
         validator::Validator,
     },
 };
@@ -143,13 +143,21 @@ impl CsrWriteOp {
         (old_value & !self.mask) | (value & self.mask)
     }
 
-    /// Merge two write operations into one.
+    /// Merge two write operations into one by `OR`.
     ///
     /// XXX: You'd better not to pass overlapped masks, but there's no check for this.
     #[inline]
     fn merge(&self, rhs: &CsrWriteOp) -> CsrWriteOp {
         CsrWriteOp {
             mask: self.mask | rhs.mask,
+        }
+    }
+
+    /// Merge two write operations into one by `AND`.
+    #[inline]
+    fn mask(&self, rhs: &CsrWriteOp) -> CsrWriteOp {
+        CsrWriteOp {
+            mask: self.mask & rhs.mask,
         }
     }
 }
@@ -183,9 +191,29 @@ impl CsrReg {
         self.value
     }
 
+    fn validate(&self, new_value: WordType, context: &CsrContext) -> CsrWriteOp {
+        if let Some(validator) = self.validator {
+            return validator(new_value, context);
+        }
+        return CsrWriteOp::new_write_all();
+    }
+
     fn write(&mut self, new_value: WordType, context: &CsrContext) {
         if let Some(validator) = self.validator {
             let op = validator(new_value, context);
+            op.apply(&mut self.value, new_value);
+        } else {
+            self.value = new_value;
+        }
+    }
+
+    /// Apply the write operation, with the given CsrWriteOp.
+    ///
+    /// NOTE: This is currently used when writing to a shadow CSR,
+    /// which needs to validate and apply the write operation to its base CSR.
+    fn write_with_mask(&mut self, new_value: WordType, context: &CsrContext, mask: CsrWriteOp) {
+        if let Some(validator) = self.validator {
+            let op = validator(new_value, context).mask(&mask);
             op.apply(&mut self.value, new_value);
         } else {
             self.value = new_value;
@@ -277,15 +305,13 @@ impl CsrRegFile {
     /// ONLY used in debugger. Read & write without side-effect.
     /// TODO: Consider remove this.
     pub fn debug(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
-        if let Some(reg) = self.table.get_mut(&addr) {
-            let old = *reg;
-            if let Some(new) = new_value {
-                reg.write(new, &self.ctx);
-            }
-            Some(old.value)
-        } else {
-            None
+        let value = self.read_uncheck_privilege(addr);
+
+        if let Some(value) = new_value {
+            self.write_uncheck_privilege(addr, value);
         }
+
+        value
     }
 
     /// Write directly without any check or validation and have no other side effects.
@@ -320,8 +346,22 @@ impl CsrRegFile {
                 fcsr.value = data & 0xFF;
             } // TODO: Raise error
         } else {
-            if let Some(val) = self.table.get_mut(&addr) {
-                val.write(data, &self.ctx);
+            if let Some(csr) = self.table.get_mut(&addr) {
+                if let Some(base_addr) = resolve_shadow_addr(addr) {
+                    // This is a shadow CSR, write to its base CSR instead.
+
+                    // Validate with the shadow CSR's validator.
+                    let op = csr.validate(data, &self.ctx);
+
+                    if let Some(base_csr) = self.table.get_mut(&base_addr) {
+                        // Apply the write operation to the base CSR, with the base CSR's validator.
+                        base_csr.write_with_mask(data, &self.ctx, op);
+                    } else {
+                        // TODO: Raise error
+                    }
+                } else {
+                    csr.write(data, &self.ctx);
+                }
             } else {
                 // TODO: Raise error
             }
@@ -341,7 +381,12 @@ impl CsrRegFile {
                 .copied()
                 .map(|reg| (reg.value >> 5) & 0b111)
         } else {
-            self.table.get(&addr).copied().map(|reg| reg.value)
+            if let Some(base_addr) = resolve_shadow_addr(addr) {
+                // This is a shadow CSR.
+                self.table.get(&base_addr).copied().map(|reg| reg.value)
+            } else {
+                self.table.get(&addr).copied().map(|reg| reg.value)
+            }
         }
     }
 
@@ -351,6 +396,12 @@ impl CsrRegFile {
     where
         T: NamedCsrReg,
     {
+        if let Some(base_addr) = resolve_shadow_addr(T::get_index()) {
+            // This is a shadow CSR, get its base CSR instead.
+            let reg = self.table.get_mut(&base_addr)?;
+            return Some(T::new(reg as *mut CsrReg, &mut self.ctx as *mut CsrContext));
+        }
+
         let reg = self.table.get_mut(&T::get_index())?;
         Some(NamedCsrReg::new(
             reg as *mut CsrReg,
@@ -386,7 +437,9 @@ impl CsrRegFile {
 
 #[cfg(test)]
 mod test {
-    use crate::isa::riscv::csr_reg::{CsrRegFile, PrivilegeLevel, csr_index, csr_macro::*};
+    use crate::isa::riscv::csr_reg::{
+        CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_index, csr_macro::*,
+    };
 
     #[test]
     fn test_rw_by_addr() {
@@ -437,6 +490,52 @@ mod test {
         assert_eq!(
             reg.read_uncheck_privilege(csr_index::mcause).unwrap(),
             0xFEFE
+        );
+    }
+
+    #[test]
+    fn test_mcycle() {
+        let mut reg = CsrRegFile::new();
+
+        // `mcycle` is a normal writable CSR.
+
+        // Test NamedCsr API.
+        let mcycle = reg.get_by_type_existing::<Mcycle>();
+        mcycle.set_mcycle(1);
+        assert_eq!(mcycle.get_mcycle(), 1);
+
+        // Test CsrRegfile API.
+        assert_eq!(reg.read_uncheck_privilege(Mcycle::get_index()).unwrap(), 1);
+        reg.write_uncheck_privilege(Mcycle::get_index(), 2);
+        assert_eq!(reg.read_uncheck_privilege(Mcycle::get_index()).unwrap(), 2);
+
+        // `cycle` is a shadow CSR of `mcycle`.
+
+        // It's known that with NamedCsr API, shadow CSR's validator cannot work properly,
+        // so only test CsrRegfile API.
+        reg.write_uncheck_privilege(Cycle::get_index(), 3);
+        assert_eq!(reg.read_uncheck_privilege(Cycle::get_index()).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_xstatus() {
+        let mut reg = CsrRegFile::new();
+
+        let mstatus = reg.get_by_type_existing::<Mstatus>();
+        let sstatus = reg.get_by_type_existing::<Sstatus>();
+
+        mstatus.set_spp(1);
+        assert_eq!(mstatus.get_spp(), 1);
+        assert_eq!(sstatus.get_spp(), 1);
+
+        reg.write_uncheck_privilege(Sstatus::get_index(), 0b10);
+        assert_eq!(
+            reg.read_uncheck_privilege(Sstatus::get_index()).unwrap(),
+            0b10
+        );
+        assert_eq!(
+            reg.read_uncheck_privilege(Mstatus::get_index()).unwrap(),
+            0b10
         );
     }
 }
