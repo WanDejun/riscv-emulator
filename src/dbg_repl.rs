@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use riscv_emulator::{
     board::Board,
     cli_coordinator::CliCoordinator,
-    config::arch_config::{FLOAT_REG_NAME, REG_NAME, WordType},
+    config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, WordType},
     isa::{
         ISATypes, InstrLen,
         riscv::{
@@ -85,6 +85,12 @@ enum PrintCmd {
     Pc,
     Reg {
         reg: String,
+    },
+    Regs {
+        #[arg(long, default_value_t = 0)]
+        start: u32,
+        #[arg(short, long, default_value_t = REGFILE_CNT as u32)]
+        len: u32,
     },
     Mem {
         addr: String,
@@ -227,6 +233,9 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 // TODO: unify handling of reg, csr, and freg
                 self.print_reg(parse_common_reg(&reg)?)?;
             }
+            Cli::Print(PrintCmd::Regs { start, len }) => {
+                self.print_regs(start, len)?;
+            }
             Cli::Print(PrintCmd::Mem { addr, len }) => {
                 self.print_mem(parse_u64(&addr)?, len);
             }
@@ -246,6 +255,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Display(PrintCmd::Reg { reg }) => {
                 self.watch_list
                     .push(PrintObject::Reg(parse_common_reg(&reg)?));
+            }
+            Cli::Display(PrintCmd::Regs { start: _, len: _ }) => {
+                // TODO or maybe do not need display all regfile.
+                todo!();
             }
             Cli::Display(PrintCmd::Mem { addr, len }) => {
                 self.watch_list
@@ -269,6 +282,9 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 let reg_idx = parse_common_reg(&reg)?;
                 self.watch_list
                     .retain(|&item| item != PrintObject::Reg(reg_idx));
+            }
+            Cli::Undisplay(PrintCmd::Regs { start: _, len: _ }) => {
+                todo!();
             }
             Cli::Undisplay(PrintCmd::Mem { addr, len }) => {
                 let addr = parse_word(&addr)?;
@@ -395,6 +411,18 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         Ok(())
     }
 
+    fn print_regs(&self, start: u32, len: u32) -> Result<(), String> {
+        let reg_base_name = String::from("x");
+        for i in start..start + len {
+            if i >= REGFILE_CNT as u32 {
+                return Err(String::from("register index out of range."));
+            }
+            print!("{:<4} ", reg_base_name.clone() + &i.to_string() + ".",);
+            self.print_reg(i as u8)?;
+        }
+        Ok(())
+    }
+
     fn print_float_reg(&self, idx: u8) -> Result<(), String> {
         let val = self.dbg.read_float_reg(idx);
         println!("{} = {:.4}", palette.reg(FLOAT_REG_NAME[idx as usize]), val);
@@ -493,7 +521,7 @@ impl OutputPalette {
     }
 
     fn reg(&self, reg: &str) -> impl std::fmt::Display {
-        reg.magenta()
+        format!("{:<5}", reg).magenta()
     }
 
     fn csr(&self, csr: &str) -> impl std::fmt::Display {
