@@ -1,3 +1,5 @@
+use std::u8;
+
 use clap::{Parser, Subcommand};
 
 use crossterm::style::Stylize;
@@ -88,9 +90,9 @@ enum PrintCmd {
     },
     Regs {
         #[arg(long, default_value_t = 0)]
-        start: u32,
-        #[arg(short, long, default_value_t = REGFILE_CNT as u32)]
-        len: u32,
+        start: u8,
+        #[arg(short, long, default_value_t = REGFILE_CNT as u8)]
+        len: u8,
     },
     Mem {
         addr: String,
@@ -118,6 +120,7 @@ const PROMPT: &str = "(rvdb) ";
 enum PrintObject {
     Pc,
     Reg(u8),
+    Regs(u8, u8),
     Mem(WordType, u32),
     CSR(WordType),
     FReg(u8),
@@ -211,6 +214,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             match item {
                 PrintObject::Pc => self.print_pc(),
                 PrintObject::Reg(idx) => self.print_reg(idx)?,
+                PrintObject::Regs(start, len) => self.print_regs(start, len)?,
                 PrintObject::Mem(addr, len) => self.print_mem(addr, len),
                 PrintObject::CSR(addr) => self.print_csr(addr),
                 PrintObject::FReg(idx) => self.print_float_reg(idx)?,
@@ -256,9 +260,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.watch_list
                     .push(PrintObject::Reg(parse_common_reg(&reg)?));
             }
-            Cli::Display(PrintCmd::Regs { start: _, len: _ }) => {
-                // TODO or maybe do not need display all regfile.
-                todo!();
+            Cli::Display(PrintCmd::Regs { start, len }) => {
+                self.watch_list.push(PrintObject::Regs(start, len));
             }
             Cli::Display(PrintCmd::Mem { addr, len }) => {
                 self.watch_list
@@ -283,8 +286,9 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.watch_list
                     .retain(|&item| item != PrintObject::Reg(reg_idx));
             }
-            Cli::Undisplay(PrintCmd::Regs { start: _, len: _ }) => {
-                todo!();
+            Cli::Undisplay(PrintCmd::Regs { start, len }) => {
+                self.watch_list
+                    .retain(|&item| item != PrintObject::Regs(start, len));
             }
             Cli::Undisplay(PrintCmd::Mem { addr, len }) => {
                 let addr = parse_word(&addr)?;
@@ -405,16 +409,16 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         let val = self.dbg.read_reg(idx);
         println!(
             "{} = {}",
-            palette.reg(REG_NAME[idx as usize]),
+            palette.reg(REG_NAME[idx as usize], 5),
             format_data(val)
         );
         Ok(())
     }
 
-    fn print_regs(&self, start: u32, len: u32) -> Result<(), String> {
+    fn print_regs(&self, start: u8, len: u8) -> Result<(), String> {
         let reg_base_name = String::from("x");
         for i in start..start + len {
-            if i >= REGFILE_CNT as u32 {
+            if i >= REGFILE_CNT as u8 {
                 return Err(String::from("register index out of range."));
             }
             print!("{:<4} ", reg_base_name.clone() + &i.to_string() + ".",);
@@ -425,7 +429,11 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
     fn print_float_reg(&self, idx: u8) -> Result<(), String> {
         let val = self.dbg.read_float_reg(idx);
-        println!("{} = {:.4}", palette.reg(FLOAT_REG_NAME[idx as usize]), val);
+        println!(
+            "{} = {:.4}",
+            palette.reg(FLOAT_REG_NAME[idx as usize], 0),
+            val
+        );
         Ok(())
     }
 
@@ -520,8 +528,8 @@ impl OutputPalette {
         addr.blue()
     }
 
-    fn reg(&self, reg: &str) -> impl std::fmt::Display {
-        format!("{:<5}", reg).magenta()
+    fn reg(&self, reg: &str, padding: usize) -> impl std::fmt::Display {
+        format!("{:<width$}", reg, width = padding).magenta()
     }
 
     fn csr(&self, csr: &str) -> impl std::fmt::Display {
@@ -649,20 +657,20 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                     format!(
                         "{} {},{},{} - type I",
                         palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
+                        palette.reg(REG_NAME[rd as usize], 0),
                         palette.csr(
                             CSR_NAME
                                 .get(&imm)
                                 .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
                         ),
-                        palette.reg(REG_NAME[rs1 as usize]),
+                        palette.reg(REG_NAME[rs1 as usize], 0),
                     )
                 }
                 RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
                     format!(
                         "{} {},{},{} - type I",
                         palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
+                        palette.reg(REG_NAME[rd as usize], 0),
                         palette.csr(
                             CSR_NAME
                                 .get(&imm)
@@ -675,8 +683,8 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                     format!(
                         "{} {},{},{} - type I",
                         palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize]),
-                        palette.reg(REG_NAME[rs1 as usize]),
+                        palette.reg(REG_NAME[rd as usize], 0),
+                        palette.reg(REG_NAME[rs1 as usize], 0),
                         palette.data(imm.to_string().as_str()),
                     )
                 }
@@ -686,9 +694,9 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{},{} - type R",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.reg(REG_NAME[rs2 as usize])
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0)
                 )
             }
 
@@ -696,9 +704,9 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{},{} rm={} - type R",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0),
                     rm,
                 )
             }
@@ -713,10 +721,10 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{},{},{} rm={} - type R4",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.reg(REG_NAME[rs2 as usize]),
-                    palette.reg(REG_NAME[rs3 as usize]),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0),
+                    palette.reg(REG_NAME[rs3 as usize], 0),
                     rm
                 )
             }
@@ -725,8 +733,8 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{},{} - type B",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0),
                     palette.data((imm >> 1).to_string().as_str())
                 )
             }
@@ -735,7 +743,7 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{} - type J",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rd as usize], 0),
                     palette.data((imm >> 12).to_string().as_str())
                 )
             }
@@ -744,8 +752,8 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{},{} - type S",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rs1 as usize]),
-                    palette.reg(REG_NAME[rs2 as usize]),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0),
                     palette.data((imm).to_string().as_str())
                 )
             }
@@ -753,7 +761,7 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 format!(
                     "{} {},{} - type U",
                     palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize]),
+                    palette.reg(REG_NAME[rd as usize], 0),
                     palette.data((imm >> 12).to_string().as_str())
                 )
             }
