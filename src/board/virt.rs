@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     EMULATOR_CONFIG,
+    async_poller::{AsyncPoller, PollingEvent},
     board::{Board, BoardStatus},
     config::arch_config::WordType,
     device::{
@@ -15,7 +16,7 @@ use crate::{
         config::{CLINT_BASE, CLINT_SIZE, Device, POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
         fast_uart::{
             FastUart16550,
-            virtual_io::{SerialDestTrait, SerialDestination, SimulationIO, TerminalIO},
+            virtual_io::{SerialDestination, TerminalIO},
         },
         mmio::{MemoryMapIO, MemoryMapItem},
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
@@ -66,6 +67,7 @@ pub struct VirtBoard {
     timer: Rc<UnsafeCell<Timer>>,
     status: BoardStatus,
     clint: Rc<RefCell<Device>>,
+    async_poller: AsyncPoller,
 }
 
 impl VirtBoard {
@@ -75,11 +77,10 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
-    fn init_uart_dest(uart: &FastUart16550) -> Box<dyn SerialDestTrait> {
+    fn register_uart_poll_event(poller: &mut AsyncPoller, uart: &FastUart16550) {
         if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            Box::new(TerminalIO::new(uart.get_io_channel()))
-        } else {
-            Box::new(SimulationIO::new(uart.get_io_channel()))
+            let io = TerminalIO::new(uart.get_io_channel());
+            poller.add_event(PollingEvent::Uart(io));
         }
     }
 
@@ -87,13 +88,14 @@ impl VirtBoard {
         let clock = VirtualClockRef::new();
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
         let ram_ref = Rc::new(UnsafeCell::new(ram));
+        let mut async_poller = AsyncPoller::new();
 
         // Construct devices
         let mut uart_allocator = device::IdAllocator::new::<FastUart16550>(0, String::from("uart"));
         let uart1_info = uart_allocator.get();
         let uart1 = Rc::new(RefCell::new(Device::FastUart16550(FastUart16550::new())));
         if let Device::FastUart16550(uart_inner) = &mut *uart1.borrow_mut() {
-            Self::init_uart_dest(&uart_inner);
+            Self::register_uart_poll_event(&mut async_poller, &uart_inner);
         }
 
         let power_manager = Rc::new(RefCell::new(Device::PowerManager(PowerManager::new())));
@@ -160,6 +162,7 @@ impl VirtBoard {
             timer: timer,
             status: BoardStatus::Running,
             clint: clint,
+            async_poller: async_poller.start_polling(),
         }
     }
 
