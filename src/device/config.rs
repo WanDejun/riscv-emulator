@@ -61,6 +61,11 @@ macro_rules! make_device_enum {
                     $( Device::$name(dev) => dev.sync(), )*
                 }
             }
+            fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+                match self {
+                    $( Device::$name(dev) => dev.get_poll_enent(), )*
+                }
+            }
         }
     };
 }

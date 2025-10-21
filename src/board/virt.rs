@@ -7,17 +7,14 @@ use std::{
 
 use crate::{
     EMULATOR_CONFIG,
-    async_poller::{AsyncPoller, PollingEvent},
+    async_poller::AsyncPoller,
     board::{Board, BoardStatus},
     config::arch_config::WordType,
     device::{
-        self,
+        self, DeviceTrait,
         aclint::Clint,
         config::{CLINT_BASE, CLINT_SIZE, Device, POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
-        fast_uart::{
-            FastUart16550,
-            virtual_io::{SerialDestination, TerminalIO},
-        },
+        fast_uart::{FastUart16550, virtual_io::SerialDestination},
         mmio::{MemoryMapIO, MemoryMapItem},
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
         virtio::{
@@ -77,10 +74,11 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
-    fn register_uart_poll_event(poller: &mut AsyncPoller, uart: &FastUart16550) {
+    fn register_uart_poll_event(poller: &mut AsyncPoller, uart: &mut FastUart16550) {
         if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            let io = TerminalIO::new(uart.get_io_channel());
-            poller.add_event(PollingEvent::Uart(io));
+            if let Some(enent) = uart.get_poll_enent() {
+                poller.add_event(enent);
+            }
         }
     }
 
@@ -95,7 +93,7 @@ impl VirtBoard {
         let uart1_info = uart_allocator.get();
         let uart1 = Rc::new(RefCell::new(Device::FastUart16550(FastUart16550::new())));
         if let Device::FastUart16550(uart_inner) = &mut *uart1.borrow_mut() {
-            Self::register_uart_poll_event(&mut async_poller, &uart_inner);
+            Self::register_uart_poll_event(&mut async_poller, uart_inner);
         }
 
         let power_manager = Rc::new(RefCell::new(Device::PowerManager(PowerManager::new())));

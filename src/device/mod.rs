@@ -1,6 +1,6 @@
 use crate::{
-    config::arch_config::WordType, device::fast_uart::FastUart16550Handle,
-    handle_trait::HandleTrait, utils::UnsignedInteger,
+    async_poller::PollingEvent, config::arch_config::WordType,
+    device::fast_uart::FastUart16550Handle, handle_trait::HandleTrait, utils::UnsignedInteger,
 };
 
 pub(crate) mod aclint;
@@ -35,6 +35,7 @@ pub trait Mem {
 // Check align requirement before device.read/write. Most of align requirement was checked in mmio.
 pub trait DeviceTrait: Mem {
     fn sync(&mut self);
+    fn get_poll_enent(&mut self) -> Option<PollingEvent>;
 }
 
 pub trait MemMappedDeviceTrait: DeviceTrait {

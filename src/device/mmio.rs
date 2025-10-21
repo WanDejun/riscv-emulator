@@ -184,6 +184,9 @@ impl DeviceTrait for MemoryMapIO {
             item.device.borrow_mut().sync();
         }
     }
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        None
+    }
 }
 
 #[cfg(test)]

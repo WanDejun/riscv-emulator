@@ -45,6 +45,9 @@ impl Mem for PowerManager {
 
 impl DeviceTrait for PowerManager {
     fn sync(&mut self) {}
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        None
+    }
 }
 
 impl MemMappedDeviceTrait for PowerManager {

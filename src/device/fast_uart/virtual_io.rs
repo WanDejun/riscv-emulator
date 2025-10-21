@@ -20,72 +20,14 @@ pub enum SerialDestination {
     Stdio,
 }
 
-pub trait SerialDestTrait {}
-
 pub struct TerminalIO {
     channel: UartIOChannel,
 }
 
-impl SerialDestTrait for TerminalIO {}
 impl TerminalIO {
     pub fn new(channel: UartIOChannel) -> Self {
         Self { channel }
     }
-}
-
-fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>, sync_lock: Arc<AtomicBool>) {
-    thread::spawn(move || {
-        loop {
-            CliCoordinator::global().confirm_pause_and_wait();
-
-            // output epoll
-            loop {
-                // lock
-                if !sync_lock.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                    break;
-                }
-            }
-            while let Ok(v) = output_rx.try_recv() {
-                print!("{}", v as char);
-            }
-            io::stdout().flush().unwrap();
-            sync_lock.store(false, std::sync::atomic::Ordering::Release);
-
-            // input epoll
-            if event::poll(Duration::from_millis(20)).unwrap() {
-                if let Event::Key(k) = event::read().unwrap() {
-                    match k.code {
-                        KeyCode::Char(c) => input_tx.send(c as u8).unwrap(),
-                        KeyCode::Tab => input_tx.send(b'\t').unwrap(),
-                        KeyCode::Backspace => input_tx.send(0x08).unwrap(),
-                        KeyCode::Enter => input_tx.send(b'\r').unwrap(),
-                        KeyCode::Up => {
-                            for v in [0x1B, 0x5B, 0x41] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Down => {
-                            for v in [0x1B, 0x5B, 0x42] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Left => {
-                            for v in [0x1B, 0x5B, 0x43] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        KeyCode::Right => {
-                            for v in [0x1B, 0x5B, 0x44] {
-                                input_tx.send(v).unwrap();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    });
 }
 
 /// # SimulationIO
@@ -93,8 +35,6 @@ fn spawn_io_thread(input_tx: Sender<u8>, output_rx: Receiver<u8>, sync_lock: Arc
 pub struct SimulationIO {
     channel: UartIOChannel,
 }
-
-impl SerialDestTrait for SimulationIO {}
 
 impl SimulationIO {
     pub fn new(channel: UartIOChannel) -> Self {
