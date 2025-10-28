@@ -73,17 +73,18 @@ impl TrapController {
     }
 
     pub fn mret(cpu: &mut RV32CPU) {
-        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
+        let mstatus = cpu.csr.get_by_type_existing::<Mstatus>();
         mstatus.set_mie(mstatus.get_mpie());
         mstatus.set_mpie(1);
-        cpu.write_pc(cpu.csr.read_uncheck_privilege(csr_index::mepc).unwrap());
+        cpu.write_pc(cpu.csr.read_uncheck_privilege(Mepc::get_index()).unwrap());
 
-        if mstatus.get_mpp() != 3 {
-            // MPP is not M-Mode, clear mprv.
+        let new_priv: u8 = mstatus.get_mpp() as u8;
+
+        if new_priv != PrivilegeLevel::M as u8 {
             mstatus.set_mprv(0);
         }
-        cpu.csr
-            .set_current_privileged((mstatus.get_mpp() as u8).into());
+
+        cpu.csr.set_current_privileged(new_priv.into());
         mstatus.set_mpp(0);
     }
 
@@ -117,15 +118,19 @@ impl TrapController {
     }
 
     pub fn sret(cpu: &mut RV32CPU) {
-        let sstatus = cpu.csr.get_by_type::<Sstatus>().unwrap();
+        let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
         sstatus.set_sie(sstatus.get_spie());
         sstatus.set_spie(1);
-        let sepc = cpu.csr.get_by_type::<Sepc>().unwrap().get_sepc();
-        cpu.write_pc(sepc);
+        cpu.write_pc(cpu.csr.read_uncheck_privilege(Sepc::get_index()).unwrap());
 
-        cpu.csr
-            .set_current_privileged((sstatus.get_spp() as u8).into());
-        sstatus.set_spp(0);
+        let new_priv: u8 = sstatus.get_spp() as u8;
+
+        // If new_priv != M, then `MPRV` is set to 0 on execution of xRET.
+        // `SPP` cannot be M, so no need to check.
+        cpu.csr.get_by_type_existing::<Mstatus>().set_mprv(0);
+
+        cpu.csr.set_current_privileged(new_priv.into());
+        sstatus.set_spp(PrivilegeLevel::U as u8 as WordType);
     }
 
     // ======================================
