@@ -184,14 +184,10 @@ impl PageTable {
         let ppn = target_pte.0.ppn();
         let paddr = match target_pte.1 {
             PageSize::Small4K => {
-                ppn.address | (vaddr.0 & ((1 << (1 * PAGE_SIZE_XLEN as WordType)) - 1))
+                ppn.address | (vaddr.0 & ((1 << (PAGE_SIZE_XLEN as WordType)) - 1))
             }
-            PageSize::Medium2M => {
-                ppn.address | (vaddr.0 & ((1 << (2 * PAGE_SIZE_XLEN as WordType)) - 1))
-            }
-            PageSize::Large1G => {
-                ppn.address | (vaddr.0 & ((1 << (3 * PAGE_SIZE_XLEN as WordType)) - 1))
-            }
+            PageSize::Medium2M => ppn.address | (vaddr.0 & ((1024 * 1024 * 2 as WordType) - 1)),
+            PageSize::Large1G => ppn.address | (vaddr.0 & ((1024 * 1024 * 1024 as WordType) - 1)),
         };
         Ok(paddr.into())
     }
