@@ -26,7 +26,7 @@ int fib(int n) {
 }
 
 int main() {
-    output(fib(25));
+    output(fib(30));
     printf("%d\n", 1);
 
     PowerOff();

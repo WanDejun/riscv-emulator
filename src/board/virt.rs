@@ -181,6 +181,8 @@ impl VirtBoard {
             log::debug!("iCache hit rate {}", rate);
 
             self.status = BoardStatus::Halt;
+
+            log::debug!("Total cycles: {}", self.clock.now());
         }
 
         unsafe { self.timer.as_mut_unchecked() }.tick();

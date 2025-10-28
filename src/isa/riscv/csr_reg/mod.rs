@@ -4,12 +4,12 @@ mod validator;
 pub mod csr_macro;
 pub mod m_utils;
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::cmp::Ordering;
 
 use crate::{
     config::arch_config::WordType,
     isa::riscv::csr_reg::{
-        csr_macro::{CSR_REG_TABLE, Mstatus, Satp, resolve_shadow_addr},
+        csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
         validator::Validator,
     },
 };
@@ -226,8 +226,10 @@ impl CsrReg {
     }
 }
 
+const CSR_SIZE: usize = 1 << 12;
+
 pub(crate) struct CsrRegFile {
-    table: HashMap<WordType, CsrReg>,
+    table: [Option<CsrReg>; CSR_SIZE],
     cpl: PrivilegeLevel, // current privileged level
     pub(super) ctx: CsrContext,
 }
@@ -238,9 +240,9 @@ impl CsrRegFile {
     }
 
     pub fn from(csr_table: &[(WordType, WordType, Validator)]) -> Self {
-        let mut table = HashMap::new();
+        let mut table = [None; CSR_SIZE];
         for (addr, default_value, validator) in csr_table.iter() {
-            table.insert(*addr, CsrReg::new(*default_value, Some(*validator)));
+            table[*addr as usize] = Some(CsrReg::new(*default_value, Some(*validator)));
         }
 
         Self {
@@ -318,7 +320,10 @@ impl CsrRegFile {
     /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
     #[must_use]
     pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
-        if let Some(reg) = self.table.get_mut(&addr) {
+        if addr >= CSR_SIZE as WordType {
+            return None;
+        }
+        if let Some(reg) = self.table[addr as usize].as_mut() {
             reg.write_directly(data);
             Some(())
         } else {
@@ -331,29 +336,26 @@ impl CsrRegFile {
     pub fn write_uncheck_privilege(&mut self, addr: WordType, data: WordType) {
         // Special-case fflags and frm, they have their own addr but are subfields of fcsr.
         if addr == csr_index::fflags {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
-            } // TODO: Raise error
+            let fcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            fcsr.value = (fcsr.value & !0b11111) | (data & 0b11111);
         } else if addr == csr_index::frm {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                fcsr.value = (fcsr.value & !0b11100000) | ((data & 0b111) << 5);
-            } // TODO: Raise error
+            let fcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            fcsr.value = (fcsr.value & !0b11100000) | ((data & 0b111) << 5);
         } else if addr == csr_index::fcsr {
-            if let Some(fcsr) = self.table.get_mut(&csr_index::fcsr) {
-                // Quoted from RISC-V manual:
-                // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
-                // implementations shall ignore writes to these bits and supply a zero value when read."
-                fcsr.value = data & 0xFF;
-            } // TODO: Raise error
+            // Quoted from RISC-V manual:
+            // "Bits 31—8 of the fcsr are reserved for other standard extensions. If these extensions are not present,
+            // implementations shall ignore writes to these bits and supply a zero value when read."
+            let fcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            fcsr.value = data & 0xFF;
         } else {
-            if let Some(csr) = self.table.get_mut(&addr) {
+            if let Some(csr) = self.table[addr as usize].as_mut() {
                 if let Some(base_addr) = resolve_shadow_addr(addr) {
                     // This is a shadow CSR, write to its base CSR instead.
 
                     // Validate with the shadow CSR's validator.
                     let op = csr.validate(data, &self.ctx);
 
-                    if let Some(base_csr) = self.table.get_mut(&base_addr) {
+                    if let Some(base_csr) = self.table[base_addr as usize].as_mut() {
                         // Apply the write operation to the base CSR, with the base CSR's validator.
                         base_csr.write_with_mask(data, &self.ctx, op);
                     } else {
@@ -371,21 +373,16 @@ impl CsrRegFile {
     pub fn read_uncheck_privilege(&self, addr: WordType) -> Option<WordType> {
         // Special-case fflags and frm; they are subfields of fcsr
         if addr == csr_index::fflags {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|reg| reg.value & 0b11111)
+            Some(self.table[Fcsr::get_index() as usize].unwrap().value() & 0b11111)
         } else if addr == csr_index::frm {
-            self.table
-                .get(&csr_index::fcsr)
-                .copied()
-                .map(|reg| (reg.value >> 5) & 0b111)
+            Some((self.table[Fcsr::get_index() as usize].unwrap().value() >> 5) & 0b111)
         } else {
             if let Some(base_addr) = resolve_shadow_addr(addr) {
                 // This is a shadow CSR.
-                self.table.get(&base_addr).copied().map(|reg| reg.value)
+                // The base CSR must exist because it can be resolved by `resolve_shadow_addr`.
+                Some(self.table[base_addr as usize].unwrap().value())
             } else {
-                self.table.get(&addr).copied().map(|reg| reg.value)
+                Some(self.table[addr as usize]?.value())
             }
         }
     }
@@ -398,11 +395,11 @@ impl CsrRegFile {
     {
         if let Some(base_addr) = resolve_shadow_addr(T::get_index()) {
             // This is a shadow CSR, get its base CSR instead.
-            let reg = self.table.get_mut(&base_addr)?;
+            let reg = self.table[base_addr as usize].as_mut()?;
             return Some(T::new(reg as *mut CsrReg, &mut self.ctx as *mut CsrContext));
         }
 
-        let reg = self.table.get_mut(&T::get_index())?;
+        let reg = self.table[T::get_index() as usize].as_mut()?;
         Some(NamedCsrReg::new(
             reg as *mut CsrReg,
             &mut self.ctx as *mut CsrContext,
