@@ -159,7 +159,7 @@ impl PageTable {
     // TODO: Maybe we need to take shared owership in virtual memory manager to avoid intermediate overhead
     // TODO: Read/Write/Execute check.
     // TODO: Privilege check.
-    pub fn translate_addr<const DIRTY: bool, const ACCESS: bool>(
+    pub fn translate_vaddr<const DIRTY: bool, const ACCESS: bool>(
         &self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
@@ -264,7 +264,7 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr::<false, true>(&mut ram, 0x0000_0123.into(), PTEFlags::R, PTEFlags::R)
+            .translate_vaddr::<false, true>(&mut ram, 0x0000_0123.into(), PTEFlags::R, PTEFlags::R)
             .unwrap();
         assert_eq!(paddr.0, data_page | 0x123);
     }
@@ -297,7 +297,7 @@ mod test {
         assert_eq!(pte.bits, data_pte.0.bits);
 
         let paddr = page_table
-            .translate_addr::<false, true>(&mut ram, 0x0011_4514.into(), PTEFlags::W, PTEFlags::W)
+            .translate_vaddr::<false, true>(&mut ram, 0x0011_4514.into(), PTEFlags::W, PTEFlags::W)
             .unwrap();
         assert_eq!(paddr.0, 0x8111_4514);
     }
@@ -331,7 +331,7 @@ mod test {
 
         // try get instr, without X authority.
         let err = page_table
-            .translate_addr::<false, true>(&mut ram, 0x0000_0010.into(), PTEFlags::X, PTEFlags::X)
+            .translate_vaddr::<false, true>(&mut ram, 0x0000_0010.into(), PTEFlags::X, PTEFlags::X)
             .unwrap_err();
         assert_eq!(err, PageTableError::PrivilegeFault);
     }

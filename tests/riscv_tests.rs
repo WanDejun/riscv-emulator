@@ -12,6 +12,7 @@ use crossterm::style::Stylize;
 use riscv_emulator::Emulator;
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
+use riscv_emulator::isa::riscv::debugger::Address;
 use riscv_emulator::load::get_section_addr;
 
 fn get_test_by_name(name: &str) -> PathBuf {
@@ -62,7 +63,7 @@ fn run_test(elf: &Path) -> bool {
         emu.run_until(&mut |cpu, instr_cnt| {
             // Handle tohost
             if (instr_cnt & (0xFFF)) == 0 {
-                let msg = cpu.read_mem::<u64>(tohost).unwrap();
+                let msg = cpu.read_memory::<u64>(Address::Phys(tohost)).unwrap();
 
                 if msg != 0 {
                     run_result = msg == 1;
@@ -147,6 +148,13 @@ fn run_test_group_exclude(name: &str, exclude_names: &[&str]) {
 #[cfg(feature = "riscv-tests")]
 fn run_rv64ui_p_tests() {
     run_test_group_exclude("rv64ui-p-", &["fence_i", "ma_data"]);
+}
+
+#[test]
+#[cfg(feature = "riscv64")]
+#[cfg(feature = "riscv-tests")]
+fn run_rv64ui_v_tests() {
+    run_test_group_exclude("rv64ui-v-", &["fence_i", "ma_data"]);
 }
 
 #[test]

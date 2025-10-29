@@ -129,7 +129,7 @@ impl RV32CPU {
             decode_instr
         } else {
             // IF
-            let instr_bytes = self.memory.get_instr_code::<u32>(self.pc, &mut self.csr);
+            let instr_bytes = self.memory.ifetch::<u32>(self.pc, &mut self.csr);
             if let Err(err) = instr_bytes {
                 TrapController::try_send_trap_signal(
                     self,

@@ -16,7 +16,7 @@ use riscv_emulator::{
                 PrivilegeLevel,
                 csr_macro::{CSR_ADDRESS, CSR_NAME},
             },
-            debugger::{DebugEvent, Debugger},
+            debugger::{Address, DebugEvent, Debugger},
             decoder::DecodeInstr,
             instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
         },
@@ -42,7 +42,7 @@ enum Cli {
     Undisplay(PrintCmd),
 
     /// List assembly around the current position.
-    #[command(alias = "l")]
+    #[command(aliases = ["l", "ls"])]
     List,
 
     /// Show historical PC values.
@@ -53,7 +53,7 @@ enum Cli {
     },
 
     /// Step a single instruction.
-    #[command(alias = "s")]
+    #[command(aliases = ["s", "step"])]
     Si,
 
     /// Continue running.
@@ -70,6 +70,9 @@ enum Cli {
         delete: bool,
         /// Address to set/delete the breakpoint; decimal by default, or hex if prefixed with `0x`.
         addr: String,
+
+        #[arg(short, long, default_value_t = false)]
+        virt: bool,
     },
 
     /// Show information such as breakpoints.
@@ -83,28 +86,36 @@ enum Cli {
 
 #[derive(Debug, Subcommand)]
 enum PrintCmd {
-    /// Program counter; decimal by default, or hex if prefixed with `0x`.
+    /// Program counter
     Pc,
+    /// General-purpose register
     Reg {
+        /// Register name
         reg: String,
     },
+    /// Some general-purpose registers
     Regs {
+        /// Starting register index
         #[arg(long, default_value_t = 0)]
         start: u8,
+        /// Number of registers
         #[arg(short, long, default_value_t = REGFILE_CNT as u8)]
         len: u8,
     },
+    /// Memory (in virtual or physical address space)
     Mem {
         addr: String,
         #[arg(short, long, default_value_t = 16)]
         len: u32,
+        /// Whether the address is virtual or physical.
+        #[arg(short, long, default_value_t = false)]
+        virt: bool,
     },
-    Csr {
-        addr: String,
-    },
-    FReg {
-        reg: String,
-    },
+    /// Control and status register
+    Csr { addr: String },
+    /// Floating-point register
+    FReg { reg: String },
+    /// Privilege level
     Priv,
 }
 
@@ -121,10 +132,18 @@ enum PrintObject {
     Pc,
     Reg(u8),
     Regs(u8, u8),
-    Mem(WordType, u32),
+    Mem(u64, u32, bool),
     CSR(WordType),
     FReg(u8),
     Privilege,
+}
+
+fn make_address(addr: u64, virt: bool) -> Address {
+    if virt {
+        Address::Virt(addr)
+    } else {
+        Address::Phys(addr)
+    }
 }
 
 pub struct DebugREPL<'a, I: ISATypes> {
@@ -159,7 +178,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                         }
                     } else {
                         last_line = line.to_string();
-                        self.editor.add_history_entry(line).ok();
+                        self.editor.add_history_entry(line).unwrap();
                     }
 
                     match self.respond(line) {
@@ -169,7 +188,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                             }
                         }
                         Err(err) => {
-                            eprintln!("Error occurred: {}", err);
+                            eprintln!("{}", err);
                         }
                     }
                 }
@@ -191,18 +210,18 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         CliCoordinator::global().pause_uart();
 
         match rst {
-            Ok(DebugEvent::StepCompleted { pc }) => {
+            Ok(DebugEvent::StepCompleted) => {
                 println!(
-                    "stepped, pc = {}: {}",
-                    format_addr(pc),
-                    self.asm_formatted_at(pc)
+                    "{}: {}",
+                    format_addr(self.dbg.read_pc()),
+                    self.current_asm_formatted(),
                 );
             }
-            Ok(DebugEvent::BreakpointHit { pc }) => {
+            Ok(DebugEvent::BreakpointHit) => {
                 println!(
                     "breakpoint hit at pc = {}: {}",
-                    format_addr(pc),
-                    self.asm_formatted_at(pc)
+                    format_addr(self.dbg.read_pc()),
+                    self.current_asm_formatted()
                 );
             }
             Err(e) => return Err(format!("step failed: {}", e)),
@@ -215,7 +234,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 PrintObject::Pc => self.print_pc(),
                 PrintObject::Reg(idx) => self.print_reg(idx)?,
                 PrintObject::Regs(start, len) => self.print_regs(start, len)?,
-                PrintObject::Mem(addr, len) => self.print_mem(addr, len),
+                PrintObject::Mem(addr, len, is_virt) => self.print_mem(addr, len, is_virt),
                 PrintObject::CSR(addr) => self.print_csr(addr),
                 PrintObject::FReg(idx) => self.print_float_reg(idx)?,
                 PrintObject::Privilege => self.print_privilege(),
@@ -240,8 +259,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Print(PrintCmd::Regs { start, len }) => {
                 self.print_regs(start, len)?;
             }
-            Cli::Print(PrintCmd::Mem { addr, len }) => {
-                self.print_mem(parse_u64(&addr)?, len);
+            Cli::Print(PrintCmd::Mem { addr, len, virt }) => {
+                self.print_mem(parse_u64(&addr)?, len, virt);
             }
             Cli::Print(PrintCmd::Csr { addr }) => {
                 self.print_csr(parse_csr(&addr)?);
@@ -263,9 +282,13 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Display(PrintCmd::Regs { start, len }) => {
                 self.watch_list.push(PrintObject::Regs(start, len));
             }
-            Cli::Display(PrintCmd::Mem { addr, len }) => {
+            Cli::Display(PrintCmd::Mem {
+                addr,
+                len,
+                virt: is_virt,
+            }) => {
                 self.watch_list
-                    .push(PrintObject::Mem(parse_word(&addr)?, len));
+                    .push(PrintObject::Mem(parse_word(&addr)?, len, is_virt));
             }
             Cli::Display(PrintCmd::Csr { addr }) => {
                 self.watch_list.push(PrintObject::CSR(parse_csr(&addr)?));
@@ -290,10 +313,14 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.watch_list
                     .retain(|&item| item != PrintObject::Regs(start, len));
             }
-            Cli::Undisplay(PrintCmd::Mem { addr, len }) => {
+            Cli::Undisplay(PrintCmd::Mem {
+                addr,
+                len,
+                virt: is_virt,
+            }) => {
                 let addr = parse_word(&addr)?;
                 self.watch_list
-                    .retain(|&item| item != PrintObject::Mem(addr, len));
+                    .retain(|&item| item != PrintObject::Mem(addr, len, is_virt));
             }
             Cli::Undisplay(PrintCmd::Csr { addr }) => {
                 let csr_addr = parse_csr(&addr)?;
@@ -311,14 +338,14 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             }
 
             Cli::History { count } => {
-                let history = self.dbg.pc_history().collect::<Vec<WordType>>();
+                let history = self.dbg.pc_history().collect::<Vec<_>>();
                 let skip_len = history.len().saturating_sub(count);
-                for (idx, pc) in history.into_iter().skip(skip_len).enumerate() {
+                for (idx, (addr, instr)) in history.into_iter().skip(skip_len).enumerate() {
                     println!(
                         "{}: pc = {}, {}",
                         format_idx(idx),
-                        format_addr(pc),
-                        self.asm_formatted_at(pc)
+                        format_addr(addr),
+                        self.asm_formatted(instr)
                     );
                 }
             }
@@ -327,10 +354,11 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 const LIST_INSTR: WordType = 10;
 
                 // TODO: This may not a valid instruction start for variable-length ISA.
-                let mut curr_addr = (self.dbg.read_pc() - LIST_INSTR * 2) as WordType;
+                let curr_addr = (self.dbg.read_pc() - LIST_INSTR * 2) as WordType;
+                let mut curr_addr = Address::Virt(curr_addr);
 
                 for _ in 0..LIST_INSTR {
-                    let is_curr_line = curr_addr == self.dbg.read_pc();
+                    let is_curr_line = curr_addr == Address::Virt(self.dbg.read_pc());
 
                     if is_curr_line {
                         print!("{} ", palette.arrow(">"));
@@ -338,17 +366,17 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                         print!("  ");
                     }
 
-                    let raw = self.dbg.read_origin_instr(curr_addr).ok();
+                    let raw = self.dbg.read_instr(curr_addr.value());
                     let (raw_formatted, asm) = self.raw_and_asm_formatted(raw);
 
-                    println!("{}: {} {}", format_addr(curr_addr), raw_formatted, asm);
+                    println!("{}: {} {}", format_address(curr_addr), raw_formatted, asm);
 
                     match raw {
                         Some(raw) => {
-                            curr_addr += raw.len();
+                            curr_addr = curr_addr + raw.len();
                         }
                         None => {
-                            curr_addr += 4; // TODO: How long should I go if I failed to read raw instruction? 
+                            curr_addr = curr_addr + 4; // TODO: How long should I go if I failed to read raw instruction? 
                         }
                     }
                 }
@@ -357,13 +385,13 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             Cli::Info(InfoCmd::Breakpoints) => {
                 println!("Breakpoints:");
                 // TODO: Unnecessary copy to by pass borrow check.
-                let breakpoints: Vec<_> = self.dbg.breakpoints().keys().copied().collect();
+                let breakpoints: Vec<_> = self.dbg.breakpoints().clone();
                 for (idx, bp) in breakpoints.into_iter().enumerate() {
                     println!(
                         "{}: {}, {}",
                         format_idx(idx),
-                        format_addr(bp.pc),
-                        self.asm_formatted_at(bp.pc),
+                        format_address(bp.addr),
+                        self.asm_formatted_at(bp.addr),
                     );
                 }
             }
@@ -376,21 +404,21 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.handle_continue(steps)?;
             }
 
-            Cli::Breakpoint { delete, addr } => {
-                let pc = parse_word(&addr)?;
+            Cli::Breakpoint { delete, addr, virt } => {
+                let addr = make_address(parse_word(&addr)?, virt);
                 if delete {
-                    self.dbg.clear_breakpoint(pc).map_err(|e| e.to_string())?;
+                    self.dbg.clear_breakpoint(addr).map_err(|e| e.to_string())?;
                     println!(
                         "cleared breakpoint at {}: {}",
-                        format_addr(pc),
-                        self.asm_formatted_at(pc)
+                        format_address(addr),
+                        self.asm_formatted_at(addr)
                     );
                 } else {
-                    self.dbg.set_breakpoint(pc).map_err(|e| e.to_string())?;
+                    self.dbg.set_breakpoint(addr).map_err(|e| e.to_string())?;
                     println!(
                         "set breakpoint at {}: {}",
-                        format_addr(pc),
-                        self.asm_formatted_at(pc)
+                        format_address(addr),
+                        self.asm_formatted_at(addr)
                     );
                 }
             }
@@ -437,20 +465,20 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         Ok(())
     }
 
-    fn print_mem(&mut self, addr: WordType, len: u32) {
+    fn print_mem(&mut self, addr: WordType, len: u32, is_virt: bool) {
         const BYTE_PER_LINE: u32 = 16;
 
-        let mut curr_addr = addr;
+        let mut curr_addr = make_address(addr, is_virt);
         let mut i = 0 as u32;
         while i < len {
             if i % BYTE_PER_LINE == 0 {
                 if i != 0 {
                     println!();
                 }
-                print!("{}: ", format_addr(curr_addr));
+                print!("{}: ", format_address(curr_addr));
             }
-            print!("{} ", self.read_mem_byte_formatted(curr_addr));
-            curr_addr += 1;
+            print!("{} ", self.read_byte_formatted(curr_addr));
+            curr_addr = curr_addr + 1;
             i += 1;
         }
 
@@ -475,40 +503,40 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         println!("{}", format_privilege(privilege))
     }
 
-    fn read_mem_byte_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
+    fn read_byte_formatted(&mut self, addr: Address) -> impl std::fmt::Display {
         self.dbg
-            .read_mem::<u8>(addr)
-            .map(|v| format!("{:02x}", v))
+            .read_memory::<u8>(addr)
+            .map(|b| format!("{:02x}", b))
             .unwrap_or("**".into())
     }
 
-    fn read_mem_word_formatted(&mut self, addr: WordType) -> impl std::fmt::Display {
-        self.dbg
-            .read_mem::<u32>(addr)
-            .map(|v| format!("0x{:08x}", v))
+    fn read_word_formatted(&mut self, addr: Address) -> impl std::fmt::Display {
+        let word = self.dbg.read_memory::<u32>(addr);
+        word.map(|w| format!("0x{:08x}", w))
             .unwrap_or("<invalid>".into())
     }
 
-    fn asm_formatted_at(&mut self, addr: WordType) -> impl std::fmt::Display {
-        let raw = self.dbg.read_origin_instr(addr).ok();
+    fn asm_formatted(&mut self, raw: Option<I::RawInstr>) -> impl std::fmt::Display {
         self.raw_and_asm_formatted(raw).1
     }
 
-    fn decode_info_option(&mut self, raw: Option<I::RawInstr>) -> Option<I::DecodeRst> {
-        if let Some(raw) = raw {
-            self.dbg.decoded_info(raw)
-        } else {
-            None
-        }
+    fn asm_formatted_at(&mut self, addr: Address) -> impl std::fmt::Display {
+        let raw = self.dbg.read_instr_directly(addr);
+        self.asm_formatted(raw)
+    }
+
+    fn current_asm_formatted(&mut self) -> impl std::fmt::Display {
+        let raw = self.dbg.current_instr();
+        self.asm_formatted(raw)
     }
 
     fn raw_and_asm_formatted(
-        &mut self,
+        &self,
         raw: Option<I::RawInstr>,
     ) -> (impl std::fmt::Display, impl std::fmt::Display) {
         (
             <I as AsmFormattable<I>>::format_raw(raw),
-            <I as AsmFormattable<I>>::format_asm(self.decode_info_option(raw)),
+            <I as AsmFormattable<I>>::format_asm(raw.and_then(|raw| self.dbg.decoded_info(raw))),
         )
     }
 }
@@ -616,6 +644,12 @@ fn format_idx(idx: usize) -> impl std::fmt::Display {
 
 fn format_addr(word: WordType) -> impl std::fmt::Display {
     palette.addr(&format!("0x{:08x}", word)).to_string()
+}
+
+fn format_address(addr: Address) -> impl std::fmt::Display {
+    match addr {
+        Address::Phys(addr) | Address::Virt(addr) => format_addr(addr),
+    }
 }
 
 fn format_data(data: WordType) -> impl std::fmt::Display {
