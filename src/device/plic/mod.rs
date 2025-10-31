@@ -1,7 +1,10 @@
 use std::{
+    collections::BTreeSet,
     hint::unlikely,
     sync::{Arc, atomic::AtomicU32},
 };
+
+use bit_set::BitSet;
 
 use crate::{
     config::arch_config::WordType,
@@ -23,7 +26,8 @@ const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
 pub struct PLICContext {
     enable: [u32; VIRT_MAX_INTERRUPTS / 32], // base + 0x2000 + contextN * 0x80 ~ base + 0x2000 + contextN * 0x80 + 0x7c
     priority_threshold: u32,                 // base + 0x200000 + contextN * 0x1000
-                                             // claim_register: u32,  base + 0x200000 + contextN * 0x1004
+    // claim_register: u32,  base + 0x200000 + contextN * 0x1004
+    claim: u32,
 }
 
 impl PLICContext {
@@ -31,6 +35,7 @@ impl PLICContext {
         PLICContext {
             enable: [0; VIRT_MAX_INTERRUPTS / 32],
             priority_threshold: 0,
+            claim: 0,
         }
     }
 }
@@ -46,22 +51,29 @@ impl PLICPending {
         }
     }
 
-    pub fn set_bit(&self, interrupt_id: usize) {
+    fn set_bit(&self, interrupt_id: usize) {
         let index = interrupt_id / 32;
         let bit = interrupt_id % 32;
         self.bits[index].fetch_or(1 << bit, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub fn clear_bit(&self, interrupt_id: usize) {
-        let index = interrupt_id / 32;
-        let bit = interrupt_id % 32;
-        self.bits[index].fetch_and(!(1 << bit), std::sync::atomic::Ordering::SeqCst);
+    #[inline]
+    fn clear_bit(&self, interrupt_id: u32) {
+        self.take_bit(interrupt_id);
     }
 
-    pub fn get_bit(&self, interrupt_id: usize) -> bool {
-        let index = interrupt_id / 32;
+    fn get_bit(&self, interrupt_id: u32) -> bool {
+        let index = (interrupt_id / 32) as usize;
         let bit = interrupt_id % 32;
         (self.bits[index].load(std::sync::atomic::Ordering::SeqCst) & (1 << bit)) != 0
+    }
+
+    fn take_bit(&self, interrupt_id: u32) -> bool {
+        let index = (interrupt_id / 32) as usize;
+        let bit = interrupt_id % 32;
+        let mask = 1 << bit;
+        let old = self.bits[index].fetch_and(!(mask), std::sync::atomic::Ordering::SeqCst);
+        old & mask != 0
     }
 }
 
@@ -115,14 +127,30 @@ pub struct PLICLayout {
     priority: [u32; VIRT_MAX_INTERRUPTS], // base ~ base + 0x0ffc
     pending: Arc<PLICPending>,            // base + 0x1000 ~ base + 0x107c
     contexts: [PLICContext; VIRT_MAX_CONTEXTS], // base + 0x2000 ~ base + 0x3FFFFC
+
+    ordering: BTreeSet<(u32, u32)>,
+
+    interrupt_sources_busy: BitSet,
 }
 
 impl PLICLayout {
     pub fn new() -> Self {
+        let priority = [0; VIRT_MAX_INTERRUPTS];
+        let mut ordering = BTreeSet::new();
+
+        // interrupt priority default value is 0.
+        // interrupt 0 is not exist.
+        for i in 1..VIRT_MAX_INTERRUPTS {
+            ordering.insert((priority[i], i as u32));
+        }
         PLICLayout {
-            priority: [0; VIRT_MAX_INTERRUPTS],
+            priority,
             pending: Arc::new(PLICPending::new()),
             contexts: core::array::from_fn(|_| PLICContext::new()),
+
+            ordering,
+
+            interrupt_sources_busy: BitSet::with_capacity(VIRT_MAX_INTERRUPTS),
         }
     }
 
@@ -132,25 +160,70 @@ impl PLICLayout {
     }
 
     #[inline]
-    fn set_priority(&mut self, interrupt_id: usize, value: u32) {
-        self.priority[interrupt_id] = value;
+    fn set_priority(&mut self, interrupt_id: u32, value: u32) {
+        if unlikely(interrupt_id as usize > VIRT_MAX_INTERRUPTS) {
+            return;
+        }
+        let old_priority = self.priority[interrupt_id as usize];
+        if value != old_priority {
+            // set ordering.
+            self.ordering.remove(&(old_priority, interrupt_id));
+            self.ordering.insert((value, interrupt_id));
+
+            self.priority[interrupt_id as usize] = value;
+        }
     }
 
     #[inline]
-    fn get_pending_bit(&self, interrupt_id: usize) -> bool {
-        self.pending.get_bit(interrupt_id)
+    fn take_pending_bit(&self, interrupt_id: u32) -> bool {
+        self.pending.take_bit(interrupt_id)
     }
 
     #[inline]
-    fn get_enable_bit(&self, context_id: usize, interrupt_id: usize) -> bool {
-        let index = interrupt_id / 32;
+    fn get_enable_bit(&self, context_nr: usize, interrupt_id: u32) -> bool {
+        let index = (interrupt_id / 32) as usize;
         let bit = interrupt_id % 32;
-        (self.contexts[context_id].enable[index] & (1 << bit)) != 0
+        (self.contexts[context_nr].enable[index] & (1 << bit)) != 0
     }
 
     #[inline]
-    fn get_priority_threshold(&self, context_id: usize) -> u32 {
-        self.contexts[context_id].priority_threshold
+    fn get_priority_threshold(&self, context_nr: usize) -> u32 {
+        self.contexts[context_nr].priority_threshold
+    }
+
+    fn check_interrupt(&mut self, context_nr: usize) -> Option<u32> {
+        // context is busy.
+        if unlikely(self.contexts[context_nr].claim != 0) {
+            return None;
+        }
+
+        let priority_threshold = self.contexts[context_nr].priority_threshold;
+
+        // Traverse in descending order of priority.
+        for (priority, interrupt_id) in self.ordering.iter().rev() {
+            // The upcoming priorities are all equal to 0.
+            if *priority == 0 {
+                break;
+            }
+
+            if self.interrupt_sources_busy.contains(*interrupt_id as usize) {
+                continue;
+            }
+
+            // The PLIC will mask all PLIC interrupts of a priority less than or equal to threshold.
+            // First check the enable_bit, then check the pending_bit.
+            if *priority > priority_threshold
+                && self.get_enable_bit(context_nr, *interrupt_id)
+                && self.take_pending_bit(*interrupt_id)
+            {
+                self.contexts[context_nr].claim = *interrupt_id;
+                self.interrupt_sources_busy.insert(*interrupt_id as usize);
+
+                return Some(*interrupt_id);
+            }
+        }
+
+        return None;
     }
 }
 
@@ -165,8 +238,26 @@ impl PLIC {
         }
     }
 
+    pub fn suspend_interrupt(&mut self, interrupt_id: usize) {
+        if unlikely(interrupt_id > VIRT_MAX_INTERRUPTS) {
+            return;
+        }
+        self.layout.pending.set_bit(interrupt_id);
+    }
+
+    // pub fn clear_interrupt(&mut self, interrupt_id: usize) {
+    //     if unlikely(interrupt_id > VIRT_MAX_INTERRUPTS) {
+    //         return;
+    //     }
+    //     self.layout.pending.clear_bit(interrupt_id);
+    // }
+
+    pub fn check_interrupt(&mut self, context_nr: usize) -> Option<u32> {
+        self.layout.check_interrupt(context_nr)
+    }
+
     // inner_addr point to self.layout.contexts[return.0].enable[return.1]
-    fn check_and_index_enable_word(&self, inner_addr: WordType) -> Option<(usize, usize)> {
+    fn get_enable_word_index(&self, inner_addr: WordType) -> Option<(usize, usize)> {
         // Out of range.
         if unlikely(inner_addr < CONTEXT_ENABLE_BIT_OFFSET) {
             return None;
@@ -187,7 +278,7 @@ impl PLIC {
         Some((context_id, interrupt_id_div32))
     }
 
-    fn check_and_index_pending(&self, inner_addr: WordType) -> Option<usize> {
+    fn get_pending_index(&self, inner_addr: WordType) -> Option<usize> {
         // Out of range.
         if unlikely(inner_addr < PENDING_BIT_OFFSET) {
             return None;
@@ -201,7 +292,7 @@ impl PLIC {
         Some(index)
     }
 
-    fn check_and_index_context_config(&self, inner_addr: WordType) -> Option<(usize, usize)> {
+    fn get_context_config_index(&self, inner_addr: WordType) -> Option<(usize, usize)> {
         // Out of range.
         if unlikely(inner_addr < CONTEXT_CONFIG_OFFSET) {
             return None;
@@ -237,7 +328,7 @@ impl Mem for PLIC {
             Ok(unsafe { core::mem::transmute_copy(&data) })
         } else if inner_addr < CONTEXT_ENABLE_BIT_OFFSET {
             // pending
-            if let Some(index) = self.check_and_index_pending(inner_addr) {
+            if let Some(index) = self.get_pending_index(inner_addr) {
                 let data =
                     self.layout.pending.bits[index].load(std::sync::atomic::Ordering::SeqCst);
                 Ok(unsafe { core::mem::transmute_copy(&data) })
@@ -246,9 +337,7 @@ impl Mem for PLIC {
             }
         } else if inner_addr < CONTEXT_CONFIG_OFFSET {
             // enable bits
-            if let Some((context_id, interrupt_id_div32)) =
-                self.check_and_index_enable_word(inner_addr)
-            {
+            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
                 let data = self.layout.contexts[context_id].enable[interrupt_id_div32];
                 Ok(unsafe { core::mem::transmute_copy(&data) })
             } else {
@@ -256,8 +345,7 @@ impl Mem for PLIC {
             }
         } else if inner_addr < PLIC_SIZE {
             // config region
-            if let Some((context_id, offset_in_context)) =
-                self.check_and_index_context_config(inner_addr)
+            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
             {
                 if offset_in_context == 0 {
                     // Priority Threshold
@@ -265,7 +353,8 @@ impl Mem for PLIC {
                     Ok(unsafe { core::mem::transmute_copy(&data) })
                 } else if offset_in_context == 1 {
                     // Claim/Complete
-                    todo!();
+                    let data = self.layout.contexts[context_id].claim;
+                    Ok(unsafe { core::mem::transmute_copy(&data) })
                 } else {
                     Err(MemError::LoadFault)
                 }
@@ -288,8 +377,8 @@ impl Mem for PLIC {
 
         if inner_addr < 0x1000 {
             // priority
-            let interrupt_id = (inner_addr / 4) as usize;
-            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS {
+            let interrupt_id = (inner_addr / 4) as u32;
+            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as u32 {
                 return Err(MemError::StoreFault);
             }
 
@@ -301,9 +390,7 @@ impl Mem for PLIC {
             Err(MemError::StoreFault)
         } else if inner_addr < CONTEXT_CONFIG_OFFSET {
             // enable bits
-            if let Some((context_id, interrupt_id_div32)) =
-                self.check_and_index_enable_word(inner_addr)
-            {
+            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
                 self.layout.contexts[context_id].enable[interrupt_id_div32] =
                     unsafe { core::mem::transmute_copy(&data) };
                 Ok(())
@@ -312,17 +399,21 @@ impl Mem for PLIC {
             }
         } else if inner_addr < PLIC_SIZE {
             // config region
-            if let Some((context_id, offset_in_context)) =
-                self.check_and_index_context_config(inner_addr)
+            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
             {
                 if offset_in_context == 0 {
                     // Priority Threshold
                     self.layout.contexts[context_id].priority_threshold =
                         unsafe { core::mem::transmute_copy(&data) };
                     Ok(())
-                } else if offset_in_context == 4 {
+                } else if offset_in_context == 1 {
                     // Claim/Complete
-                    todo!();
+                    let old_claim = &mut self.layout.contexts[context_id].claim;
+                    self.layout
+                        .interrupt_sources_busy
+                        .remove(*old_claim as usize);
+                    *old_claim = 0;
+                    Ok(())
                 } else {
                     Err(MemError::StoreFault)
                 }
@@ -339,6 +430,7 @@ impl Mem for PLIC {
 mod test {
     use super::*;
 
+    // all methods go through mmio interface.
     impl PLIC {
         fn get_priority(&mut self, interrupt_id: WordType) -> Result<u32, MemError> {
             self.read(interrupt_id * 4)
@@ -397,9 +489,13 @@ mod test {
             self.write(addr, value)
         }
 
-        fn set_claim_complete(&mut self, context_id: WordType, value: u32) -> Result<(), MemError> {
+        fn set_claim_complete(
+            &mut self,
+            context_id: WordType,
+            interrupt_id: u32,
+        ) -> Result<(), MemError> {
             let addr = CONTEXT_CONFIG_OFFSET + (context_id * CONTEXT_CONFIG_SIZE) + 4;
-            self.write(addr, value)
+            self.write(addr, interrupt_id)
         }
     }
 
@@ -463,5 +559,38 @@ mod test {
         ); // over max context index
 
         // TODO: test claim/complete.
+    }
+
+    #[test]
+    fn interrupt_test() {
+        let mut plic = PLIC::new();
+        plic.set_priority(1, 5).unwrap();
+        plic.set_priority(2, 7).unwrap();
+        plic.suspend_interrupt(1);
+        plic.suspend_interrupt(2);
+        assert!(plic.check_interrupt(0).is_none());
+
+        // context 0 <- interrupt 2 (receiveed)
+        plic.set_enable_word(0, 0, 0xffffffff).unwrap();
+        assert_eq!(plic.check_interrupt(0), Some(2)); // receive but do not complete.
+        assert!(plic.check_interrupt(0).is_none()); // context is busy for interrupt 2
+
+        // context 1 <- interrupt 1 (receiveed)
+        plic.set_enable_word(1, 0, 0xffffffff).unwrap();
+        assert_eq!(plic.check_interrupt(1), Some(1)); // receive but do not complete.
+        // context 1 <- interrupt 1 (completed)
+        plic.set_claim_complete(1, 1).unwrap();
+
+        plic.suspend_interrupt(2);
+        assert!(plic.check_interrupt(1).is_none()); // interrupt 2 is not completed.
+
+        // context 0 <- interrupt 2 (completed)
+        plic.set_claim_complete(0, 2).unwrap();
+
+        // context 1 <- interrupt 2 (receiveed)
+        assert_eq!(plic.check_interrupt(1), Some(2));
+
+        // context 0 <- None
+        assert!(plic.check_interrupt(0).is_none());
     }
 }
