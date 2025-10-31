@@ -9,6 +9,7 @@ pub mod fast_uart;
 mod id_allocator;
 pub(crate) use id_allocator::*;
 pub(crate) mod mmio;
+pub(crate) mod plic;
 pub(crate) mod power_manager;
 pub(crate) mod virtio;
 
