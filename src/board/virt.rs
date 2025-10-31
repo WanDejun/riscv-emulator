@@ -13,9 +13,13 @@ use crate::{
     device::{
         self, DeviceTrait,
         aclint::Clint,
-        config::{CLINT_BASE, CLINT_SIZE, Device, POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
+        config::{
+            CLINT_BASE, CLINT_SIZE, Device, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE,
+            POWER_MANAGER_SIZE,
+        },
         fast_uart::{FastUart16550, virtual_io::SerialDestination},
         mmio::{MemoryMapIO, MemoryMapItem},
+        plic::PLIC,
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
         virtio::{
             virtio_blk::VirtIOBlkDeviceBuilder,
@@ -62,9 +66,13 @@ pub struct VirtBoard {
     cpu: Box<RV32CPU>,
     clock: VirtualClockRef,
     timer: Rc<UnsafeCell<Timer>>,
-    status: BoardStatus,
+
+    // interrupt manager.
     clint: Rc<RefCell<Device>>,
+    plic: Rc<RefCell<Device>>,
     async_poller: AsyncPoller,
+
+    status: BoardStatus,
 }
 
 impl VirtBoard {
@@ -104,11 +112,13 @@ impl VirtBoard {
             clock.clone(),
             timer.clone(),
         ))));
+        let plic = Rc::new(RefCell::new(Device::PLIC(PLIC::new())));
 
         let mut mmio_items = vec![
             MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(uart1_info.base, uart1_info.size, uart1),
             MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
+            MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic.clone()),
+            MemoryMapItem::new(uart1_info.base, uart1_info.size, uart1),
         ];
 
         // Add VirtIO device.
@@ -158,9 +168,12 @@ impl VirtBoard {
             cpu: cpu,
             clock: clock,
             timer: timer,
-            status: BoardStatus::Running,
-            clint: clint,
+
             async_poller: async_poller.start_polling(),
+            clint: clint,
+            plic,
+
+            status: BoardStatus::Running,
         }
     }
 

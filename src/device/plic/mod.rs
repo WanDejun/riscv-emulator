@@ -8,7 +8,7 @@ use bit_set::BitSet;
 
 use crate::{
     config::arch_config::WordType,
-    device::{Mem, MemError, config::PLIC_SIZE},
+    device::{DeviceTrait, Mem, MemError, config::PLIC_SIZE},
 };
 
 const PLIC_MAX_INTERRUPTS: usize = 1024;
@@ -423,6 +423,15 @@ impl Mem for PLIC {
         } else {
             unreachable!();
         }
+    }
+}
+
+impl DeviceTrait for PLIC {
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        None
+    }
+    fn sync(&mut self) {
+        // nothing to do.
     }
 }
 

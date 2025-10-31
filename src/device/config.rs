@@ -2,7 +2,7 @@ use super::{DeviceTrait, Mem};
 use crate::{
     config::arch_config::WordType,
     device::{
-        MemError, aclint::Clint, fast_uart::FastUart16550, power_manager::PowerManager,
+        MemError, aclint::Clint, fast_uart::FastUart16550, plic::PLIC, power_manager::PowerManager,
         virtio::virtio_mmio::VirtIOMMIO,
     },
     utils::UnsignedInteger,
@@ -73,4 +73,4 @@ macro_rules! make_device_enum {
         }
     };
 }
-make_device_enum!(FastUart16550, PowerManager, Clint, VirtIOMMIO);
+make_device_enum!(FastUart16550, PowerManager, Clint, VirtIOMMIO, PLIC);
