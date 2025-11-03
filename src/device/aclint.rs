@@ -61,7 +61,7 @@ impl Clint {
 }
 
 impl IRQSource for Clint {
-    fn set_irq_line(&mut self, line: IRQLine, _id: u8) {
+    fn set_irq_line(&mut self, line: IRQLine, _id: usize) {
         self.irq_line = Some(line);
         self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({
             let irq_line_ptr = self.irq_line.as_mut().unwrap() as *mut IRQLine;

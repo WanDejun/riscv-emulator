@@ -191,14 +191,19 @@ impl RV32CPU {
 }
 
 impl IRQHandler for RV32CPU {
-    fn handle_irq(&mut self, id: u8, level: bool) {
-        match Interrupt::from(id as usize) {
+    fn handle_irq(&mut self, interrupt: Interrupt, level: bool) {
+        let mip = self.csr.get_by_type_existing::<Mip>();
+        let level = level as WordType;
+
+        match interrupt {
             Interrupt::MachineTimer => {
-                if level {
-                    self.csr.get_by_type::<Mip>().unwrap().set_mtip(1);
-                } else {
-                    self.csr.get_by_type::<Mip>().unwrap().set_mtip(0);
-                }
+                mip.set_mtip(level);
+            }
+            Interrupt::MachineExternal => {
+                mip.set_meip(level);
+            }
+            Interrupt::SupervisorExternal => {
+                mip.set_seip(level);
             }
 
             _ => {

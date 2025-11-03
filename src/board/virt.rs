@@ -9,7 +9,6 @@ use crate::{
     EMULATOR_CONFIG,
     async_poller::AsyncPoller,
     board::{Board, BoardStatus},
-    config::arch_config::WordType,
     device::{
         self, DeviceTrait,
         aclint::Clint,
@@ -39,28 +38,33 @@ use crate::{
 };
 
 pub trait IRQHandler {
-    fn handle_irq(&mut self, id: u8, level: bool);
+    fn handle_irq(&mut self, interrupt: Interrupt, level: bool);
 }
 
 pub trait IRQSource {
-    fn set_irq_line(&mut self, line: IRQLine, id: u8);
+    fn set_irq_line(&mut self, line: IRQLine, id: usize);
 }
 
 /// NOTE: Only used in single-threaded contexts.
 pub struct IRQLine {
     target: *mut dyn IRQHandler,
-    id: u8,
+    interrupt_nr: Interrupt,
 }
 
 impl IRQLine {
-    pub fn new(target: *mut dyn IRQHandler, id: u8) -> Self {
-        Self { target, id }
+    pub fn new(target: *mut dyn IRQHandler, interrupt_nr: Interrupt) -> Self {
+        Self {
+            target,
+            interrupt_nr,
+        }
     }
 
     pub fn set_irq(&mut self, level: bool) {
-        unsafe { &mut *self.target }.handle_irq(self.id, level);
+        unsafe { &mut *self.target }.handle_irq(self.interrupt_nr, level);
     }
 }
+
+const PLIC_FREQUENCY_DIVISION: usize = 128;
 
 pub struct VirtBoard {
     cpu: Box<RV32CPU>,
@@ -70,6 +74,7 @@ pub struct VirtBoard {
     // interrupt manager.
     clint: Rc<RefCell<Device>>,
     plic: Rc<RefCell<Device>>,
+    plic_freq_counter: usize,
     async_poller: AsyncPoller,
 
     status: BoardStatus,
@@ -112,6 +117,8 @@ impl VirtBoard {
             clock.clone(),
             timer.clone(),
         ))));
+
+        // PLIC init.
         let plic = Rc::new(RefCell::new(Device::PLIC(PLIC::new())));
 
         let mut mmio_items = vec![
@@ -153,15 +160,26 @@ impl VirtBoard {
 
         let mut cpu = Box::new(RV32CPU::from_vaddr_manager(vaddr_manager));
 
-        let timer_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn IRQHandler,
-            Into::<WordType>::into(Interrupt::MachineTimer) as u8,
-        );
+        // register irq line for timer.
+        let timer_irq_line =
+            IRQLine::new(&mut *cpu as *mut dyn IRQHandler, Interrupt::MachineTimer);
 
         let clint_clone = clint.clone();
         let clint_mut_ref = &mut *(clint_clone.borrow_mut());
         if let Device::Clint(clint_inner) = clint_mut_ref {
             clint_inner.set_irq_line(timer_irq_line, 0);
+        }
+
+        // register irq line for plic.
+        let plic_mathine_irq_line =
+            IRQLine::new(&mut *cpu as *mut dyn IRQHandler, Interrupt::MachineExternal);
+        let plic_supervisor_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn IRQHandler,
+            Interrupt::SupervisorExternal,
+        );
+        if let Device::PLIC(plic) = &mut *plic.borrow_mut() {
+            plic.set_irq_line(plic_mathine_irq_line, 0);
+            plic.set_irq_line(plic_supervisor_irq_line, 1);
         }
 
         Self {
@@ -172,6 +190,7 @@ impl VirtBoard {
             async_poller: async_poller.start_polling(),
             clint: clint,
             plic,
+            plic_freq_counter: 0,
 
             status: BoardStatus::Running,
         }
@@ -181,6 +200,12 @@ impl VirtBoard {
     where
         F: FnMut(&mut RV32CPU, usize) -> bool,
     {
+        if self.plic_freq_counter.wrapping_add(1) == PLIC_FREQUENCY_DIVISION {
+            if let Device::PLIC(plic) = &mut *self.plic.borrow_mut() {
+                plic.try_get_interrupt(0);
+                plic.try_get_interrupt(1);
+            }
+        }
         self.cpu.step()?;
         self.clock.advance(1);
 

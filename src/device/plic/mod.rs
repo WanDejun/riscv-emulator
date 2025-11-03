@@ -7,6 +7,7 @@ use std::{
 use bit_set::BitSet;
 
 use crate::{
+    board::virt::IRQSource,
     config::arch_config::WordType,
     device::{DeviceTrait, Mem, MemError, config::PLIC_SIZE},
 };
@@ -229,12 +230,14 @@ impl PLICLayout {
 
 pub struct PLIC {
     layout: PLICLayout,
+    irq_line: [Option<crate::board::virt::IRQLine>; VIRT_MAX_CONTEXTS],
 }
 
 impl PLIC {
     pub fn new() -> Self {
         PLIC {
             layout: PLICLayout::new(),
+            irq_line: core::array::from_fn(|_| None),
         }
     }
 
@@ -252,8 +255,17 @@ impl PLIC {
     //     self.layout.pending.clear_bit(interrupt_id);
     // }
 
-    pub fn check_interrupt(&mut self, context_nr: usize) -> Option<u32> {
-        self.layout.check_interrupt(context_nr)
+    /// try get interrupt of context_nr, send interrupt signal to cpu, interrupt line existed.
+    pub fn try_get_interrupt(&mut self, context_nr: usize) -> Option<u32> {
+        if let Some(interrupt_id) = self.layout.check_interrupt(context_nr) {
+            if let Some(irq_line) = &mut self.irq_line[context_nr] {
+                irq_line.set_irq(true);
+            }
+
+            Some(interrupt_id)
+        } else {
+            None
+        }
     }
 
     // inner_addr point to self.layout.contexts[return.0].enable[return.1]
@@ -435,6 +447,14 @@ impl DeviceTrait for PLIC {
     }
 }
 
+impl IRQSource for PLIC {
+    fn set_irq_line(&mut self, line: crate::board::virt::IRQLine, id: usize) {
+        assert!(id < VIRT_MAX_CONTEXTS);
+        // plic external interrupt source id will be write to plic.claim register.
+        self.irq_line[id] = Some(line);
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -577,29 +597,29 @@ mod test {
         plic.set_priority(2, 7).unwrap();
         plic.suspend_interrupt(1);
         plic.suspend_interrupt(2);
-        assert!(plic.check_interrupt(0).is_none());
+        assert!(plic.try_get_interrupt(0).is_none());
 
         // context 0 <- interrupt 2 (receiveed)
         plic.set_enable_word(0, 0, 0xffffffff).unwrap();
-        assert_eq!(plic.check_interrupt(0), Some(2)); // receive but do not complete.
-        assert!(plic.check_interrupt(0).is_none()); // context is busy for interrupt 2
+        assert_eq!(plic.try_get_interrupt(0), Some(2)); // receive but do not complete.
+        assert!(plic.try_get_interrupt(0).is_none()); // context is busy for interrupt 2
 
         // context 1 <- interrupt 1 (receiveed)
         plic.set_enable_word(1, 0, 0xffffffff).unwrap();
-        assert_eq!(plic.check_interrupt(1), Some(1)); // receive but do not complete.
+        assert_eq!(plic.try_get_interrupt(1), Some(1)); // receive but do not complete.
         // context 1 <- interrupt 1 (completed)
         plic.set_claim_complete(1, 1).unwrap();
 
         plic.suspend_interrupt(2);
-        assert!(plic.check_interrupt(1).is_none()); // interrupt 2 is not completed.
+        assert!(plic.try_get_interrupt(1).is_none()); // interrupt 2 is not completed.
 
         // context 0 <- interrupt 2 (completed)
         plic.set_claim_complete(0, 2).unwrap();
 
         // context 1 <- interrupt 2 (receiveed)
-        assert_eq!(plic.check_interrupt(1), Some(2));
+        assert_eq!(plic.try_get_interrupt(1), Some(2));
 
         // context 0 <- None
-        assert!(plic.check_interrupt(0).is_none());
+        assert!(plic.try_get_interrupt(0).is_none());
     }
 }
