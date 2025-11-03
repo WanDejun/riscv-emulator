@@ -12,6 +12,7 @@ mod ram;
 mod utils;
 mod vclock;
 
+pub mod async_poller;
 pub mod board;
 pub mod cli_coordinator;
 pub mod config;

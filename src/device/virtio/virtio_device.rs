@@ -30,6 +30,10 @@ pub(crate) trait VirtIODeviceTrait {
 
     fn read_config(&mut self, idx: u64) -> u32;
     fn write_config(&mut self, idx: u64, data: u32);
+
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        None
+    }
 }
 
 pub(super) struct DeviceIDAllocator(AtomicU16);

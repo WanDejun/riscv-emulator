@@ -357,6 +357,9 @@ impl Mem for VirtIOMMIO {
 
 impl DeviceTrait for VirtIOMMIO {
     fn sync(&mut self) {}
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        self.device.get_mut().get_poll_enent()
+    }
 }
 
 impl MemMappedDeviceTrait for VirtIOMMIO {

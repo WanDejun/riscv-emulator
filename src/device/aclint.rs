@@ -161,6 +161,9 @@ impl DeviceTrait for Clint {
     fn sync(&mut self) {
         // Nothing to do
     }
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        None
+    }
 }
 
 impl MemMappedDeviceTrait for Clint {

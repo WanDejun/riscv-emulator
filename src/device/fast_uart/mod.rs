@@ -30,12 +30,13 @@ use log::error;
 use crate::EmulatorConfigurator;
 use crate::{
     EMULATOR_CONFIG,
+    async_poller::{self, InterryptID, PollingEventTrait},
     cli_coordinator::CliCoordinator,
     config::arch_config::WordType,
     device::{
         DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
-        fast_uart::virtual_io::SerialDestination,
+        fast_uart::virtual_io::{SerialDestination, TerminalIO},
     },
     handle_trait::HandleTrait,
     isa::riscv::trap::Exception,
@@ -338,6 +339,12 @@ impl DeviceTrait for FastUart16550 {
                 break;
             }
         }
+    }
+
+    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+        Some(async_poller::PollingEvent::Uart(TerminalIO::new(
+            self.get_io_channel(),
+        )))
     }
 }
 
