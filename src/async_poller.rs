@@ -15,17 +15,24 @@ pub trait PollingEventTrait {
     fn poll(&mut self) -> Option<ExternalInterrupt>;
 }
 
+pub enum AsyncPollerCommand {
+    Exit,
+}
+
 pub enum PollingEvent {
     Uart(TerminalIO),
     #[cfg(feature = "test-device")]
     TestDevice(TestDevicePoller),
-    Stop,
+    Control(Receiver<AsyncPollerCommand>),
 }
 
 pub struct AsyncPoller {
     enents: Arc<Mutex<Vec<PollingEvent>>>,
-    sender: Sender<ExternalInterrupt>,
-    receiver: Receiver<ExternalInterrupt>,
+    irq_sender: Sender<ExternalInterrupt>, // used in polling thread to send interrupt id.
+    irq_receiver: Receiver<ExternalInterrupt>,
+
+    control_sender: Sender<AsyncPollerCommand>,
+    control_receiver: Receiver<AsyncPollerCommand>, // used in polling thread to receive control commands.
 
     #[cfg(feature = "riscv64")]
     plic_irq_line: Option<PlicIRQLine>,
@@ -33,11 +40,20 @@ pub struct AsyncPoller {
 
 impl AsyncPoller {
     pub fn new() -> Self {
-        let (sender, receiver) = channel::unbounded();
+        let (irq_sender, irq_receiver) = channel::unbounded();
+        let (control_sender, control_receiver) = channel::unbounded();
+        let enents = Arc::new(Mutex::new(vec![PollingEvent::Control(
+            control_receiver.clone(),
+        )]));
         Self {
-            enents: Arc::new(Mutex::new(vec![])),
-            sender,
-            receiver,
+            enents,
+            irq_sender,
+            irq_receiver,
+
+            control_sender,
+            control_receiver,
+
+            #[cfg(feature = "riscv64")]
             plic_irq_line: None,
         }
     }
@@ -52,7 +68,7 @@ impl AsyncPoller {
     /// Start a polling thread.
     pub fn start_polling(self) -> Self {
         let events = self.enents.clone();
-        let sender = self.sender.clone();
+        let sender = self.irq_sender.clone();
         thread::spawn(move || {
             loop {
                 // just scheduling enents by order.
@@ -70,8 +86,14 @@ impl AsyncPoller {
                                 sender.send(id).unwrap();
                             }
                         }
-                        PollingEvent::Stop => {
-                            return; // exit current thread.
+                        PollingEvent::Control(receiver) => {
+                            while let Ok(v) = receiver.try_recv() {
+                                match v {
+                                    AsyncPollerCommand::Exit => {
+                                        return; // exit current thread.
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -81,11 +103,21 @@ impl AsyncPoller {
         self
     }
 
+    pub fn exit_polling(&self) {
+        self.control_sender.send(AsyncPollerCommand::Exit).unwrap();
+    }
+
     /// get the result of enent.poll().
     pub fn trigger_external_interrupt(&mut self) {
-        while let Ok(id) = self.receiver.try_recv() {
+        while let Ok(id) = self.irq_receiver.try_recv() {
             self.plic_irq_line.as_mut().unwrap().set_irq(id, true);
         }
+    }
+}
+
+impl Drop for AsyncPoller {
+    fn drop(&mut self) {
+        self.exit_polling();
     }
 }
 
