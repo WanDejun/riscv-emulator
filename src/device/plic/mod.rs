@@ -1,3 +1,5 @@
+pub mod irq_line;
+
 use std::{
     collections::BTreeSet,
     hint::unlikely,
@@ -7,9 +9,9 @@ use std::{
 use bit_set::BitSet;
 
 use crate::{
-    board::virt::IRQSource,
+    board::virt::RiscvIRQSource,
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError, config::PLIC_SIZE},
+    device::{DeviceTrait, Mem, MemError, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler},
 };
 
 const PLIC_MAX_INTERRUPTS: usize = 1024;
@@ -23,6 +25,8 @@ const CONTEXT_ENABLE_BIT_OFFSET: WordType = 0x002000;
 const CONTEXT_ENABLE_BIT_SIZE: WordType = 0x80;
 const CONTEXT_CONFIG_OFFSET: WordType = 0x200000;
 const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
+
+pub type ExternalInterrupt = u32;
 
 pub struct PLICContext {
     enable: [u32; VIRT_MAX_INTERRUPTS / 32], // base + 0x2000 + contextN * 0x80 ~ base + 0x2000 + contextN * 0x80 + 0x7c
@@ -52,24 +56,24 @@ impl PLICPending {
         }
     }
 
-    fn set_bit(&self, interrupt_id: usize) {
+    fn set_bit(&self, interrupt_id: ExternalInterrupt) {
         let index = interrupt_id / 32;
         let bit = interrupt_id % 32;
-        self.bits[index].fetch_or(1 << bit, std::sync::atomic::Ordering::SeqCst);
+        self.bits[index as usize].fetch_or(1 << bit, std::sync::atomic::Ordering::SeqCst);
     }
 
     #[inline]
-    fn clear_bit(&self, interrupt_id: u32) {
+    fn clear_bit(&self, interrupt_id: ExternalInterrupt) {
         self.take_bit(interrupt_id);
     }
 
-    fn get_bit(&self, interrupt_id: u32) -> bool {
+    fn get_bit(&self, interrupt_id: ExternalInterrupt) -> bool {
         let index = (interrupt_id / 32) as usize;
         let bit = interrupt_id % 32;
         (self.bits[index].load(std::sync::atomic::Ordering::SeqCst) & (1 << bit)) != 0
     }
 
-    fn take_bit(&self, interrupt_id: u32) -> bool {
+    fn take_bit(&self, interrupt_id: ExternalInterrupt) -> bool {
         let index = (interrupt_id / 32) as usize;
         let bit = interrupt_id % 32;
         let mask = 1 << bit;
@@ -129,7 +133,7 @@ pub struct PLICLayout {
     pending: Arc<PLICPending>,            // base + 0x1000 ~ base + 0x107c
     contexts: [PLICContext; VIRT_MAX_CONTEXTS], // base + 0x2000 ~ base + 0x3FFFFC
 
-    ordering: BTreeSet<(u32, u32)>,
+    ordering: BTreeSet<(u32, ExternalInterrupt)>,
 
     interrupt_sources_busy: BitSet,
 }
@@ -156,12 +160,12 @@ impl PLICLayout {
     }
 
     #[inline]
-    fn get_priority(&self, interrupt_id: usize) -> u32 {
-        self.priority[interrupt_id]
+    fn get_priority(&self, interrupt_id: ExternalInterrupt) -> u32 {
+        self.priority[interrupt_id as usize]
     }
 
     #[inline]
-    fn set_priority(&mut self, interrupt_id: u32, value: u32) {
+    fn set_priority(&mut self, interrupt_id: ExternalInterrupt, value: u32) {
         if unlikely(interrupt_id as usize > VIRT_MAX_INTERRUPTS) {
             return;
         }
@@ -176,12 +180,12 @@ impl PLICLayout {
     }
 
     #[inline]
-    fn take_pending_bit(&self, interrupt_id: u32) -> bool {
+    fn take_pending_bit(&self, interrupt_id: ExternalInterrupt) -> bool {
         self.pending.take_bit(interrupt_id)
     }
 
     #[inline]
-    fn get_enable_bit(&self, context_nr: usize, interrupt_id: u32) -> bool {
+    fn get_enable_bit(&self, context_nr: usize, interrupt_id: ExternalInterrupt) -> bool {
         let index = (interrupt_id / 32) as usize;
         let bit = interrupt_id % 32;
         (self.contexts[context_nr].enable[index] & (1 << bit)) != 0
@@ -241,8 +245,8 @@ impl PLIC {
         }
     }
 
-    pub fn suspend_interrupt(&mut self, interrupt_id: usize) {
-        if unlikely(interrupt_id > VIRT_MAX_INTERRUPTS) {
+    pub fn trigger_interrupt(&mut self, interrupt_id: ExternalInterrupt) {
+        if unlikely(interrupt_id > VIRT_MAX_INTERRUPTS as ExternalInterrupt) {
             return;
         }
         self.layout.pending.set_bit(interrupt_id);
@@ -332,8 +336,8 @@ impl Mem for PLIC {
 
         if inner_addr < PENDING_BIT_OFFSET {
             // priority
-            let interrupt_id = (inner_addr / 4) as usize;
-            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS {
+            let interrupt_id = (inner_addr / 4) as ExternalInterrupt;
+            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as ExternalInterrupt {
                 return Err(MemError::LoadFault);
             }
             let data = self.layout.get_priority(interrupt_id);
@@ -447,11 +451,21 @@ impl DeviceTrait for PLIC {
     }
 }
 
-impl IRQSource for PLIC {
+// Send the external interrupt resulting from the arbitration to the CPU through the IRQLine.
+impl RiscvIRQSource for PLIC {
     fn set_irq_line(&mut self, line: crate::board::virt::IRQLine, id: usize) {
         assert!(id < VIRT_MAX_CONTEXTS);
         // plic external interrupt source id will be write to plic.claim register.
         self.irq_line[id] = Some(line);
+    }
+}
+
+// Receive the interrupt signal from peripherals.
+impl PlicIRQHandler for PLIC {
+    fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
+        if level {
+            self.trigger_interrupt(interrupt);
+        }
     }
 }
 
@@ -595,8 +609,8 @@ mod test {
         let mut plic = PLIC::new();
         plic.set_priority(1, 5).unwrap();
         plic.set_priority(2, 7).unwrap();
-        plic.suspend_interrupt(1);
-        plic.suspend_interrupt(2);
+        plic.trigger_interrupt(1);
+        plic.trigger_interrupt(2);
         assert!(plic.try_get_interrupt(0).is_none());
 
         // context 0 <- interrupt 2 (receiveed)
@@ -610,7 +624,7 @@ mod test {
         // context 1 <- interrupt 1 (completed)
         plic.set_claim_complete(1, 1).unwrap();
 
-        plic.suspend_interrupt(2);
+        plic.trigger_interrupt(2);
         assert!(plic.try_get_interrupt(1).is_none()); // interrupt 2 is not completed.
 
         // context 0 <- interrupt 2 (completed)

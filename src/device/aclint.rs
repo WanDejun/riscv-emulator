@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
-    board::virt::{IRQLine, IRQSource},
+    board::virt::{IRQLine, RiscvIRQSource},
     config::arch_config::WordType,
     device::{
         DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
@@ -60,7 +60,7 @@ impl Clint {
     }
 }
 
-impl IRQSource for Clint {
+impl RiscvIRQSource for Clint {
     fn set_irq_line(&mut self, line: IRQLine, _id: usize) {
         self.irq_line = Some(line);
         self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({

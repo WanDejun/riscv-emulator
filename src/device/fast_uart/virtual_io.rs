@@ -1,7 +1,7 @@
 use crate::{
-    async_poller::{InterryptID, PollingEventTrait},
+    async_poller::PollingEventTrait,
     cli_coordinator::CliCoordinator,
-    device::fast_uart::UartIOChannel,
+    device::{fast_uart::UartIOChannel, plic::ExternalInterrupt},
 };
 use clap::ValueEnum;
 use crossbeam::channel::{Receiver, Sender};
@@ -70,7 +70,7 @@ impl SimulationIO {
 // }
 
 impl PollingEventTrait for TerminalIO {
-    fn poll(&self) -> Option<InterryptID> {
+    fn poll(&self) -> Option<ExternalInterrupt> {
         CliCoordinator::global().confirm_pause_and_wait();
 
         // output epoll

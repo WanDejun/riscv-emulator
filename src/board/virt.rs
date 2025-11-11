@@ -37,22 +37,22 @@ use crate::{
     vclock::{Timer, VirtualClockRef},
 };
 
-pub trait IRQHandler {
+pub trait RiscvIRQHandler {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool);
 }
 
-pub trait IRQSource {
+pub trait RiscvIRQSource {
     fn set_irq_line(&mut self, line: IRQLine, id: usize);
 }
 
 /// NOTE: Only used in single-threaded contexts.
 pub struct IRQLine {
-    target: *mut dyn IRQHandler,
+    target: *mut dyn RiscvIRQHandler,
     interrupt_nr: Interrupt,
 }
 
 impl IRQLine {
-    pub fn new(target: *mut dyn IRQHandler, interrupt_nr: Interrupt) -> Self {
+    pub fn new(target: *mut dyn RiscvIRQHandler, interrupt_nr: Interrupt) -> Self {
         Self {
             target,
             interrupt_nr,
@@ -161,8 +161,10 @@ impl VirtBoard {
         let mut cpu = Box::new(RV32CPU::from_vaddr_manager(vaddr_manager));
 
         // register irq line for timer.
-        let timer_irq_line =
-            IRQLine::new(&mut *cpu as *mut dyn IRQHandler, Interrupt::MachineTimer);
+        let timer_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn RiscvIRQHandler,
+            Interrupt::MachineTimer,
+        );
 
         let clint_clone = clint.clone();
         let clint_mut_ref = &mut *(clint_clone.borrow_mut());
@@ -171,10 +173,12 @@ impl VirtBoard {
         }
 
         // register irq line for plic.
-        let plic_mathine_irq_line =
-            IRQLine::new(&mut *cpu as *mut dyn IRQHandler, Interrupt::MachineExternal);
+        let plic_mathine_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn RiscvIRQHandler,
+            Interrupt::MachineExternal,
+        );
         let plic_supervisor_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn IRQHandler,
+            &mut *cpu as *mut dyn RiscvIRQHandler,
             Interrupt::SupervisorExternal,
         );
         if let Device::PLIC(plic) = &mut *plic.borrow_mut() {
@@ -201,6 +205,11 @@ impl VirtBoard {
         F: FnMut(&mut RV32CPU, usize) -> bool,
     {
         if self.plic_freq_counter.wrapping_add(1) == PLIC_FREQUENCY_DIVISION {
+            self.plic_freq_counter = 0;
+
+            // TODO: use external irq lines to trigger plic interrupts.
+            self.async_poller.trigger_external_interrupt();
+
             if let Device::PLIC(plic) = &mut *self.plic.borrow_mut() {
                 plic.try_get_interrupt(0);
                 plic.try_get_interrupt(1);

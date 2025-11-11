@@ -2,7 +2,7 @@
 use crossterm::terminal::disable_raw_mode;
 
 use crate::{
-    board::virt::IRQHandler,
+    board::virt::RiscvIRQHandler,
     config::arch_config::WordType,
     cpu::RegFile,
     fpu::soft_float::SoftFPU,
@@ -190,7 +190,7 @@ impl RV32CPU {
     }
 }
 
-impl IRQHandler for RV32CPU {
+impl RiscvIRQHandler for RV32CPU {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool) {
         let mip = self.csr.get_by_type_existing::<Mip>();
         let level = level as WordType;

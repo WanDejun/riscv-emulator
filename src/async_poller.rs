@@ -5,13 +5,13 @@ use std::{
 
 use crossbeam::channel::{self, Receiver, Sender};
 
-use crate::device::fast_uart::virtual_io::TerminalIO;
+#[cfg(feature = "riscv64")]
+use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
+use crate::device::{fast_uart::virtual_io::TerminalIO, plic::ExternalInterrupt};
 
 pub trait PollingEventTrait {
-    fn poll(&self) -> Option<InterryptID>;
+    fn poll(&self) -> Option<ExternalInterrupt>;
 }
-
-pub type InterryptID = u8;
 
 pub enum PollingEvent {
     Uart(TerminalIO),
@@ -20,8 +20,11 @@ pub enum PollingEvent {
 
 pub struct AsyncPoller {
     enents: Arc<Mutex<Vec<PollingEvent>>>,
-    sender: Sender<InterryptID>,
-    receiver: Receiver<InterryptID>,
+    sender: Sender<ExternalInterrupt>,
+    receiver: Receiver<ExternalInterrupt>,
+
+    #[cfg(feature = "riscv64")]
+    plic_irq_line: Option<PlicIRQLine>,
 }
 
 impl AsyncPoller {
@@ -31,6 +34,7 @@ impl AsyncPoller {
             enents: Arc::new(Mutex::new(vec![])),
             sender,
             receiver,
+            plic_irq_line: None,
         }
     }
 
@@ -68,12 +72,16 @@ impl AsyncPoller {
     }
 
     /// get the result of enent.poll().
-    pub fn get_poller_results(&self) -> Vec<InterryptID> {
-        let mut interrupts = vec![];
+    pub fn trigger_external_interrupt(&mut self) {
         while let Ok(id) = self.receiver.recv() {
-            interrupts.push(id);
+            self.plic_irq_line.as_mut().unwrap().set_irq(id, true);
         }
+    }
+}
 
-        interrupts
+#[cfg(feature = "riscv64")]
+impl PlicIRQSource for AsyncPoller {
+    fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
+        self.plic_irq_line = Some(line);
     }
 }

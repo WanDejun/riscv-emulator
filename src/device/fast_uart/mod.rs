@@ -30,7 +30,7 @@ use log::error;
 use crate::EmulatorConfigurator;
 use crate::{
     EMULATOR_CONFIG,
-    async_poller::{self, InterryptID, PollingEventTrait},
+    async_poller::{self, PollingEventTrait},
     cli_coordinator::CliCoordinator,
     config::arch_config::WordType,
     device::{
