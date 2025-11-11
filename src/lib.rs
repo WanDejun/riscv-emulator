@@ -64,7 +64,7 @@ pub struct EmulatorConfig {
 impl EmulatorConfig {
     pub fn new() -> Self {
         Self {
-            serial_destination: SerialDestination::Stdio,
+            serial_destination: SerialDestination::Test,
             devices: vec![],
         }
     }
