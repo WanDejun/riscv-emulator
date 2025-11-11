@@ -4,6 +4,10 @@
 use std::{
     hint::unlikely,
     mem::transmute_copy,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
     time::{self, UNIX_EPOCH},
 };
 
@@ -19,7 +23,7 @@ pub const TEST_DEVICE_INTERRUPT_ID: ExternalInterrupt = 63;
 
 struct TestDeviceLayout {
     control_register: u32,
-    interrupt_mask_register: u32,
+    interrupt_mask_register: Arc<AtomicU32>,
     data_register0: u32,
     data_register1: u32,
 }
@@ -28,7 +32,7 @@ impl TestDeviceLayout {
     fn new() -> Self {
         Self {
             control_register: 0,
-            interrupt_mask_register: 0,
+            interrupt_mask_register: Arc::new(AtomicU32::new(0)),
             data_register0: 0,
             data_register1: 0,
         }
@@ -36,20 +40,20 @@ impl TestDeviceLayout {
 }
 
 enum PollerDataPackage {
-    InterruptStatus(bool),
+    // InterruptStatus(u32),
     Data(u64),
 }
 pub struct TestDevicePoller {
-    enable: bool,
+    interrupt_mask_register: Arc<AtomicU32>,
     pre_time: u64,
     step_time: u64,
     receiver: Receiver<PollerDataPackage>,
 }
 
 impl TestDevicePoller {
-    fn new(receiver: Receiver<PollerDataPackage>) -> Self {
+    fn new(receiver: Receiver<PollerDataPackage>, imr: Arc<AtomicU32>) -> Self {
         Self {
-            enable: false,
+            interrupt_mask_register: imr,
             pre_time: 0,
             step_time: 0,
             receiver,
@@ -111,11 +115,9 @@ impl Mem for TestDevice {
         match addr {
             0x00 => self.layout.control_register = data_u32,
             0x04 => {
-                self.layout.interrupt_mask_register = data_u32;
-                let interrupt_status = if (data_u32 & 1) != 0 { true } else { false };
-                self.sender
-                    .try_send(PollerDataPackage::InterruptStatus(interrupt_status))
-                    .unwrap();
+                self.layout
+                    .interrupt_mask_register
+                    .store(data_u32, Ordering::Release);
             }
             0x08 => {
                 self.layout.data_register0 = data_u32;
@@ -137,7 +139,10 @@ impl Mem for TestDevice {
 
 impl DeviceTrait for TestDevice {
     fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
-        let poller = TestDevicePoller::new(self.receiver.clone());
+        let poller = TestDevicePoller::new(
+            self.receiver.clone(),
+            self.layout.interrupt_mask_register.clone(),
+        );
         Some(crate::async_poller::PollingEvent::TestDevice(poller))
     }
     fn sync(&mut self) {
@@ -157,12 +162,9 @@ impl PollingEventTrait for TestDevicePoller {
                         .as_nanos();
                     self.pre_time = cur as u64;
                 }
-                PollerDataPackage::InterruptStatus(flag) => {
-                    self.enable = flag;
-                }
             }
         }
-        if !self.enable {
+        if (self.interrupt_mask_register.load(Ordering::Acquire) & 1) == 0 {
             return None;
         }
 
@@ -173,7 +175,9 @@ impl PollingEventTrait for TestDevicePoller {
         let target = self.pre_time + self.step_time;
         if cur >= target {
             self.pre_time = target;
-            self.enable = false;
+            // trigger only one time -> use for debug.
+            // self.interrupt_mask_register
+            //     .fetch_and(!0x1, Ordering::Release);
             Some(63)
         } else {
             None
