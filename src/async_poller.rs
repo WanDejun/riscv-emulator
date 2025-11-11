@@ -7,14 +7,18 @@ use crossbeam::channel::{self, Receiver, Sender};
 
 #[cfg(feature = "riscv64")]
 use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
+#[cfg(feature = "test-device")]
+use crate::device::test_device::TestDevicePoller;
 use crate::device::{fast_uart::virtual_io::TerminalIO, plic::ExternalInterrupt};
 
 pub trait PollingEventTrait {
-    fn poll(&self) -> Option<ExternalInterrupt>;
+    fn poll(&mut self) -> Option<ExternalInterrupt>;
 }
 
 pub enum PollingEvent {
     Uart(TerminalIO),
+    #[cfg(feature = "test-device")]
+    TestDevice(TestDevicePoller),
     Stop,
 }
 
@@ -52,11 +56,17 @@ impl AsyncPoller {
         thread::spawn(move || {
             loop {
                 // just scheduling enents by order.
-                let guard = events.lock().unwrap();
-                for event in guard.iter() {
+                let mut guard = events.lock().unwrap();
+                for event in guard.iter_mut() {
                     match event {
                         PollingEvent::Uart(event) => {
                             if let Some(id) = event.poll() {
+                                sender.send(id).unwrap();
+                            }
+                        }
+                        #[cfg(feature = "test-device")]
+                        PollingEvent::TestDevice(poller) => {
+                            if let Some(id) = poller.poll() {
                                 sender.send(id).unwrap();
                             }
                         }
@@ -73,7 +83,7 @@ impl AsyncPoller {
 
     /// get the result of enent.poll().
     pub fn trigger_external_interrupt(&mut self) {
-        while let Ok(id) = self.receiver.recv() {
+        while let Ok(id) = self.receiver.try_recv() {
             self.plic_irq_line.as_mut().unwrap().set_irq(id, true);
         }
     }

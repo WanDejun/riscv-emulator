@@ -7,8 +7,9 @@ edition = "2024"
 riscv32 = []
 riscv64 = []
 riscv-tests = []
+test-device = ["riscv64"]
 
-default = ["riscv64"]
+default = ["riscv64", "test-device"]
 
 [dependencies]
 xmas-elf = "0.7.0"

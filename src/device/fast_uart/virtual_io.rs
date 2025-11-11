@@ -70,7 +70,7 @@ impl SimulationIO {
 // }
 
 impl PollingEventTrait for TerminalIO {
-    fn poll(&self) -> Option<ExternalInterrupt> {
+    fn poll(&mut self) -> Option<ExternalInterrupt> {
         CliCoordinator::global().confirm_pause_and_wait();
 
         // output epoll

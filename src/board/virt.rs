@@ -5,6 +5,11 @@ use std::{
     sync::atomic::Ordering,
 };
 
+#[cfg(feature = "test-device")]
+use crate::device::{
+    config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
+    test_device::TestDevice,
+};
 use crate::{
     EMULATOR_CONFIG,
     async_poller::AsyncPoller,
@@ -18,7 +23,10 @@ use crate::{
         },
         fast_uart::{FastUart16550, virtual_io::SerialDestination},
         mmio::{MemoryMapIO, MemoryMapItem},
-        plic::PLIC,
+        plic::{
+            PLIC,
+            irq_line::{PlicIRQLine, PlicIRQSource},
+        },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
         virtio::{
             virtio_blk::VirtIOBlkDeviceBuilder,
@@ -118,11 +126,24 @@ impl VirtBoard {
             timer.clone(),
         ))));
 
+        #[cfg(feature = "test-device")]
+        let test_device = Rc::new(RefCell::new(Device::TestDevice(TestDevice::new())));
+        #[cfg(feature = "test-device")]
+        if let Device::TestDevice(device) = &mut *test_device.borrow_mut() {
+            async_poller.add_event(device.get_poll_enent().unwrap());
+        }
+
         // PLIC init.
         let plic = Rc::new(RefCell::new(Device::PLIC(PLIC::new())));
+        if let Device::PLIC(plic) = &mut *plic.borrow_mut() {
+            let poller_plic_irq_line = PlicIRQLine::new(plic as *mut _);
+            async_poller.set_irq_line(poller_plic_irq_line, 0);
+        }
 
         let mut mmio_items = vec![
             MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
+            #[cfg(feature = "test-device")]
+            MemoryMapItem::new(TEST_DEVICE_BASE, TEST_DEVICE_SIZE, test_device),
             MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
             MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic.clone()),
             MemoryMapItem::new(uart1_info.base, uart1_info.size, uart1),
@@ -204,7 +225,8 @@ impl VirtBoard {
     where
         F: FnMut(&mut RV32CPU, usize) -> bool,
     {
-        if self.plic_freq_counter.wrapping_add(1) == PLIC_FREQUENCY_DIVISION {
+        self.plic_freq_counter += 1;
+        if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
             self.plic_freq_counter = 0;
 
             // TODO: use external irq lines to trigger plic interrupts.
@@ -357,5 +379,64 @@ mod tests {
             Some(1 << 7)
         );
         assert!(board.clock.now() >= target_time);
+    }
+
+    #[cfg(feature = "test-device")]
+    #[test]
+    fn test_plic() {
+        use std::{thread::sleep, time::Duration};
+
+        use crate::{config::arch_config::WordType, isa::riscv::debugger::Address};
+
+        let mut board = create_test_board();
+
+        if let Device::PLIC(plic) = &mut *board.plic.borrow_mut() {
+            use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
+            const PRIORITY_OFFSET: WordType = 0;
+            const PENDING_BIT_OFFSET: WordType = 0x001000;
+            const CONTEXT_ENABLE_BIT_OFFSET: WordType = 0x002000;
+            const CONTEXT_ENABLE_BIT_SIZE: WordType = 0x80;
+            const CONTEXT_CONFIG_OFFSET: WordType = 0x200000;
+            const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
+
+            // priority_threshold
+            let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE);
+            plic.write(addr, 1u32).unwrap();
+
+            // test device interrupt priority
+            plic.write(TEST_DEVICE_INTERRUPT_ID as WordType * 4, 5u32)
+                .unwrap();
+
+            let addr = CONTEXT_ENABLE_BIT_OFFSET + (0 * CONTEXT_ENABLE_BIT_SIZE) + 4;
+            plic.write(addr, 0xffffffffu32).unwrap();
+        }
+
+        board
+            .cpu
+            .write_memory(
+                Address::Phys(TEST_DEVICE_BASE + 2 * size_of::<u32>() as WordType),
+                500_000u32,
+            )
+            .unwrap();
+        board
+            .cpu
+            .write_memory(
+                Address::Phys(TEST_DEVICE_BASE + 3 * size_of::<u32>() as WordType),
+                0u32,
+            )
+            .unwrap();
+        board
+            .cpu
+            .write_memory(
+                Address::Phys(TEST_DEVICE_BASE + 1 * size_of::<u32>() as WordType),
+                1u32,
+            )
+            .unwrap();
+        sleep(Duration::from_secs(1));
+
+        for _ in 0..200 {
+            assert!(board.step().is_ok());
+        }
+        assert_eq!(board.cpu.debug_csr(csr_index::mip, None).unwrap(), 1 << 11);
     }
 }
