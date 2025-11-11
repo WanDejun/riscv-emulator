@@ -1,4 +1,4 @@
-// A simple timer(nano_seconds) for external interrupt testing.
+// A simple timer(microseconds) for external interrupt testing.
 
 #![cfg(feature = "test-device")]
 use std::{
@@ -8,7 +8,7 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
-    time::{self, UNIX_EPOCH},
+    time::{self, Duration, SystemTime},
 };
 
 use crossbeam::channel::{Receiver, Sender};
@@ -45,8 +45,8 @@ enum PollerDataPackage {
 }
 pub struct TestDevicePoller {
     interrupt_mask_register: Arc<AtomicU32>,
-    pre_time: u64,
-    step_time: u64,
+    pre_time: SystemTime,
+    step_time: Duration,
     receiver: Receiver<PollerDataPackage>,
 }
 
@@ -54,8 +54,8 @@ impl TestDevicePoller {
     fn new(receiver: Receiver<PollerDataPackage>, imr: Arc<AtomicU32>) -> Self {
         Self {
             interrupt_mask_register: imr,
-            pre_time: 0,
-            step_time: 0,
+            pre_time: SystemTime::now(),
+            step_time: Duration::from_micros(0),
             receiver,
         }
     }
@@ -155,12 +155,8 @@ impl PollingEventTrait for TestDevicePoller {
         while let Ok(v) = self.receiver.try_recv() {
             match v {
                 PollerDataPackage::Data(t) => {
-                    self.step_time = t;
-                    let cur = time::SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("time went backwards")
-                        .as_nanos();
-                    self.pre_time = cur as u64;
+                    self.step_time = Duration::from_micros(t);
+                    self.pre_time = time::SystemTime::now();
                 }
             }
         }
@@ -168,13 +164,9 @@ impl PollingEventTrait for TestDevicePoller {
             return None;
         }
 
-        let cur = time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos() as u64;
-        let target = self.pre_time + self.step_time;
-        if cur >= target {
-            self.pre_time = target;
+        let cur = time::SystemTime::now();
+        if cur.duration_since(self.pre_time).unwrap() > self.step_time {
+            self.pre_time = cur;
             // trigger only one time -> use for debug.
             // self.interrupt_mask_register
             //     .fetch_and(!0x1, Ordering::Release);

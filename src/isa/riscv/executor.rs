@@ -119,9 +119,7 @@ impl RV32CPU {
 
     fn step_impl(&mut self) -> Result<(), Exception> {
         if let Some(interrupt) = TrapController::check_interrupt(self) {
-            if TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0) {
-                return Ok(());
-            }
+            TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0);
         }
 
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {

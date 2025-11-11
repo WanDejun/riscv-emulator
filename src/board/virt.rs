@@ -290,7 +290,9 @@ mod tests {
             ram.write::<u32>(4 * i, 0x13).unwrap(); // NOP
         }
 
-        VirtBoard::from_ram(ram)
+        let mut board = VirtBoard::from_ram(ram);
+        board.cpu.debug_csr(csr_index::mtvec, Some(0x8000_2000));
+        board
     }
 
     #[test]
@@ -386,38 +388,44 @@ mod tests {
     fn test_plic() {
         use std::{thread::sleep, time::Duration};
 
+        use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
+        use crate::ram_config;
         use crate::{config::arch_config::WordType, isa::riscv::debugger::Address};
+        const PRIORITY_OFFSET: WordType = 0;
+        const PENDING_BIT_OFFSET: WordType = 0x001000;
+        const CONTEXT_ENABLE_BIT_OFFSET: WordType = 0x002000;
+        const CONTEXT_ENABLE_BIT_SIZE: WordType = 0x80;
+        const CONTEXT_CONFIG_OFFSET: WordType = 0x200000;
+        const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
 
         let mut board = create_test_board();
+        let mstatus = board.cpu.debug_csr(csr_index::mstatus, None).unwrap() | 1 << 3; // enable MIE
+        board.cpu.debug_csr(csr_index::mstatus, Some(mstatus));
+        board.cpu.debug_csr(csr_index::mie, Some(1 << 11)); // enable MEIE
 
         if let Device::PLIC(plic) = &mut *board.plic.borrow_mut() {
-            use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
-            const PRIORITY_OFFSET: WordType = 0;
-            const PENDING_BIT_OFFSET: WordType = 0x001000;
-            const CONTEXT_ENABLE_BIT_OFFSET: WordType = 0x002000;
-            const CONTEXT_ENABLE_BIT_SIZE: WordType = 0x80;
-            const CONTEXT_CONFIG_OFFSET: WordType = 0x200000;
-            const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
-
             // priority_threshold
             let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE);
             plic.write(addr, 1u32).unwrap();
 
-            // test device interrupt priority
+            // test_device interrupt priority
             plic.write(TEST_DEVICE_INTERRUPT_ID as WordType * 4, 5u32)
                 .unwrap();
 
+            // interrupt enable.
             let addr = CONTEXT_ENABLE_BIT_OFFSET + (0 * CONTEXT_ENABLE_BIT_SIZE) + 4;
             plic.write(addr, 0xffffffffu32).unwrap();
         }
 
+        // data register 0
         board
             .cpu
             .write_memory(
                 Address::Phys(TEST_DEVICE_BASE + 2 * size_of::<u32>() as WordType),
-                500_000u32,
+                100_000u32,
             )
             .unwrap();
+        // data register 1
         board
             .cpu
             .write_memory(
@@ -432,11 +440,27 @@ mod tests {
                 1u32,
             )
             .unwrap();
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_millis(20));
 
         for _ in 0..200 {
             assert!(board.step().is_ok());
         }
-        assert_eq!(board.cpu.debug_csr(csr_index::mip, None).unwrap(), 1 << 11);
+
+        let meip = 1 << 11;
+        assert_eq!(board.cpu.debug_csr(csr_index::mip, None).unwrap(), meip);
+
+        // let mecause: WordType = Trap::Interrupt(Interrupt::MachineExternal).into();
+        // assert_eq!(
+        //     board.cpu.debug_csr(csr_index::mcause, None).unwrap(),
+        //     mecause
+        // );
+        if let Device::PLIC(plic) = &mut *board.plic.borrow_mut() {
+            use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
+            let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE) + 4;
+            let claimed_id = plic.read::<u32>(addr).unwrap();
+            assert_eq!(claimed_id, TEST_DEVICE_INTERRUPT_ID);
+        }
+        let mepc = board.cpu.debug_csr(csr_index::mepc, None).unwrap();
+        assert!(mepc >= ram_config::BASE_ADDR);
     }
 }
