@@ -1,6 +1,7 @@
 #[macro_use]
-mod validator;
-
+mod write_validator;
+#[macro_use]
+mod read_validator;
 pub mod csr_macro;
 pub mod m_utils;
 
@@ -10,7 +11,8 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::csr_reg::{
         csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
-        validator::Validator,
+        read_validator::ReadValidator,
+        write_validator::WriteValidator,
     },
 };
 
@@ -179,12 +181,21 @@ impl CsrContext {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CsrReg {
     value: WordType,
-    validator: Option<Validator>,
+    write_validator: Option<WriteValidator>,
+    read_validator: Option<ReadValidator>,
 }
 
 impl CsrReg {
-    fn new(value: WordType, validator: Option<Validator>) -> CsrReg {
-        CsrReg { value, validator }
+    fn new(
+        value: WordType,
+        validator: Option<WriteValidator>,
+        shadow_view: Option<ReadValidator>,
+    ) -> CsrReg {
+        CsrReg {
+            value,
+            write_validator: validator,
+            read_validator: shadow_view,
+        }
     }
 
     fn value(&self) -> WordType {
@@ -192,14 +203,14 @@ impl CsrReg {
     }
 
     fn validate(&self, new_value: WordType, context: &CsrContext) -> CsrWriteOp {
-        if let Some(validator) = self.validator {
+        if let Some(validator) = self.write_validator {
             return validator(new_value, context);
         }
         return CsrWriteOp::new_write_all();
     }
 
     fn write(&mut self, new_value: WordType, context: &CsrContext) {
-        if let Some(validator) = self.validator {
+        if let Some(validator) = self.write_validator {
             let op = validator(new_value, context);
             op.apply(&mut self.value, new_value);
         } else {
@@ -212,7 +223,7 @@ impl CsrReg {
     /// NOTE: This is currently used when writing to a shadow CSR,
     /// which needs to validate and apply the write operation to its base CSR.
     fn write_with_mask(&mut self, new_value: WordType, context: &CsrContext, mask: CsrWriteOp) {
-        if let Some(validator) = self.validator {
+        if let Some(validator) = self.write_validator {
             let op = validator(new_value, context).mask(&mask);
             op.apply(&mut self.value, new_value);
         } else {
@@ -229,7 +240,7 @@ impl CsrReg {
 const CSR_SIZE: usize = 1 << 12;
 
 pub(crate) struct CsrRegFile {
-    table: [Option<CsrReg>; CSR_SIZE],
+    table: Vec<Option<CsrReg>>,
     cpl: PrivilegeLevel, // current privileged level
     pub(super) ctx: CsrContext,
 }
@@ -239,10 +250,14 @@ impl CsrRegFile {
         Self::from(CSR_REG_TABLE)
     }
 
-    pub fn from(csr_table: &[(WordType, WordType, Validator)]) -> Self {
-        let mut table = [None; CSR_SIZE];
+    pub fn from(csr_table: &[(WordType, WordType, WriteValidator)]) -> Self {
+        let mut table = vec![None; CSR_SIZE];
         for (addr, default_value, validator) in csr_table.iter() {
-            table[*addr as usize] = Some(CsrReg::new(*default_value, Some(*validator)));
+            table[*addr as usize] = Some(CsrReg::new(
+                *default_value,
+                Some(*validator),
+                resolve_shadow_addr(*addr),
+            ));
         }
 
         Self {
@@ -349,13 +364,13 @@ impl CsrRegFile {
             fcsr.value = data & 0xFF;
         } else {
             if let Some(csr) = self.table[addr as usize].as_mut() {
-                if let Some(base_addr) = resolve_shadow_addr(addr) {
+                if let Some(base_addr) = csr.read_validator {
                     // This is a shadow CSR, write to its base CSR instead.
 
                     // Validate with the shadow CSR's validator.
                     let op = csr.validate(data, &self.ctx);
 
-                    if let Some(base_csr) = self.table[base_addr as usize].as_mut() {
+                    if let Some(base_csr) = self.table[base_addr.target_index as usize].as_mut() {
                         // Apply the write operation to the base CSR, with the base CSR's validator.
                         base_csr.write_with_mask(data, &self.ctx, op);
                     } else {
@@ -380,7 +395,10 @@ impl CsrRegFile {
             if let Some(base_addr) = resolve_shadow_addr(addr) {
                 // This is a shadow CSR.
                 // The base CSR must exist because it can be resolved by `resolve_shadow_addr`.
-                Some(self.table[base_addr as usize].unwrap().value())
+                Some(
+                    self.table[base_addr.target_index as usize].unwrap().value()
+                        & base_addr.view_mask,
+                )
             } else {
                 Some(self.table[addr as usize]?.value())
             }
@@ -395,7 +413,7 @@ impl CsrRegFile {
     {
         if let Some(base_addr) = resolve_shadow_addr(T::get_index()) {
             // This is a shadow CSR, get its base CSR instead.
-            let reg = self.table[base_addr as usize].as_mut()?;
+            let reg = self.table[base_addr.target_index as usize].as_mut()?;
             return Some(T::new(reg as *mut CsrReg, &mut self.ctx as *mut CsrContext));
         }
 
@@ -525,14 +543,32 @@ mod test {
         assert_eq!(mstatus.get_spp(), 1);
         assert_eq!(sstatus.get_spp(), 1);
 
-        reg.write_uncheck_privilege(Sstatus::get_index(), 0b10);
+        reg.write_uncheck_privilege(Mstatus::get_index(), 0x1002);
         assert_eq!(
             reg.read_uncheck_privilege(Sstatus::get_index()).unwrap(),
-            0b10
+            0x02
         );
         assert_eq!(
             reg.read_uncheck_privilege(Mstatus::get_index()).unwrap(),
-            0b10
+            0x1002
         );
+    }
+
+    #[test]
+    fn test_s_mode_shadow_csr() {
+        let mut csr = CsrRegFile::new();
+
+        let mip = csr.get_by_type_existing::<Mip>();
+        let sip = csr.get_by_type_existing::<Sip>();
+        mip.set_seip(1);
+        assert_eq!(sip.get_seip(), 1);
+        mip.set_meip(1);
+        assert_eq!(csr.read_uncheck_privilege(Sip::get_index()).unwrap(), 0x200);
+        assert_eq!(csr.read_uncheck_privilege(Mip::get_index()).unwrap(), 0xa00);
+
+        let mie = csr.get_by_type_existing::<Mie>();
+        let sie = csr.get_by_type_existing::<Sie>();
+        mie.set_seie(1);
+        assert_eq!(sie.get_seie(), 1);
     }
 }

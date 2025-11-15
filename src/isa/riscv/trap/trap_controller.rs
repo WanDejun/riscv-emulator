@@ -22,8 +22,7 @@ impl TrapController {
     //                M-Mode
     // ======================================
     fn is_exception_delegated_m_mode(cpu: &mut RV32CPU, exception: Exception) -> bool {
-        let medeleg = cpu.csr.get_by_type::<Medeleg>().unwrap();
-        let medeleg_val = medeleg.get_medeleg();
+        let medeleg_val = cpu.debug_csr(Medeleg::get_index(), None).unwrap();
         (medeleg_val & (1 << exception as u8)) != 0
     }
 
@@ -242,8 +241,8 @@ mod test {
                     // .csr(csr_index::mtval, 0)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(mcause.get_exception_code(), Exception::LoadFault.into());
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::LoadFault.into());
                         checker
                     })
             },
@@ -267,11 +266,8 @@ mod test {
                     // .csr(csr_index::mtval, BASE_LOAD_MEM)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(
-                            mcause.get_exception_code(),
-                            Exception::LoadMisaligned.into()
-                        );
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::LoadMisaligned.into());
                         checker
                     })
             },
@@ -289,8 +285,8 @@ mod test {
                     .csr(csr_index::mepc, ram_config::BASE_ADDR)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(mcause.get_exception_code(), Exception::StoreFault.into());
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::StoreFault.into());
                         checker
                     })
             },
@@ -314,11 +310,8 @@ mod test {
                     // .csr(csr_index::mtval, BASE_LOAD_MEM)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(
-                            mcause.get_exception_code(),
-                            Exception::StoreMisaligned.into()
-                        );
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::StoreMisaligned.into());
                         checker
                     })
             },
@@ -341,11 +334,8 @@ mod test {
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(
-                            mcause.get_exception_code(),
-                            Exception::IllegalInstruction.into()
-                        );
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::IllegalInstruction.into());
                         checker
                     })
             },
@@ -368,11 +358,8 @@ mod test {
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(
-                            mcause.get_exception_code(),
-                            Exception::InstructionFault.into()
-                        );
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::InstructionFault.into());
                         checker
                     })
             },
@@ -395,11 +382,8 @@ mod test {
                     .csr(csr_index::mepc, PC_START)
                     .customized(|checker| {
                         let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
-                        assert_eq!(mcause.get_interrupt(), 0);
-                        assert_eq!(
-                            mcause.get_exception_code(),
-                            Exception::InstructionMisaligned.into()
-                        );
+                        assert_eq!(mcause.get_interrupt_flag(), 0);
+                        assert_eq!(mcause.get_cause(), Exception::InstructionMisaligned.into());
                         checker
                     })
             },

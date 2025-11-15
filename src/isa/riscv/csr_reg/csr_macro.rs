@@ -1,6 +1,7 @@
 use phf::phf_map;
 
-use super::validator::*;
+use super::read_validator::*;
+use super::write_validator::*;
 use super::*;
 use crate::config::arch_config::{SignedWordType, WordType, XLEN};
 use crate::utils::BIT_ONES_ARRAY;
@@ -140,7 +141,7 @@ macro_rules! gen_csr_regfile {
             }
         )*
 
-        pub(crate) const CSR_REG_TABLE: &[(WordType, WordType, Validator)] = &[
+        pub(crate) const CSR_REG_TABLE: &[(WordType, WordType, WriteValidator)] = &[
             $(
                 ($addr, $default, ${concat(_validate_, $name_str)})
             ),*
@@ -149,10 +150,10 @@ macro_rules! gen_csr_regfile {
         gen_csr_address_hashmap!($(($name_str, $addr)),*);
 
         /// Resolve the shadow CSR address to its base CSR address.
-        pub(super) fn resolve_shadow_addr(addr: WordType) -> Option<WordType> {
+        pub(super) fn resolve_shadow_addr(addr: WordType) -> Option<ReadValidator> {
             match addr {
                 $(
-                    $addr => gen_csr_regfile!(@resolve_shadow $addr $(, $shadow_of)?),
+                    $addr => gen_csr_regfile!(@resolve_shadow $(@shadow $shadow_of ,)? $name, $($fname),*),
                 )*
                 _ => None,
             }
@@ -160,8 +161,16 @@ macro_rules! gen_csr_regfile {
     };
 
     // These branches are used to find the base CSR address by the shadow CSR address.
-    (@resolve_shadow $addr:expr, $shadow_of:ident) => { Some($shadow_of::get_index()) };
-    (@resolve_shadow $addr:expr) => { None };
+    (@resolve_shadow @shadow $shadow_of:ident, $name: ident, $($fname: ident),* ) => {
+        Some(combine_shadow_read_ops!(
+            $shadow_of::get_index(),
+            $(
+                $name::${concat($fname, _start)},
+                $name::${concat($fname, _end)}
+            ),*
+        ))
+    };
+    (@resolve_shadow $name: ident, $($_: expr),*) => { None };
 
     // These branches are used to choose validator.
     (@choose_validator $name:ident, $fname:ident, $v:expr) => { $v };
@@ -209,18 +218,18 @@ gen_csr_regfile! {
         19, 1, mxr;
         23, 1, spelp;
         24, 1, sdt;
-        32, 2, uxl;
+        32, 2, uxl, validate_readonly;  // TODO: We don't support changing XLEN yet.
         -1, 1, sd;
     ];
 
-    Sie, "sie", 0x104u64, 0x00, [
+    Sie, "sie", 0x104u64, 0x00, @shadow Mie, [
         0,  1, usie; // User Software Interrupt Enable
         1,  1, ssie;
         4,  1, utie; // User Time     Interrupt Enable
         5,  1, stie;
         8,  1, ueie; // User External Interrupt Enable
         9,  1, seie;
-        0, XLEN, mip;
+        // 0, XLEN, mip;
     ];
 
     Stvec, "stvec", 0x105u64, 0x00, [
@@ -229,7 +238,7 @@ gen_csr_regfile! {
     ];
 
     Sscratch, "sscratch", 0x140u64, 0x00, [
-        0, XLEN, mscratch;
+        0, XLEN, scratch;
     ];
 
     Sepc, "sepc", 0x141u64, 0x00, [
@@ -237,16 +246,15 @@ gen_csr_regfile! {
     ];
 
     Scause, "scause", 0x142u64, 0x00, [
-        0, XLEN - 1, exception_code;
+        0, XLEN - 1, cause;
         -1, 1, interrupt;
-        0, XLEN, scause;
     ];
 
     Stval, "stval", 0x143u64, 0x00, [
         0, XLEN, stval;
     ];
 
-    Sip, "sip", 0x144u64, 0x00, [
+    Sip, "sip", 0x144u64, 0x00, @shadow Mip, [
         0,  1, usip; // User Software Interrupt Pending.
         1,  1, ssip;
         // 2,  1, hsip;
@@ -256,7 +264,7 @@ gen_csr_regfile! {
         8,  1, ueip; // User External Interrupt Pending.
         9,  1, seip;
         // 10, 1, heip;
-        0, XLEN, mip;
+        // 0, XLEN, mip;
     ];
 
     // TODO: riscv-32 support.
@@ -321,7 +329,7 @@ gen_csr_regfile! {
         12, 1, instruction_page_fault;
         13, 1, load_page_fault;
         15, 1, store_page_fault;
-        0, XLEN, medeleg;
+        // 0, XLEN, medeleg;
     ];
 
     // see mip.
@@ -333,16 +341,23 @@ gen_csr_regfile! {
     ];
 
     Mie, "mie", 0x304u64, 0x00, [
-        0,  1, usie; // User Software Interrupt Enable
+        0,  1, usie;  // User Software                  Interrupt Enable
         1,  1, ssie;
-        2,  1, msie;
-        4,  1, utie; // User Time     Interrupt Enable
+        2,  1, vssie; // Virtual Supervisor Software    Interrupt Enable
+        3,  1, msie;
+
+        4,  1, utie;  // User Time                      Interrupt Enable
         5,  1, stie;
-        6,  1, mtie;
-        8,  1, ueie; // User External Interrupt Enable
+        6,  1, vstie; // Virtual Supervisor Time        Interrupt Enable
+        7,  1, mtie;
+
+        8,  1, ueie;  // User External                  Interrupt Enable
         9,  1, seie;
-        10, 1, meie;
-        0, XLEN, mip;
+        10, 1, vseie; // Virtual Supervisor External    Interrupt Enable
+        11, 1, meie;
+        12, 1, sgeie; // Supervisor Guest External Interrupt Enable
+        13, 1, hgeie; // Hypervisor Guest External Interrupt Enable
+        // 0, XLEN, mip;
     ];
 
     Mtvec, "mtvec", 0x305u64, 0x00, [
@@ -355,7 +370,7 @@ gen_csr_regfile! {
     ];
 
     Mscratch, "mscratch", 0x340u64, 0x00, [
-        0, XLEN, mscratch;
+        0, XLEN, scratch;
     ];
 
     Mepc, "mepc", 0x341u64, 0x00, [
@@ -363,8 +378,8 @@ gen_csr_regfile! {
     ];
 
     Mcause, "mcause", 0x342u64, 0x00, [
-        0, XLEN - 1, exception_code;
-        -1, 1, interrupt;
+        0, XLEN - 1, cause;
+        -1, 1, interrupt_flag;
     ];
 
     Mtval, "mtval", 0x343u64, 0x00, [
@@ -374,17 +389,22 @@ gen_csr_regfile! {
     Mip, "mip", 0x344u64, 0x00, [
         0,  1, usip; // User Software Interrupt Pending.
         1,  1, ssip;
-        // 2,  1, hsip;
+        2,  1, vssip;
         3,  1, msip;
+
         4,  1, utip; // User Time     Interrupt Pending.
         5,  1, stip;
-        // 6,  1, htip;
+        6,  1, vstip;
         7,  1, mtip;
+
         8,  1, ueip; // User External Interrupt Pending.
         9,  1, seip;
-        // 10, 1, heip;
+        10, 1, vseip;
         11, 1, meip;
-        0, XLEN, mip;
+
+        12, 1, sgeip;
+        13, 1, hgeip;
+        // 0, XLEN, mip;
     ];
 
     Mcycle, "mcycle", 0xB00u64, 0x00, [

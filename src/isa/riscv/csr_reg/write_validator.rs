@@ -4,7 +4,7 @@ use crate::{
     utils::{UnsignedInteger, make_mask},
 };
 
-pub(super) type Validator = fn(WordType, &CsrContext) -> CsrWriteOp;
+pub(super) type WriteValidator = fn(WordType, &CsrContext) -> CsrWriteOp;
 
 /// Condition trait for [`validate_with_cond`] functions.
 trait ValidateCond {
