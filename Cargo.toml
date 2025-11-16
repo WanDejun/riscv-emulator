@@ -8,8 +8,9 @@ riscv32 = []
 riscv64 = []
 riscv-tests = []
 test-device = ["riscv64"]
+custom-instr = ["riscv64"]
 
-default = ["riscv64", "test-device"]
+default = ["riscv64", "test-device", "custom-instr"]
 
 [dependencies]
 xmas-elf = "0.7.0"

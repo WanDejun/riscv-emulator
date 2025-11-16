@@ -31,7 +31,7 @@ pub struct Decoder {
 
 impl Decoder {
     pub fn new() -> Self {
-        let isa = ISABuilder::new()
+        let isa_builder = ISABuilder::new()
             .add(TABLE_RV32I)
             .add(TABLE_RV64I)
             .add(TABLE_RV32M)
@@ -41,11 +41,13 @@ impl Decoder {
             .add(TABLE_RV32F)
             .add(TABLE_RV64F)
             .add(TABLE_RVS)
-            .build();
-        Self {
-            funct3_decoder: funct_decoder::Decoder::from_isa(&isa),
-            mask_decoder: mask_decoder::MaskDecoder::from_isa(&isa),
-        }
+            .add(TABLE_RV32A)
+            .add(TABLE_RV64A);
+        #[cfg(feature = "custom-instr")]
+        let isa_builder = isa_builder.add(TABLE_RVCUSTOM0).add(TABLE_RVCUSTOM1);
+
+        let isa = isa_builder.build();
+        Self::from_isa(&isa)
     }
 }
 

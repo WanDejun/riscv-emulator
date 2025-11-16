@@ -271,6 +271,13 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::SC_D => todo!(),
 
         //---------------------------------------
+        // RV_Custom
+        //---------------------------------------
+        RiscvInstr::MY_INSTR0_R => todo!(),
+        RiscvInstr::MY_INSTR0_SPEC => todo!(),
+        RiscvInstr::MY_INSTR1 => todo!(),
+
+        //---------------------------------------
         // RV_S
         //---------------------------------------
         RiscvInstr::SRET => |_info, cpu| {
