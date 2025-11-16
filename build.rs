@@ -24,6 +24,10 @@ fn get_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 25, 31))
 }
 
+fn get_atomic_funct7(s: &str) -> u64 {
+    to_bits(get_instr_bits(s, 27, 31)) << 2
+}
+
 fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
@@ -41,6 +45,8 @@ fn main() {
         m.insert("rv_f", "RV32F");
         m.insert("rv64_f", "RV64F");
         m.insert("rv_s", "RVS");
+        m.insert("rv_a", "RV32A");
+        m.insert("rv64_a", "RV64A");
         m
     };
 
@@ -65,10 +71,6 @@ fn main() {
         {
             let encoding = instr["encoding"].as_str().unwrap();
 
-            let opcode = get_opcode(encoding);
-            let funct3 = get_funct3(encoding);
-            let funct7 = get_funct7(encoding);
-
             let fields = instr["variable_fields"]
                 .as_array()
                 .unwrap()
@@ -85,6 +87,10 @@ fn main() {
                 "R_rm"
             } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
                 "R4_rm"
+            } else if fields == ["rd", "rs1", "aq", "rl"]
+                || fields == ["rd", "rs1", "rs2", "aq", "rl"]
+            {
+                "A"
             } else if fields == ["rd", "rs1", "imm12"]
                 || fields == ["rd", "rs1", "shamtd"]
                 || fields == ["rd", "rs1", "shamtw"]
@@ -114,9 +120,18 @@ fn main() {
                 );
             };
 
+            let opcode = get_opcode(encoding);
+            let funct3 = get_funct3(encoding);
+            let funct7 = if format == "A" {
+                get_atomic_funct7(encoding)
+            } else {
+                get_funct7(encoding)
+            };
+
             let mask = hex_to_u64(instr["mask"].as_str().unwrap());
             let key = hex_to_u64(instr["match"].as_str().unwrap());
 
+            // use mask to identify instructions instead of opcode/funct3/funct7.
             let use_mask = fields.contains(&"shamtd")
                 || fields.contains(&"shamtw")
                 || fields.is_empty()

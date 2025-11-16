@@ -84,6 +84,17 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
             rs3: ((raw_instr >> 27) & 0b11111) as u8,
             rm: f3,
         },
+        InstrFormat::A => {
+            let aq = ((raw_instr >> 26) & 1) != 0;
+            let rl = ((raw_instr >> 25) & 1) != 0;
+            RVInstrInfo::A {
+                rs1,
+                rs2,
+                rd,
+                aq,
+                rl,
+            }
+        }
         InstrFormat::I => {
             let mut imm = ((raw_instr >> 20) & 0xFFF) as WordType;
 
