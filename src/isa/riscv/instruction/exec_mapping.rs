@@ -273,9 +273,18 @@ pub(in crate::isa::riscv) fn get_exec_func(
         //---------------------------------------
         // RV_Custom
         //---------------------------------------
+        #[cfg(feature = "custom-instr")]
         RiscvInstr::MY_INSTR0_R => todo!(),
-        RiscvInstr::MY_INSTR0_SPEC => todo!(),
-        RiscvInstr::MY_INSTR1 => todo!(),
+        #[cfg(feature = "custom-instr")]
+        RiscvInstr::MY_INSTR1_DISPLAY => |info, cpu| {
+            if let RVInstrInfo::I { rs1: _, rd: _, imm } = info {
+                print!("{}", imm as u8 as char);
+            }
+
+            cpu.pc = cpu.pc.wrapping_add(4);
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+            Ok(())
+        },
 
         //---------------------------------------
         // RV_S

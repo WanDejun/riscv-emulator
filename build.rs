@@ -155,6 +155,7 @@ fn main() {
         m.insert("rv64_a", "RV64A");
         #[cfg(feature = "custom-instr")]
         m.insert("rv_custom0", "RVCustom0");
+        #[cfg(feature = "custom-instr")]
         m.insert("rv_custom1", "RVCustom1");
         m
     };
