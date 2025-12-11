@@ -114,6 +114,9 @@ impl RV32CPU {
         let rst = self.step_impl();
         let mcycle = self.csr.get_by_type_existing::<Mcycle>();
         mcycle.set_mcycle_directly(mcycle.data().wrapping_add(1));
+
+        debug_assert!(self.pending_tval.is_none());
+
         rst
     }
 
@@ -132,7 +135,7 @@ impl RV32CPU {
                 TrapController::try_send_trap_signal(
                     self,
                     Trap::Exception(Exception::from_instr_fetch_err(err)),
-                    0,
+                    self.pc,
                 );
                 return Ok(());
             }
