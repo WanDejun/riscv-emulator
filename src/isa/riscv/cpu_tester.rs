@@ -200,7 +200,10 @@ where
 {
     let mut builder = build(TestCPUBuilder::new());
     for (i, inst) in raw_instrs.iter().enumerate() {
-        builder = builder.mem(i as WordType + ram_config::BASE_ADDR, *inst);
+        builder = builder.mem(
+            (size_of::<u32>() * i) as WordType + ram_config::BASE_ADDR,
+            *inst,
+        );
     }
     let mut cpu = builder.build();
     for _ in 0..raw_instrs.len() {

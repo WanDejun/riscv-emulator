@@ -17,6 +17,7 @@ use crate::{
             config::PAGE_SIZE_XLEN,
             page_table::{PTEFlags, PageTable, PageTableError},
         },
+        trap::Exception,
     },
     ram::Ram,
     utils::UnsignedInteger,
@@ -170,6 +171,21 @@ impl VirtAddrManager {
         self.ifetch_impl::<false, _>(addr, csr)
     }
 
+    /// do some binary operation on memory by callback function.
+    /// if rhs_addr is 0, unary operation instead.
+    pub(crate) fn modify_mem_by<F, T>(
+        &mut self,
+        _lhs_addr: WordType,
+        _rhs_addr: WordType,
+        _f: F,
+    ) -> Result<T, Exception>
+    where
+        T: UnsignedInteger,
+        F: Fn(&T::AtomicType, &T::AtomicType) -> Result<T, Exception>,
+    {
+        todo!();
+    }
+
     pub(crate) fn read_by_paddr<T>(&mut self, paddr: WordType) -> Result<T, MemError>
     where
         T: UnsignedInteger,
@@ -256,6 +272,7 @@ impl VirtAddrManager {
             .map(|paddr| paddr.0)
     }
 
+    // virtual memory
     pub fn set_mode(&mut self, mode: u8) {
         self.page_table.set_mode(mode);
     }
@@ -264,6 +281,7 @@ impl VirtAddrManager {
         self.page_table.set_root_addr(ppn << PAGE_SIZE_XLEN);
     }
 
+    // sync mmio devices
     pub fn sync(&mut self) {
         self.mmio.sync();
     }

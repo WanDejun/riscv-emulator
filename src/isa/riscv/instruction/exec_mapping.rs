@@ -11,7 +11,9 @@ use crate::{
                 csr_macro::{Minstret, Mstatus},
             },
             executor::RV32CPU,
-            instruction::{RVInstrInfo, exec_function::*, rv32i_table::RiscvInstr},
+            instruction::{
+                RVInstrInfo, exec_atomic_function::*, exec_function::*, rv32i_table::RiscvInstr,
+            },
             trap::{Exception, trap_controller::TrapController},
         },
     },
@@ -230,6 +232,59 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         // Classify
         RiscvInstr::FCLASS_S => exec_float_classify::<f32>,
+
+        //---------------------------------------
+        // RV_A
+        //---------------------------------------
+
+        // arith
+        RiscvInstr::AMOADD_W => exec_atomic_memory_operation::<ExecAmoAdd, u32>,
+        RiscvInstr::AMOAND_W => exec_atomic_memory_operation::<ExecAmoAnd, u32>,
+        RiscvInstr::AMOOR_W => exec_atomic_memory_operation::<ExecAmoOr, u32>,
+        RiscvInstr::AMOXOR_W => exec_atomic_memory_operation::<ExecAmoXor, u32>,
+
+        RiscvInstr::AMOADD_D => exec_atomic_memory_operation::<ExecAmoAdd, u64>,
+        RiscvInstr::AMOAND_D => exec_atomic_memory_operation::<ExecAmoAnd, u64>,
+        RiscvInstr::AMOOR_D => exec_atomic_memory_operation::<ExecAmoOr, u64>,
+        RiscvInstr::AMOXOR_D => exec_atomic_memory_operation::<ExecAmoXor, u64>,
+
+        // swap
+        RiscvInstr::AMOSWAP_W => exec_atomic_memory_operation::<ExecAmoSwap, u32>,
+        RiscvInstr::AMOSWAP_D => exec_atomic_memory_operation::<ExecAmoSwap, u64>,
+
+        // cmp
+        RiscvInstr::AMOMAX_W => exec_atomic_memory_operation::<ExecAmoMax, u32>,
+        RiscvInstr::AMOMIN_W => exec_atomic_memory_operation::<ExecAmoMin, u32>,
+        RiscvInstr::AMOMAXU_W => exec_atomic_memory_operation::<ExecAmoMaxU, u32>,
+        RiscvInstr::AMOMINU_W => exec_atomic_memory_operation::<ExecAmoMinU, u32>,
+
+        RiscvInstr::AMOMAX_D => exec_atomic_memory_operation::<ExecAmoMax, u64>,
+        RiscvInstr::AMOMIN_D => exec_atomic_memory_operation::<ExecAmoMin, u64>,
+        RiscvInstr::AMOMAXU_D => exec_atomic_memory_operation::<ExecAmoMaxU, u64>,
+        RiscvInstr::AMOMINU_D => exec_atomic_memory_operation::<ExecAmoMinU, u64>,
+
+        // load-reserved / store-conditional
+        RiscvInstr::LR_W => todo!(),
+        RiscvInstr::SC_W => todo!(),
+
+        RiscvInstr::LR_D => todo!(),
+        RiscvInstr::SC_D => todo!(),
+
+        //---------------------------------------
+        // RV_Custom
+        //---------------------------------------
+        #[cfg(feature = "custom-instr")]
+        RiscvInstr::MY_INSTR0_R => todo!(),
+        #[cfg(feature = "custom-instr")]
+        RiscvInstr::MY_INSTR1_DISPLAY => |info, cpu| {
+            if let RVInstrInfo::I { rs1: _, rd: _, imm } = info {
+                print!("{}", imm as u8 as char);
+            }
+
+            cpu.pc = cpu.pc.wrapping_add(4);
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+            Ok(())
+        },
 
         //---------------------------------------
         // RV_S

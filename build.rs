@@ -24,36 +24,23 @@ fn get_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 25, 31))
 }
 
+fn get_atomic_funct7(s: &str) -> u64 {
+    to_bits(get_instr_bits(s, 27, 31)) << 2
+}
+
 fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
-fn main() {
-    let json_path = PathBuf::from("./data/instr_dict.json");
-    let ext_to_name: HashMap<&'static str, &'static str> = {
-        let mut m = HashMap::new();
-        m.insert("rv_i", "RV32I");
-        m.insert("rv_m", "RV32M");
-        m.insert("rv64_i", "RV64I");
-        m.insert("rv64_m", "RV64M");
-        m.insert("rv_zicsr", "RVZicsr");
-        m.insert("rv_system", "RVSystem");
-        m.insert("rv_f", "RV32F");
-        m.insert("rv64_f", "RV64F");
-        m.insert("rv_s", "RVS");
-        m
-    };
-
+fn parse_instr<'a>(
+    isa_dict: &mut HashMap<&'a str, Vec<String>>,
+    ext_to_name: &HashMap<&str, &'a str>,
+    json_path: &PathBuf,
+) {
     let target_ext = ext_to_name.keys().collect::<Vec<_>>();
 
     let data = fs::read_to_string(&json_path).expect("Failed to read instr.json");
     let v: Value = serde_json::from_str(&data).expect("Invalid JSON");
-
-    let mut output = String::new();
-    output.push_str("define_riscv_isa!(\n");
-    output.push_str("RiscvInstr,\n");
-
-    let mut isa_dict: HashMap<&str, Vec<String>> = HashMap::new();
 
     for (name, instr) in v.as_object().unwrap() {
         let exts = instr["extension"].as_array().unwrap();
@@ -64,10 +51,6 @@ fn main() {
             .find(|e| target_ext.contains(&e))
         {
             let encoding = instr["encoding"].as_str().unwrap();
-
-            let opcode = get_opcode(encoding);
-            let funct3 = get_funct3(encoding);
-            let funct7 = get_funct7(encoding);
 
             let fields = instr["variable_fields"]
                 .as_array()
@@ -85,6 +68,10 @@ fn main() {
                 "R_rm"
             } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
                 "R4_rm"
+            } else if fields == ["rd", "rs1", "aq", "rl"]
+                || fields == ["rd", "rs1", "rs2", "aq", "rl"]
+            {
+                "A"
             } else if fields == ["rd", "rs1", "imm12"]
                 || fields == ["rd", "rs1", "shamtd"]
                 || fields == ["rd", "rs1", "shamtw"]
@@ -114,9 +101,18 @@ fn main() {
                 );
             };
 
+            let opcode = get_opcode(encoding);
+            let funct3 = get_funct3(encoding);
+            let funct7 = if format == "A" {
+                get_atomic_funct7(encoding)
+            } else {
+                get_funct7(encoding)
+            };
+
             let mask = hex_to_u64(instr["mask"].as_str().unwrap());
             let key = hex_to_u64(instr["match"].as_str().unwrap());
 
+            // use mask to identify instructions instead of opcode/funct3/funct7.
             let use_mask = fields.contains(&"shamtd")
                 || fields.contains(&"shamtw")
                 || fields.is_empty()
@@ -141,6 +137,40 @@ fn main() {
                 .push(s);
         }
     }
+}
+
+fn main() {
+    let ext_to_name: HashMap<&'static str, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert("rv_i", "RV32I");
+        m.insert("rv_m", "RV32M");
+        m.insert("rv64_i", "RV64I");
+        m.insert("rv64_m", "RV64M");
+        m.insert("rv_zicsr", "RVZicsr");
+        m.insert("rv_system", "RVSystem");
+        m.insert("rv_f", "RV32F");
+        m.insert("rv64_f", "RV64F");
+        m.insert("rv_s", "RVS");
+        m.insert("rv_a", "RV32A");
+        m.insert("rv64_a", "RV64A");
+        #[cfg(feature = "custom-instr")]
+        m.insert("rv_custom0", "RVCustom0");
+        #[cfg(feature = "custom-instr")]
+        m.insert("rv_custom1", "RVCustom1");
+        m
+    };
+    let mut isa_dict: HashMap<&str, Vec<String>> = HashMap::new();
+
+    let mut output = String::new();
+    output.push_str("define_riscv_isa!(\n");
+    output.push_str("RiscvInstr,\n");
+
+    let json_path = PathBuf::from("./data/instr_dict.json");
+    parse_instr(&mut isa_dict, &ext_to_name, &json_path);
+
+    let json_path = PathBuf::from("./data/instr_dict_custom.json");
+    #[cfg(feature = "custom-instr")]
+    parse_instr(&mut isa_dict, &ext_to_name, &json_path);
 
     for (name, arr) in isa_dict.into_iter() {
         output.push_str(&format!(

@@ -763,6 +763,10 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 )
             }
 
+            RVInstrInfo::A { .. } => {
+                todo!();
+            }
+
             RVInstrInfo::B { rs1, rs2, imm } => {
                 format!(
                     "{} {},{},{} - type B",

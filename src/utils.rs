@@ -305,6 +305,8 @@ pub trait UnsignedInteger:
 
     const BITS: usize;
 
+    type AtomicType;
+
     fn mask_bits(self, l: u32, r: u32) -> Self {
         debug_assert!(l <= r && (r as usize) < Self::BITS);
         self & make_mask(l as usize, r as usize).truncate_to()
@@ -320,21 +322,25 @@ impl UnsignedInteger for u8 {
     const MAX: u8 = u8::MAX;
     const MIN: u8 = u8::MIN;
     const BITS: usize = 8;
+    type AtomicType = std::sync::atomic::AtomicU8;
 }
 impl UnsignedInteger for u16 {
     const MAX: u16 = u16::MAX;
     const MIN: u16 = u16::MIN;
     const BITS: usize = 16;
+    type AtomicType = std::sync::atomic::AtomicU16;
 }
 impl UnsignedInteger for u32 {
     const MAX: u32 = u32::MAX;
     const MIN: u32 = u32::MIN;
     const BITS: usize = 32;
+    type AtomicType = std::sync::atomic::AtomicU32;
 }
 impl UnsignedInteger for u64 {
     const MAX: u64 = u64::MAX;
     const MIN: u64 = u64::MIN;
     const BITS: usize = 64;
+    type AtomicType = std::sync::atomic::AtomicU64;
 }
 
 pub trait SignedInteger:

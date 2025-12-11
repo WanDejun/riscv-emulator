@@ -1,0 +1,29 @@
+{
+    "my_instr0_r": {
+        "encoding": "0000000----------000-----0001011",
+        "variable_fields": [
+            "rd",
+            "rs1",
+            "rs2"
+        ],
+        "extension": [
+            "rv_custom0"
+        ],
+        "match": "0x0b",
+        "mask": "0xfe00707f"
+    },
+
+    "my_instr1_display": {
+        "encoding": "-----------------001-----0101011",
+        "variable_fields": [
+            "rd",
+            "rs1",
+            "imm12"
+        ],
+        "extension": [
+            "rv_custom1"
+        ],
+        "match": "0x102b",
+        "mask": "0x707f"
+    }
+}

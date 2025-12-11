@@ -494,6 +494,20 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "custom-instr")]
+    #[ignore = "custom-instr"]
+    #[test]
+    fn test_custom_instr() {
+        run_test_cpu_step(
+            &[
+                0b00001011000_00000_001_00000_0101011,
+                0b00000001010_00000_001_00000_0101011,
+            ],
+            |builder| builder,
+            |checker| checker,
+        );
+    }
+
     #[test]
     fn test_default_csr_value() {
         let cpu = TestCPUBuilder::new().build();

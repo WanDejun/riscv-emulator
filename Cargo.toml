@@ -8,6 +8,7 @@ riscv32 = []
 riscv64 = []
 riscv-tests = []
 test-device = ["riscv64"]
+custom-instr = ["riscv64"]
 
 default = ["riscv64", "test-device"]
 

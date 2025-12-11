@@ -84,7 +84,16 @@ impl DecoderTrait<RiscvTypes> for Decoder {
                     *partial = PartialDecode::RequireF7;
                     map.insert((opcode, funct3, funct7), (instr, format));
                 }
-
+                InstrFormat::A => {
+                    let (partial, map) = &mut decode_table[opcode as usize];
+                    *partial = PartialDecode::RequireF7;
+                    // rv_a instructions have only 5bits in funct7, the lower 2 bits are aq and rl.
+                    // nomatter what the aq and rl bits are, the instruction is the same.
+                    for i in 0..3 {
+                        let funct7_a = funct7 | i;
+                        map.insert((opcode, funct3, funct7_a), (instr, format));
+                    }
+                }
                 InstrFormat::I | InstrFormat::S | InstrFormat::B => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::RequireF3;

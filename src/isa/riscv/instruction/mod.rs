@@ -1,3 +1,4 @@
+mod exec_atomic_function;
 mod exec_float_function;
 
 pub(super) mod exec_function;
@@ -56,20 +57,28 @@ pub enum RVInstrInfo {
         rd: u8,
         imm: WordType,
     },
+    A {
+        rs1: u8,
+        rs2: u8,
+        rd: u8,
+        rl: bool,
+        aq: bool,
+    },
 }
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 pub enum InstrFormat {
-    U,
-    J,
-    B,
-    I,
-    S,
+    None,
     R,
     R_rm,
     R4_rm,
-    None,
+    I,
+    S,
+    B,
+    U,
+    J,
+    A,
 }
 
 // define a single enum for every instruction
