@@ -34,6 +34,7 @@ impl Decoder {
         let isa_builder = ISABuilder::new()
             .add(TABLE_RV32I)
             .add(TABLE_RV64I)
+            .add(TABLE_RVZIFENCEI)
             .add(TABLE_RV32M)
             .add(TABLE_RV64M)
             .add(TABLE_RVZICSR)
@@ -422,6 +423,26 @@ mod tests {
 
         checker.check(0x100073, RiscvInstr::EBREAK, RVInstrInfo::None);
         checker.check(0x000073, RiscvInstr::ECALL, RVInstrInfo::None);
+
+        checker.check(
+            0x0000000f,
+            RiscvInstr::FENCE,
+            RVInstrInfo::I {
+                rs1: 0,
+                rd: 0,
+                imm: 0,
+            },
+        );
+
+        checker.check(
+            0x0000100f,
+            RiscvInstr::FENCE_I,
+            RVInstrInfo::I {
+                rs1: 0,
+                rd: 0,
+                imm: 0,
+            },
+        );
     }
 
     #[test]

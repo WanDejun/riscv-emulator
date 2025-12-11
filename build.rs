@@ -87,7 +87,7 @@ fn parse_instr<'a>(
                 "U"
             } else if fields == ["imm"] {
                 "J"
-            } else if ["fence"].contains(&name.as_str()) {
+            } else if ["fence", "fence_i"].contains(&name.as_str()) {
                 "I"
             } else if name == "jal" {
                 "J"
@@ -153,6 +153,8 @@ fn main() {
         m.insert("rv_s", "RVS");
         m.insert("rv_a", "RV32A");
         m.insert("rv64_a", "RV64A");
+        m.insert("rv_zifencei", "RVZifencei");
+
         #[cfg(feature = "custom-instr")]
         m.insert("rv_custom0", "RVCustom0");
         #[cfg(feature = "custom-instr")]

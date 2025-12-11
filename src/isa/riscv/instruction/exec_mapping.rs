@@ -165,6 +165,13 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // We are executing in order, so don't need to do anything.
         RiscvInstr::FENCE => exec_nop,
 
+        RiscvInstr::FENCE_I => |_info, cpu| {
+            cpu.clear_all_cache();
+            cpu.pc = cpu.pc.wrapping_add(4);
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+            Ok(())
+        },
+
         RiscvInstr::CSRRW => exec_csrw::<false>,
         RiscvInstr::CSRRC => exec_csr_bit::<false, false>,
         RiscvInstr::CSRRS => exec_csr_bit::<true, false>,

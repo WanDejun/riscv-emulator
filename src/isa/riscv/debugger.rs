@@ -198,7 +198,7 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
                 .is_some()
         } else {
             log::warn!(
-                "Cannot translate current PC {} to physical address.",
+                "Cannot translate current PC 0x{:08x} to physical address.",
                 self.read_pc()
             );
             false
