@@ -6,7 +6,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::{
     device::{
-        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE},
         virtio::{config::*, virtio_device::VirtIODeviceTrait},
     },
@@ -135,7 +135,7 @@ impl VirtIOMMIO {
         }
     }
 
-    pub fn read_u32(&self, offset: u64) -> u32 {
+    fn read_u32_impl(&self, offset: u64) -> u32 {
         let vdev = unsafe { self.device.as_mut_unchecked() };
 
         if !check_align::<u32>(offset) {
@@ -206,7 +206,7 @@ impl VirtIOMMIO {
         }
     }
 
-    pub fn write_u32(&mut self, offset: u64, value: u32) {
+    fn write_u32_impl(&mut self, offset: u64, value: u32) {
         let vdev = unsafe { self.device.as_mut_unchecked() };
 
         if !check_align::<u32>(offset) {
@@ -316,10 +316,8 @@ impl VirtIOMMIO {
             },
         };
     }
-}
 
-impl Mem for VirtIOMMIO {
-    fn read<T>(
+    fn read_impl<T>(
         &mut self,
         addr: crate::config::arch_config::WordType,
     ) -> Result<T, crate::device::MemError>
@@ -331,12 +329,12 @@ impl Mem for VirtIOMMIO {
         }
 
         let offset: u64 = addr & !BIT_ONES_ARRAY[2]; // align to u32
-        let val = self.read_u32(offset);
+        let val = self.read_u32_impl(offset);
         let val = unsafe { (&val as *const u32 as *const T).read() };
         Ok(val)
     }
 
-    fn write<T>(
+    fn write_impl<T>(
         &mut self,
         addr: crate::config::arch_config::WordType,
         data: T,
@@ -350,12 +348,14 @@ impl Mem for VirtIOMMIO {
 
         let data = unsafe { (&data as *const T as *const u32).read() };
         let offset = addr & !BIT_ONES_ARRAY[2]; // align to u32
-        self.write_u32(offset, data);
+        self.write_u32_impl(offset, data);
         Ok(())
     }
 }
 
 impl DeviceTrait for VirtIOMMIO {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn sync(&mut self) {}
     fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
         self.device.get_mut().get_poll_enent()
@@ -374,15 +374,15 @@ impl MemMappedDeviceTrait for VirtIOMMIO {
 #[cfg(test)]
 impl VirtIOMMIO {
     pub(crate) fn write_status(&mut self, status: VirtIODeviceStatus) {
-        self.write_u32(VirtIO_MMIO_Offset::Status as u64, status.bits() as u32);
+        self.write_u32_impl(VirtIO_MMIO_Offset::Status as u64, status.bits() as u32);
     }
 
     pub(crate) fn get_host_feature(&mut self) -> u64 {
         let mut feature: u64 = 0;
         for i in (0..=1).rev() {
             feature <<= 32;
-            self.write_u32(VirtIO_MMIO_Offset::DeviceFeaturesSelect as u64, i);
-            feature |= self.read_u32(VirtIO_MMIO_Offset::DeviceFeatures as u64) as u64;
+            self.write_u32_impl(VirtIO_MMIO_Offset::DeviceFeaturesSelect as u64, i);
+            feature |= self.read_u32_impl(VirtIO_MMIO_Offset::DeviceFeatures as u64) as u64;
         }
         feature
     }
@@ -391,8 +391,8 @@ impl VirtIOMMIO {
         for i in 0..=1 {
             use crate::utils::BIT_ONES_ARRAY;
 
-            self.write_u32(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, i);
-            self.write_u32(
+            self.write_u32_impl(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, i);
+            self.write_u32_impl(
                 VirtIO_MMIO_Offset::DriverFeatures as u64,
                 (feature & BIT_ONES_ARRAY[32]) as u32,
             );
@@ -401,25 +401,25 @@ impl VirtIOMMIO {
     }
 
     pub(crate) fn init_queue(&mut self, desc_base: u64, avail_base: u64, used_base: u64) {
-        self.write_u32(VirtIO_MMIO_Offset::QueueAvailLow as u64, avail_base as u32);
-        self.write_u32(
+        self.write_u32_impl(VirtIO_MMIO_Offset::QueueAvailLow as u64, avail_base as u32);
+        self.write_u32_impl(
             VirtIO_MMIO_Offset::QueueAvailHigh as u64,
             (avail_base >> 32) as u32,
         );
 
-        self.write_u32(VirtIO_MMIO_Offset::QueueDescLow as u64, desc_base as u32);
-        self.write_u32(
+        self.write_u32_impl(VirtIO_MMIO_Offset::QueueDescLow as u64, desc_base as u32);
+        self.write_u32_impl(
             VirtIO_MMIO_Offset::QueueDescHigh as u64,
             (desc_base >> 32) as u32,
         );
 
-        self.write_u32(VirtIO_MMIO_Offset::QueueUsedLow as u64, used_base as u32);
-        self.write_u32(
+        self.write_u32_impl(VirtIO_MMIO_Offset::QueueUsedLow as u64, used_base as u32);
+        self.write_u32_impl(
             VirtIO_MMIO_Offset::QueueUsedHigh as u64,
             (used_base >> 32) as u32,
         );
 
-        self.write_u32(VirtIO_MMIO_Offset::QueueReady as u64, 0x01);
+        self.write_u32_impl(VirtIO_MMIO_Offset::QueueReady as u64, 0x01);
     }
 }
 
@@ -497,12 +497,12 @@ mod test {
 
         virtio_mmio_device.write_status(VirtIODeviceStatus::DRIVER_OK);
         virtio_mmio_device.write_status(VirtIODeviceStatus::FEATURES_OK);
-        let status = virtio_mmio_device.read_u32(VirtIO_MMIO_Offset::Status as u64);
+        let status = virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Status as u64);
         assert!(status & VirtIODeviceStatus::DRIVER_OK.bits() as u32 != 0);
 
         // init virt_queue.
-        virtio_mmio_device.write_u32(VirtIO_MMIO_Offset::QueueSelect as u64, 0);
-        virtio_mmio_device.write_u32(VirtIO_MMIO_Offset::QueueNum as u64, QUEUE_NUM as u32);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::QueueSelect as u64, 0);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::QueueNum as u64, QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
         let virtq_avail_base = 0x8000_2100 + ((QUEUE_NUM + 2) * size_of::<u16>()) as u64;
@@ -581,7 +581,7 @@ mod test {
         };
 
         // manage request.
-        virtio_mmio_device.write_u32(VirtIO_MMIO_Offset::QueueNotify as u64, 0x00);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::QueueNotify as u64, 0x00);
 
         assert_eq!(desc_status.status, VirtIOBlkReqStatus::Ok as u8);
         assert_eq!(desc_buf[0], 0);
@@ -593,7 +593,7 @@ mod test {
         assert_eq!(buf[93], (93 * 93) as u8);
 
         // Check file size (device config region).
-        let capacity = virtio_mmio_device.read_u32(VirtIO_MMIO_Offset::Config as u64);
+        let capacity = virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Config as u64);
         assert_eq!(capacity, 1);
     }
 }

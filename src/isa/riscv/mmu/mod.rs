@@ -6,7 +6,7 @@ use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError, mmio::MemoryMapIO},
+    device::{DeviceTrait, MemError, mmio::MemoryMapIO},
     isa::riscv::{
         csr_reg::{
             CsrRegFile, PrivilegeLevel,
@@ -88,14 +88,14 @@ impl VirtAddrManager {
     {
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
-            MemAccessView::MachineOnly => return self.mmio.read(addr.into()),
+            MemAccessView::MachineOnly => return self.mmio.read_by_type(addr.into()),
             MemAccessView::SupervisorAndUser => (PTEFlags::R, PTEFlags::R),
             MemAccessView::SupervisorOnly => (PTEFlags::R | PTEFlags::U, PTEFlags::R),
             MemAccessView::UserOnly => (PTEFlags::R | PTEFlags::U, PTEFlags::R | PTEFlags::U),
         };
 
         if let Ok(paddr) = self.translate_vaddr::<false, true>(addr, masks, flags) {
-            self.mmio.read(paddr)
+            self.mmio.read_by_type(paddr)
         } else {
             return Err(MemError::LoadPageFault);
         }
@@ -112,14 +112,14 @@ impl VirtAddrManager {
     {
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
-            MemAccessView::MachineOnly => return self.mmio.write(addr.into(), data),
+            MemAccessView::MachineOnly => return self.mmio.write_by_type(addr.into(), data),
             MemAccessView::SupervisorAndUser => (PTEFlags::W, PTEFlags::W),
             MemAccessView::SupervisorOnly => (PTEFlags::W | PTEFlags::U, PTEFlags::W),
             MemAccessView::UserOnly => (PTEFlags::W | PTEFlags::U, PTEFlags::W | PTEFlags::U),
         };
 
         if let Ok(paddr) = self.translate_vaddr::<true, true>(addr, masks, flags) {
-            self.mmio.write(paddr, data)
+            self.mmio.write_by_type(paddr, data)
         } else {
             Err(MemError::StorePageFault)
         }
@@ -136,14 +136,14 @@ impl VirtAddrManager {
         let privilege = csr.privelege_level();
 
         let (masks, flags) = match privilege {
-            PrivilegeLevel::M => return self.mmio.read(addr.into()),
+            PrivilegeLevel::M => return self.mmio.read_by_type(addr.into()),
             PrivilegeLevel::S => (PTEFlags::X, PTEFlags::X),
             PrivilegeLevel::U => (PTEFlags::X | PTEFlags::U, PTEFlags::X | PTEFlags::U),
             PrivilegeLevel::V => unreachable!(), // Doesn't have V-mode.
         };
 
         if let Ok(paddr) = self.translate_vaddr::<false, true>(addr, masks, flags) {
-            self.mmio.read(paddr)
+            self.mmio.read_by_type(paddr)
         } else {
             Err(MemError::LoadPageFault)
         }
@@ -174,14 +174,14 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
-        self.mmio.read(paddr.into())
+        self.mmio.read_by_type(paddr.into())
     }
 
     pub(crate) fn write_by_paddr<T>(&mut self, paddr: WordType, data: T) -> Result<(), MemError>
     where
         T: UnsignedInteger,
     {
-        self.mmio.write(paddr.into(), data)
+        self.mmio.write_by_type(paddr.into(), data)
     }
 
     /// Read operation without side-effect of page table, provided for debugger.
@@ -197,7 +197,7 @@ impl VirtAddrManager {
                 let (masks, flags) = (PTEFlags::empty(), PTEFlags::empty());
 
                 if let Ok(paddr) = self.translate_vaddr::<false, false>(addr, masks, flags) {
-                    self.mmio.read(paddr)
+                    self.mmio.read_by_type(paddr)
                 } else {
                     Err(MemError::LoadPageFault)
                 }
@@ -216,7 +216,7 @@ impl VirtAddrManager {
                 let (masks, flags) = (PTEFlags::empty(), PTEFlags::empty());
 
                 if let Ok(paddr) = self.translate_vaddr::<false, false>(addr, masks, flags) {
-                    self.mmio.write(paddr, data)
+                    self.mmio.write_by_type(paddr, data)
                 } else {
                     Err(MemError::StorePageFault)
                 }

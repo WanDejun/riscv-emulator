@@ -15,7 +15,7 @@ use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
     async_poller::PollingEventTrait,
-    device::{DeviceTrait, Mem, MemError, plic::ExternalInterrupt},
+    device::{DeviceTrait, MemError, plic::ExternalInterrupt},
     utils::check_align,
 };
 
@@ -80,10 +80,8 @@ impl TestDevice {
     fn get_data64(&self) -> u64 {
         (self.layout.data_register1 as u64) << 32 | (self.layout.data_register0 as u64)
     }
-}
 
-impl Mem for TestDevice {
-    fn read<T>(&mut self, addr: u64) -> Result<T, crate::device::MemError>
+    fn read_impl<T>(&mut self, addr: u64) -> Result<T, crate::device::MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -101,7 +99,7 @@ impl Mem for TestDevice {
         return Ok(data);
     }
 
-    fn write<T>(&mut self, addr: u64, data: T) -> Result<(), crate::device::MemError>
+    fn write_impl<T>(&mut self, addr: u64, data: T) -> Result<(), crate::device::MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -138,6 +136,8 @@ impl Mem for TestDevice {
 }
 
 impl DeviceTrait for TestDevice {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
         let poller = TestDevicePoller::new(
             self.receiver.clone(),

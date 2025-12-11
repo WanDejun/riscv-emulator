@@ -4,7 +4,7 @@ use crate::{
     board::virt::{IRQLine, RiscvIRQSource},
     config::arch_config::WordType,
     device::{
-        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{CLINT_BASE, CLINT_SIZE},
     },
     utils::{concat_to_u64, negative_of},
@@ -58,22 +58,8 @@ impl Clint {
             unsafe { self.timer.as_mut_unchecked() }.set_due(self.timer_cb_id, value);
         }
     }
-}
 
-impl RiscvIRQSource for Clint {
-    fn set_irq_line(&mut self, line: IRQLine, _id: usize) {
-        self.irq_line = Some(line);
-        self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({
-            let irq_line_ptr = self.irq_line.as_mut().unwrap() as *mut IRQLine;
-            move || {
-                unsafe { &mut *irq_line_ptr }.set_irq(true);
-            }
-        });
-    }
-}
-
-impl Mem for Clint {
-    fn read<T>(&mut self, addr: WordType) -> Result<T, MemError>
+    fn read_impl<T>(&mut self, addr: WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -105,7 +91,7 @@ impl Mem for Clint {
         Err(MemError::LoadFault)
     }
 
-    fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError>
+    fn write_impl<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -157,7 +143,21 @@ impl Mem for Clint {
     }
 }
 
+impl RiscvIRQSource for Clint {
+    fn set_irq_line(&mut self, line: IRQLine, _id: usize) {
+        self.irq_line = Some(line);
+        self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({
+            let irq_line_ptr = self.irq_line.as_mut().unwrap() as *mut IRQLine;
+            move || {
+                unsafe { &mut *irq_line_ptr }.set_irq(true);
+            }
+        });
+    }
+}
+
 impl DeviceTrait for Clint {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn sync(&mut self) {
         // Nothing to do
     }
@@ -200,20 +200,20 @@ mod tests {
     fn test_mtime_read_write() {
         let (mut clint, _timer) = create_test_clint();
 
-        let initial_time: u64 = clint.read(0x0200bff8).unwrap();
+        let initial_time: u64 = clint.read_impl(0x0200bff8).unwrap();
         assert_eq!(initial_time, 0);
 
         // 测试写入 MTIME 寄存器 (32位低位)
-        clint.write::<u32>(0x0200bff8, 0x12345678).unwrap();
-        let time_low: u32 = clint.read(0x0200bff8).unwrap();
+        clint.write_impl::<u32>(0x0200bff8, 0x12345678).unwrap();
+        let time_low: u32 = clint.read_impl(0x0200bff8).unwrap();
         assert_eq!(time_low, 0x12345678);
 
         // 测试写入 MTIME 寄存器 (32位高位)
-        clint.write::<u32>(0x0200bffc, 0x87654321).unwrap();
-        let time_high: u32 = clint.read(0x0200bffc).unwrap();
+        clint.write_impl::<u32>(0x0200bffc, 0x87654321).unwrap();
+        let time_high: u32 = clint.read_impl(0x0200bffc).unwrap();
         assert_eq!(time_high, 0x87654321);
 
-        let full_time: u64 = clint.read(0x0200bff8).unwrap();
+        let full_time: u64 = clint.read_impl(0x0200bff8).unwrap();
         assert_eq!(full_time, 0x8765432112345678);
     }
 
@@ -222,20 +222,22 @@ mod tests {
         let (mut clint, _timer) = create_test_clint();
 
         // 测试读取 MTIMECMP 寄存器 (Hart 0)
-        let initial_timecmp: u64 = clint.read(0x02004000).unwrap();
+        let initial_timecmp: u64 = clint.read_impl(0x02004000).unwrap();
         assert_eq!(initial_timecmp, 0);
 
         // 测试写入 MTIMECMP 寄存器 (64位)
-        clint.write::<u64>(0x02004000, 0x123456789abcdef0).unwrap();
-        let timecmp: u64 = clint.read(0x02004000).unwrap();
+        clint
+            .write_impl::<u64>(0x02004000, 0x123456789abcdef0)
+            .unwrap();
+        let timecmp: u64 = clint.read_impl(0x02004000).unwrap();
         assert_eq!(timecmp, 0x123456789abcdef0);
 
         // 测试分别写入高低32位
-        clint.write::<u32>(0x02004000, 0xdeadbeef).unwrap(); // 低32位
-        clint.write::<u32>(0x02004004, 0xcafebabe).unwrap(); // 高32位
+        clint.write_impl::<u32>(0x02004000, 0xdeadbeef).unwrap(); // 低32位
+        clint.write_impl::<u32>(0x02004004, 0xcafebabe).unwrap(); // 高32位
 
-        let timecmp_low: u32 = clint.read(0x02004000).unwrap();
-        let timecmp_high: u32 = clint.read(0x02004004).unwrap();
+        let timecmp_low: u32 = clint.read_impl(0x02004000).unwrap();
+        let timecmp_high: u32 = clint.read_impl(0x02004004).unwrap();
         assert_eq!(timecmp_low, 0xdeadbeef);
         assert_eq!(timecmp_high, 0xcafebabe);
     }
@@ -244,10 +246,10 @@ mod tests {
     fn test_invalid_address_access() {
         let (mut clint, _timer) = create_test_clint();
 
-        let result: Result<u32, _> = clint.read(0x12345678);
+        let result: Result<u32, _> = clint.read_impl(0x12345678);
         assert_eq!(result, Err(MemError::LoadFault));
 
-        let result = clint.write::<u32>(0x12345678, 0xdeadbeef);
+        let result = clint.write_impl::<u32>(0x12345678, 0xdeadbeef);
         assert_eq!(result, Err(MemError::StoreFault));
     }
 }

@@ -298,6 +298,7 @@ pub trait UnsignedInteger:
     + TruncateTo<u16>
     + TruncateTo<u32>
     + TruncateTo<u64>
+    + TruncateTo<u128>
 {
     const MAX: Self;
     const MIN: Self;

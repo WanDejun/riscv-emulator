@@ -18,8 +18,7 @@ use crate::{
         self, DeviceTrait,
         aclint::Clint,
         config::{
-            CLINT_BASE, CLINT_SIZE, Device, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE,
-            POWER_MANAGER_SIZE,
+            CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
         fast_uart::{FastUart16550, virtual_io::SerialDestination},
         mmio::{MemoryMapIO, MemoryMapItem},
@@ -80,8 +79,8 @@ pub struct VirtBoard {
     timer: Rc<UnsafeCell<Timer>>,
 
     // interrupt manager.
-    clint: Rc<RefCell<Device>>,
-    plic: Rc<RefCell<Device>>,
+    clint: Rc<RefCell<Clint>>,
+    plic: Rc<RefCell<PLIC>>,
     plic_freq_counter: usize,
     async_poller: AsyncPoller,
 
@@ -112,33 +111,28 @@ impl VirtBoard {
         // Construct devices
         let mut uart_allocator = device::IdAllocator::new::<FastUart16550>(0, String::from("uart"));
         let uart1_info = uart_allocator.get();
-        let uart1 = Rc::new(RefCell::new(Device::FastUart16550(FastUart16550::new())));
-        if let Device::FastUart16550(uart_inner) = &mut *uart1.borrow_mut() {
-            Self::register_uart_poll_event(&mut async_poller, uart_inner);
-        }
+        let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
+        Self::register_uart_poll_event(&mut async_poller, &mut *uart1.borrow_mut());
 
-        let power_manager = Rc::new(RefCell::new(Device::PowerManager(PowerManager::new())));
-        let clint = Rc::new(RefCell::new(Device::Clint(Clint::new(
+        let power_manager = Rc::new(RefCell::new(PowerManager::new()));
+        let clint = Rc::new(RefCell::new(Clint::new(
             1,
             0x7ff8,
             0,
             clock.clone(),
             timer.clone(),
-        ))));
+        )));
 
         #[cfg(feature = "test-device")]
-        let test_device = Rc::new(RefCell::new(Device::TestDevice(TestDevice::new())));
+        let test_device = Rc::new(RefCell::new(TestDevice::new()));
+
         #[cfg(feature = "test-device")]
-        if let Device::TestDevice(device) = &mut *test_device.borrow_mut() {
-            async_poller.add_event(device.get_poll_enent().unwrap());
-        }
+        async_poller.add_event(test_device.borrow_mut().get_poll_enent().unwrap());
 
         // PLIC init.
-        let plic = Rc::new(RefCell::new(Device::PLIC(PLIC::new())));
-        if let Device::PLIC(plic) = &mut *plic.borrow_mut() {
-            let poller_plic_irq_line = PlicIRQLine::new(plic as *mut _);
-            async_poller.set_irq_line(poller_plic_irq_line, 0);
-        }
+        let plic = Rc::new(RefCell::new(PLIC::new()));
+        let poller_plic_irq_line = PlicIRQLine::new(&mut *plic.borrow_mut());
+        async_poller.set_irq_line(poller_plic_irq_line, 0);
 
         let mut mmio_items = vec![
             MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
@@ -172,7 +166,7 @@ impl VirtBoard {
             mmio_items.push(MemoryMapItem::new(
                 virtio_info.base,
                 virtio_info.size,
-                Rc::new(RefCell::new(Device::VirtIOMMIO(virtio_mmio_device))),
+                Rc::new(RefCell::new(virtio_mmio_device)),
             ));
         }
 
@@ -187,11 +181,7 @@ impl VirtBoard {
             Interrupt::MachineTimer,
         );
 
-        let clint_clone = clint.clone();
-        let clint_mut_ref = &mut *(clint_clone.borrow_mut());
-        if let Device::Clint(clint_inner) = clint_mut_ref {
-            clint_inner.set_irq_line(timer_irq_line, 0);
-        }
+        clint.borrow_mut().set_irq_line(timer_irq_line, 0);
 
         // register irq line for plic.
         let plic_mathine_irq_line = IRQLine::new(
@@ -202,10 +192,9 @@ impl VirtBoard {
             &mut *cpu as *mut dyn RiscvIRQHandler,
             Interrupt::SupervisorExternal,
         );
-        if let Device::PLIC(plic) = &mut *plic.borrow_mut() {
-            plic.set_irq_line(plic_mathine_irq_line, 0);
-            plic.set_irq_line(plic_supervisor_irq_line, 1);
-        }
+
+        plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
+        plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
 
         Self {
             cpu: cpu,
@@ -232,10 +221,8 @@ impl VirtBoard {
             // TODO: use external irq lines to trigger plic interrupts.
             self.async_poller.trigger_external_interrupt();
 
-            if let Device::PLIC(plic) = &mut *self.plic.borrow_mut() {
-                plic.try_get_interrupt(0);
-                plic.try_get_interrupt(1);
-            }
+            self.plic.borrow_mut().try_get_interrupt(0);
+            self.plic.borrow_mut().try_get_interrupt(1);
         }
         self.cpu.step()?;
         self.clock.advance(1);
@@ -280,7 +267,6 @@ impl Board for VirtBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::Mem;
     use crate::isa::DebugTarget;
     use crate::isa::riscv::csr_reg::csr_index;
 
@@ -300,41 +286,37 @@ mod tests {
         let board = create_test_board();
 
         // 直接测试 CLINT 设备
-        let mut clint_borrowed = board.clint.borrow_mut();
-        if let Device::Clint(clint) = &mut *clint_borrowed {
-            // 测试 mtime 读取
-            let initial_time: u64 = clint.read(0x7ff8).unwrap_or(0);
-            println!("Initial mtime: {:#x}", initial_time);
+        let mut clint = board.clint.borrow_mut();
+        // 测试 mtime 读取
+        let initial_time: u64 = clint.read_u64(0x7ff8).unwrap_or(0);
+        println!("Initial mtime: {:#x}", initial_time);
 
-            // 测试 mtime 写入
-            let test_time = 0x123456789abcdef0u64;
-            let write_result = clint.write(0x7ff8, test_time);
-            assert!(
-                write_result.is_ok(),
-                "Failed to write to mtime: {:?}",
-                write_result
-            );
+        // 测试 mtime 写入
+        let test_time = 0x123456789abcdef0u64;
+        let write_result = clint.write_u64(0x7ff8, test_time);
+        assert!(
+            write_result.is_ok(),
+            "Failed to write to mtime: {:?}",
+            write_result
+        );
 
-            // 验证写入后的读取
-            let read_time: u64 = clint.read(0x7ff8).unwrap();
-            assert_eq!(read_time, test_time, "mtime write/read mismatch");
+        // 验证写入后的读取
+        let read_time: u64 = clint.read_u64(0x7ff8).unwrap();
+        assert_eq!(read_time, test_time, "mtime write/read mismatch");
 
-            // 测试 mtimecmp 访问 (mtimecmp_base = 0)
-            let timecmp_value = 0xfedcba9876543210u64;
-            let write_result = clint.write(0x0, timecmp_value);
-            assert!(
-                write_result.is_ok(),
-                "Failed to write to mtimecmp: {:?}",
-                write_result
-            );
+        // 测试 mtimecmp 访问 (mtimecmp_base = 0)
+        let timecmp_value = 0xfedcba9876543210u64;
+        let write_result = clint.write_u64(0x0, timecmp_value);
+        assert!(
+            write_result.is_ok(),
+            "Failed to write to mtimecmp: {:?}",
+            write_result
+        );
 
-            let read_timecmp: u64 = clint.read(0x0).unwrap();
-            assert_eq!(read_timecmp, timecmp_value, "mtimecmp write/read mismatch");
+        let read_timecmp: u64 = clint.read_u64(0x0).unwrap();
+        assert_eq!(read_timecmp, timecmp_value, "mtimecmp write/read mismatch");
 
-            println!("CLINT MMIO access test passed!");
-        } else {
-            panic!("CLINT device not found");
-        }
+        println!("CLINT MMIO access test passed!");
     }
 
     #[test]
@@ -354,10 +336,8 @@ mod tests {
 
         let target_time = 5;
         {
-            let mut clint_borrowed = board.clint.borrow_mut();
-            if let Device::Clint(clint) = &mut *clint_borrowed {
-                clint.write(0x0, target_time).unwrap();
-            }
+            let mut clint = board.clint.borrow_mut();
+            clint.write_u64(0x0, target_time).unwrap();
         }
 
         println!("Running board steps to test timer interrupt...");
@@ -403,18 +383,19 @@ mod tests {
         board.cpu.debug_csr(csr_index::mstatus, Some(mstatus));
         board.cpu.debug_csr(csr_index::mie, Some(1 << 11)); // enable MEIE
 
-        if let Device::PLIC(plic) = &mut *board.plic.borrow_mut() {
+        {
+            let mut plic = board.plic.borrow_mut();
             // priority_threshold
             let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE);
-            plic.write(addr, 1u32).unwrap();
+            plic.write_u32(addr, 1).unwrap();
 
             // test_device interrupt priority
-            plic.write(TEST_DEVICE_INTERRUPT_ID as WordType * 4, 5u32)
+            plic.write_u32(TEST_DEVICE_INTERRUPT_ID as WordType * 4, 5)
                 .unwrap();
 
             // interrupt enable.
             let addr = CONTEXT_ENABLE_BIT_OFFSET + (0 * CONTEXT_ENABLE_BIT_SIZE) + 4;
-            plic.write(addr, 0xffffffffu32).unwrap();
+            plic.write_u32(addr, 0xffffffff).unwrap();
         }
 
         // data register 0
@@ -454,12 +435,12 @@ mod tests {
         //     board.cpu.debug_csr(csr_index::mcause, None).unwrap(),
         //     mecause
         // );
-        if let Device::PLIC(plic) = &mut *board.plic.borrow_mut() {
-            use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
-            let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE) + 4;
-            let claimed_id = plic.read::<u32>(addr).unwrap();
-            assert_eq!(claimed_id, TEST_DEVICE_INTERRUPT_ID);
-        }
+
+        let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE) + 4;
+        let mut plic = board.plic.borrow_mut();
+        let claimed_id = plic.read_u32(addr).unwrap();
+        assert_eq!(claimed_id as u32, TEST_DEVICE_INTERRUPT_ID);
+
         let mepc = board.cpu.debug_csr(csr_index::mepc, None).unwrap();
         assert!(mepc >= ram_config::BASE_ADDR);
     }

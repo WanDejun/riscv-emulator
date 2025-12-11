@@ -34,7 +34,7 @@ use crate::{
     cli_coordinator::CliCoordinator,
     config::arch_config::WordType,
     device::{
-        DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+        DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
         fast_uart::virtual_io::{SerialDestination, TerminalIO},
     },
@@ -208,6 +208,76 @@ impl FastUart16550 {
         }
     }
 
+    fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        // check terminal input.
+        if !read_bit(&mut self.reg.borrow_mut().LSR, 0) {
+            // receive data ready.
+            if let Ok(data) = self.input_rx.try_recv() {
+                self.write_RBR(data)
+            }
+        }
+
+        let inner_addr: usize = inner_addr as usize;
+        let size = size_of::<T>();
+        debug_assert!(inner_addr as usize + size <= 8);
+
+        let mut data: T = 0u8.into();
+        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
+            // LCR
+            for i in inner_addr..8.min(inner_addr + size) {
+                data |= T::from(
+                    unsafe { self.reg_lcr_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
+                )
+            }
+        } else {
+            // Normal
+            for i in inner_addr..8.min(inner_addr + size) {
+                if i == 0 {
+                    data = self.read_RBR().into(); // RBR must be the first byte.
+                } else {
+                    data |= T::from(
+                        unsafe { self.reg_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
+                    );
+                }
+            }
+        }
+
+        Ok(data)
+    }
+
+    fn write_impl<T>(&mut self, inner_addr: WordType, data: T) -> Result<(), MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        let inner_addr: usize = inner_addr as usize;
+        let size = size_of::<T>();
+        assert!(inner_addr as usize + size <= 8);
+        let mut data: u64 = data.into();
+
+        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
+            // LCR
+            for i in inner_addr..8.min(inner_addr + size) {
+                unsafe { self.reg_lcr_ptr[i].write_volatile((data & (0xff)) as u8) }
+                data >>= 1;
+            }
+        } else {
+            // Normal
+            for i in inner_addr..8.min(inner_addr + size) {
+                if i == 0 {
+                    self.output_tx.send((data & (0xff)) as u8);
+                } else {
+                    unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
+                }
+                data >>= 1;
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn get_io_channel(&self) -> UartIOChannel {
         UartIOChannel {
             input_tx: self.input_tx.clone(),
@@ -255,79 +325,9 @@ impl FastUart16550 {
     }
 }
 
-impl Mem for FastUart16550 {
-    fn read<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
-    where
-        T: crate::utils::UnsignedInteger,
-    {
-        // check terminal input.
-        if !read_bit(&mut self.reg.borrow_mut().LSR, 0) {
-            // receive data ready.
-            if let Ok(data) = self.input_rx.try_recv() {
-                self.write_RBR(data)
-            }
-        }
-
-        let inner_addr: usize = inner_addr as usize;
-        let size = size_of::<T>();
-        debug_assert!(inner_addr as usize + size <= 8);
-
-        let mut data: T = 0u8.into();
-        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
-            // LCR
-            for i in inner_addr..8.min(inner_addr + size) {
-                data |= T::from(
-                    unsafe { self.reg_lcr_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
-                )
-            }
-        } else {
-            // Normal
-            for i in inner_addr..8.min(inner_addr + size) {
-                if i == 0 {
-                    data = self.read_RBR().into(); // RBR must be the first byte.
-                } else {
-                    data |= T::from(
-                        unsafe { self.reg_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
-                    );
-                }
-            }
-        }
-
-        Ok(data)
-    }
-
-    fn write<T>(&mut self, inner_addr: WordType, data: T) -> Result<(), MemError>
-    where
-        T: crate::utils::UnsignedInteger,
-    {
-        let inner_addr: usize = inner_addr as usize;
-        let size = size_of::<T>();
-        assert!(inner_addr as usize + size <= 8);
-        let mut data: u64 = data.into();
-
-        if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
-            // LCR
-            for i in inner_addr..8.min(inner_addr + size) {
-                unsafe { self.reg_lcr_ptr[i].write_volatile((data & (0xff)) as u8) }
-                data >>= 1;
-            }
-        } else {
-            // Normal
-            for i in inner_addr..8.min(inner_addr + size) {
-                if i == 0 {
-                    self.output_tx.send((data & (0xff)) as u8);
-                } else {
-                    unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
-                }
-                data >>= 1;
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl DeviceTrait for FastUart16550 {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn sync(&mut self) {
         loop {
             if self.output_rx.is_empty() {
@@ -388,7 +388,7 @@ mod test {
         let _handler = FastUart16550Handle::new();
         let uart_dest = SimulationIO::new(uart.get_io_channel());
 
-        uart.write(0, 'a' as u8);
+        uart.write_impl(0, 'a' as u8);
         // uart.sync();
 
         let receive = uart_dest.receive_output_data();
@@ -405,12 +405,12 @@ mod test {
 
         uart_dest.send_input_data(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
 
-        assert_eq!(uart.read::<u8>(5).unwrap() & 1u8, 1);
-        assert_eq!(uart.read::<u8>(0).unwrap(), 'a' as u8);
-        assert_eq!(uart.read::<u8>(0).unwrap(), 'b' as u8);
-        assert_eq!(uart.read::<u8>(0).unwrap(), 'c' as u8);
-        assert_eq!(uart.read::<u8>(0).unwrap(), 'd' as u8);
-        assert_eq!(uart.read::<u8>(5).unwrap() & 1u8, 0);
+        assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'b' as u8);
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'c' as u8);
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'd' as u8);
+        assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 0);
     }
 
     #[test]
@@ -420,7 +420,7 @@ mod test {
         let _handler = FastUart16550Handle::new();
         let terminal_io = TerminalIO::new(uart.get_io_channel());
 
-        uart.write(0, 'a' as u8);
+        uart.write_impl(0, 'a' as u8);
         uart.sync();
     }
 
@@ -432,12 +432,12 @@ mod test {
         let terminal_io = TerminalIO::new(uart.get_io_channel());
 
         loop {
-            if read_bit(&uart.read::<u8>(5).unwrap(), 0) {
+            if read_bit(&uart.read_impl::<u8>(5).unwrap(), 0) {
                 break;
             }
         }
-        let data = uart.read::<u8>(0).unwrap();
-        uart.write(0, data);
+        let data = uart.read_impl::<u8>(0).unwrap();
+        uart.write_impl(0, data);
 
         uart.sync();
     }

@@ -1,5 +1,5 @@
 use crate::device::{
-    DeviceTrait, Mem, MemError, MemMappedDeviceTrait,
+    DeviceTrait, MemError, MemMappedDeviceTrait,
     config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
 };
 use std::sync::atomic::AtomicU16;
@@ -11,8 +11,8 @@ pub struct PowerManager {
     reg: u16,
 }
 
-impl Mem for PowerManager {
-    fn read<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
+impl PowerManager {
+    fn read_impl<T>(&mut self, addr: crate::config::arch_config::WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -24,7 +24,7 @@ impl Mem for PowerManager {
         Ok(ret)
     }
 
-    fn write<T>(
+    fn write_impl<T>(
         &mut self,
         _addr: crate::config::arch_config::WordType,
         data: T,
@@ -44,6 +44,8 @@ impl Mem for PowerManager {
 }
 
 impl DeviceTrait for PowerManager {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn sync(&mut self) {}
     fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
         None

@@ -11,7 +11,7 @@ use bit_set::BitSet;
 use crate::{
     board::virt::RiscvIRQSource,
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler},
+    device::{DeviceTrait, MemError, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler},
 };
 
 const PLIC_MAX_INTERRUPTS: usize = 1024;
@@ -245,6 +245,122 @@ impl PLIC {
         }
     }
 
+    fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, super::MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        // check align in MMIO.
+        if core::mem::size_of::<T>() != 4 {
+            return Err(MemError::LoadFault);
+        }
+
+        if inner_addr < PENDING_BIT_OFFSET {
+            // priority
+            let interrupt_id = (inner_addr / 4) as ExternalInterrupt;
+            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as ExternalInterrupt {
+                return Err(MemError::LoadFault);
+            }
+            let data = self.layout.get_priority(interrupt_id);
+            Ok(unsafe { core::mem::transmute_copy(&data) })
+        } else if inner_addr < CONTEXT_ENABLE_BIT_OFFSET {
+            // pending
+            if let Some(index) = self.get_pending_index(inner_addr) {
+                let data =
+                    self.layout.pending.bits[index].load(std::sync::atomic::Ordering::SeqCst);
+                Ok(unsafe { core::mem::transmute_copy(&data) })
+            } else {
+                Err(MemError::LoadFault)
+            }
+        } else if inner_addr < CONTEXT_CONFIG_OFFSET {
+            // enable bits
+            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
+                let data = self.layout.contexts[context_id].enable[interrupt_id_div32];
+                Ok(unsafe { core::mem::transmute_copy(&data) })
+            } else {
+                Err(MemError::LoadFault)
+            }
+        } else if inner_addr < PLIC_SIZE {
+            // config region
+            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
+            {
+                if offset_in_context == 0 {
+                    // Priority Threshold
+                    let data = self.layout.contexts[context_id].priority_threshold;
+                    Ok(unsafe { core::mem::transmute_copy(&data) })
+                } else if offset_in_context == 1 {
+                    // Claim/Complete
+                    let data = self.layout.contexts[context_id].claim;
+                    Ok(unsafe { core::mem::transmute_copy(&data) })
+                } else {
+                    Err(MemError::LoadFault)
+                }
+            } else {
+                Err(MemError::LoadFault)
+            }
+        } else {
+            unreachable!();
+        }
+    }
+
+    fn write_impl<T>(&mut self, inner_addr: WordType, data: T) -> Result<(), super::MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        // check align in MMIO.
+        if core::mem::size_of::<T>() != 4 {
+            return Err(MemError::StoreFault);
+        }
+
+        if inner_addr < 0x1000 {
+            // priority
+            let interrupt_id = (inner_addr / 4) as u32;
+            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as u32 {
+                return Err(MemError::StoreFault);
+            }
+
+            self.layout
+                .set_priority(interrupt_id, unsafe { core::mem::transmute_copy(&data) });
+            Ok(())
+        } else if inner_addr < CONTEXT_ENABLE_BIT_OFFSET {
+            // pending is read-only
+            Err(MemError::StoreFault)
+        } else if inner_addr < CONTEXT_CONFIG_OFFSET {
+            // enable bits
+            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
+                self.layout.contexts[context_id].enable[interrupt_id_div32] =
+                    unsafe { core::mem::transmute_copy(&data) };
+                Ok(())
+            } else {
+                Err(MemError::StoreFault)
+            }
+        } else if inner_addr < PLIC_SIZE {
+            // config region
+            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
+            {
+                if offset_in_context == 0 {
+                    // Priority Threshold
+                    self.layout.contexts[context_id].priority_threshold =
+                        unsafe { core::mem::transmute_copy(&data) };
+                    Ok(())
+                } else if offset_in_context == 1 {
+                    // Claim/Complete
+                    let old_claim = &mut self.layout.contexts[context_id].claim;
+                    self.layout
+                        .interrupt_sources_busy
+                        .remove(*old_claim as usize);
+                    *old_claim = 0;
+                    Ok(())
+                } else {
+                    Err(MemError::StoreFault)
+                }
+            } else {
+                Err(MemError::StoreFault)
+            }
+        } else {
+            unreachable!();
+        }
+    }
+
     pub fn trigger_interrupt(&mut self, interrupt_id: ExternalInterrupt) {
         if unlikely(interrupt_id > VIRT_MAX_INTERRUPTS as ExternalInterrupt) {
             return;
@@ -324,125 +440,9 @@ impl PLIC {
     }
 }
 
-impl Mem for PLIC {
-    fn read<T>(&mut self, inner_addr: WordType) -> Result<T, super::MemError>
-    where
-        T: crate::utils::UnsignedInteger,
-    {
-        // check align in MMIO.
-        if core::mem::size_of::<T>() != 4 {
-            return Err(MemError::LoadFault);
-        }
-
-        if inner_addr < PENDING_BIT_OFFSET {
-            // priority
-            let interrupt_id = (inner_addr / 4) as ExternalInterrupt;
-            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as ExternalInterrupt {
-                return Err(MemError::LoadFault);
-            }
-            let data = self.layout.get_priority(interrupt_id);
-            Ok(unsafe { core::mem::transmute_copy(&data) })
-        } else if inner_addr < CONTEXT_ENABLE_BIT_OFFSET {
-            // pending
-            if let Some(index) = self.get_pending_index(inner_addr) {
-                let data =
-                    self.layout.pending.bits[index].load(std::sync::atomic::Ordering::SeqCst);
-                Ok(unsafe { core::mem::transmute_copy(&data) })
-            } else {
-                Err(MemError::LoadFault)
-            }
-        } else if inner_addr < CONTEXT_CONFIG_OFFSET {
-            // enable bits
-            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
-                let data = self.layout.contexts[context_id].enable[interrupt_id_div32];
-                Ok(unsafe { core::mem::transmute_copy(&data) })
-            } else {
-                Err(MemError::LoadFault)
-            }
-        } else if inner_addr < PLIC_SIZE {
-            // config region
-            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
-            {
-                if offset_in_context == 0 {
-                    // Priority Threshold
-                    let data = self.layout.contexts[context_id].priority_threshold;
-                    Ok(unsafe { core::mem::transmute_copy(&data) })
-                } else if offset_in_context == 1 {
-                    // Claim/Complete
-                    let data = self.layout.contexts[context_id].claim;
-                    Ok(unsafe { core::mem::transmute_copy(&data) })
-                } else {
-                    Err(MemError::LoadFault)
-                }
-            } else {
-                Err(MemError::LoadFault)
-            }
-        } else {
-            unreachable!();
-        }
-    }
-
-    fn write<T>(&mut self, inner_addr: WordType, data: T) -> Result<(), super::MemError>
-    where
-        T: crate::utils::UnsignedInteger,
-    {
-        // check align in MMIO.
-        if core::mem::size_of::<T>() != 4 {
-            return Err(MemError::StoreFault);
-        }
-
-        if inner_addr < 0x1000 {
-            // priority
-            let interrupt_id = (inner_addr / 4) as u32;
-            if interrupt_id == 0 || interrupt_id >= VIRT_MAX_INTERRUPTS as u32 {
-                return Err(MemError::StoreFault);
-            }
-
-            self.layout
-                .set_priority(interrupt_id, unsafe { core::mem::transmute_copy(&data) });
-            Ok(())
-        } else if inner_addr < CONTEXT_ENABLE_BIT_OFFSET {
-            // pending is read-only
-            Err(MemError::StoreFault)
-        } else if inner_addr < CONTEXT_CONFIG_OFFSET {
-            // enable bits
-            if let Some((context_id, interrupt_id_div32)) = self.get_enable_word_index(inner_addr) {
-                self.layout.contexts[context_id].enable[interrupt_id_div32] =
-                    unsafe { core::mem::transmute_copy(&data) };
-                Ok(())
-            } else {
-                Err(MemError::StoreFault)
-            }
-        } else if inner_addr < PLIC_SIZE {
-            // config region
-            if let Some((context_id, offset_in_context)) = self.get_context_config_index(inner_addr)
-            {
-                if offset_in_context == 0 {
-                    // Priority Threshold
-                    self.layout.contexts[context_id].priority_threshold =
-                        unsafe { core::mem::transmute_copy(&data) };
-                    Ok(())
-                } else if offset_in_context == 1 {
-                    // Claim/Complete
-                    let old_claim = &mut self.layout.contexts[context_id].claim;
-                    self.layout
-                        .interrupt_sources_busy
-                        .remove(*old_claim as usize);
-                    *old_claim = 0;
-                    Ok(())
-                } else {
-                    Err(MemError::StoreFault)
-                }
-            } else {
-                Err(MemError::StoreFault)
-            }
-        } else {
-            unreachable!();
-        }
-    }
-}
-
 impl DeviceTrait for PLIC {
+    dispatch_read_write! { read_impl, write_impl }
+
     fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
         None
     }
@@ -476,16 +476,16 @@ mod test {
     // all methods go through mmio interface.
     impl PLIC {
         fn get_priority(&mut self, interrupt_id: WordType) -> Result<u32, MemError> {
-            self.read(interrupt_id * 4)
+            self.read_impl(interrupt_id * 4)
         }
 
         fn set_priority(&mut self, interrupt_id: WordType, value: u32) -> Result<(), MemError> {
-            self.write(interrupt_id * 4, value)
+            self.write_impl(interrupt_id * 4, value)
         }
 
         fn get_pending_bit(&mut self, interrupt_id: WordType) -> Result<bool, MemError> {
             let addr = PENDING_BIT_OFFSET + (interrupt_id / 32 * 4) as WordType;
-            let word = self.read::<u32>(addr)?;
+            let word = self.read_impl::<u32>(addr)?;
             let bit = interrupt_id % 32;
             Ok((word & (1 << bit)) != 0)
         }
@@ -498,7 +498,7 @@ mod test {
             let addr = CONTEXT_ENABLE_BIT_OFFSET
                 + (interrupt_id * CONTEXT_ENABLE_BIT_SIZE)
                 + (inner_index * 4);
-            self.read::<u32>(addr)
+            self.read_impl::<u32>(addr)
         }
 
         fn set_enable_word(
@@ -510,17 +510,17 @@ mod test {
             let addr = CONTEXT_ENABLE_BIT_OFFSET
                 + (context_id * CONTEXT_ENABLE_BIT_SIZE)
                 + (inner_index * 4);
-            self.write(addr, value)
+            self.write_impl(addr, value)
         }
 
         fn get_priority_threshold(&mut self, context_id: WordType) -> Result<u32, MemError> {
             let addr = CONTEXT_CONFIG_OFFSET + (context_id * CONTEXT_CONFIG_SIZE);
-            self.read::<u32>(addr)
+            self.read_impl::<u32>(addr)
         }
 
         fn get_claim_complete(&mut self, context_id: WordType) -> Result<u32, MemError> {
             let addr = CONTEXT_CONFIG_OFFSET + (context_id * CONTEXT_CONFIG_SIZE) + 4;
-            self.read::<u32>(addr)
+            self.read_impl::<u32>(addr)
         }
 
         fn set_priority_threshold(
@@ -529,7 +529,7 @@ mod test {
             value: u32,
         ) -> Result<(), MemError> {
             let addr = CONTEXT_CONFIG_OFFSET + (context_id * CONTEXT_CONFIG_SIZE);
-            self.write(addr, value)
+            self.write_impl(addr, value)
         }
 
         fn set_claim_complete(
@@ -538,7 +538,7 @@ mod test {
             interrupt_id: u32,
         ) -> Result<(), MemError> {
             let addr = CONTEXT_CONFIG_OFFSET + (context_id * CONTEXT_CONFIG_SIZE) + 4;
-            self.write(addr, interrupt_id)
+            self.write_impl(addr, interrupt_id)
         }
     }
 
@@ -561,7 +561,7 @@ mod test {
         // ======= pending =======
         // =======================
         assert!(
-            plic.write(
+            plic.write_impl(
                 PENDING_BIT_OFFSET + 1 * size_of::<u32>() as WordType,
                 0x1234_5678u32
             )
@@ -573,7 +573,7 @@ mod test {
                 .is_err()
         ); // over max pending index
         assert!(
-            plic.read::<u32>(PENDING_BIT_OFFSET + VIRT_MAX_INTERRUPTS as WordType / 8)
+            plic.read_impl::<u32>(PENDING_BIT_OFFSET + VIRT_MAX_INTERRUPTS as WordType / 8)
                 .is_err()
         ); // over max pending index
 

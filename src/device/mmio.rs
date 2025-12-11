@@ -6,16 +6,16 @@ use std::{
 
 use crate::{
     config::arch_config::WordType,
-    device::{DeviceTrait, Mem, MemError, config::Device},
+    device::{DeviceTrait, MemError},
     ram::Ram,
     ram_config,
-    utils::{UnsignedInteger, check_align},
+    utils::{TruncateTo, UnsignedInteger, check_align},
 };
 
 pub struct MemoryMapItem {
     pub(crate) start: WordType,
     pub(crate) size: WordType,
-    pub(crate) device: Rc<RefCell<Device>>,
+    pub(crate) device: Rc<RefCell<dyn DeviceTrait>>,
 }
 
 impl PartialEq for MemoryMapItem {
@@ -36,7 +36,11 @@ impl Ord for MemoryMapItem {
 }
 
 impl MemoryMapItem {
-    pub(crate) fn new(start: WordType, size: WordType, device: Rc<RefCell<Device>>) -> Self {
+    pub(crate) fn new(
+        start: WordType,
+        size: WordType,
+        device: Rc<RefCell<dyn DeviceTrait>>,
+    ) -> Self {
         Self {
             start,
             size,
@@ -61,56 +65,7 @@ pub struct MemoryMapIO {
 }
 
 impl MemoryMapIO {
-    pub fn from_mmio_items(ram: Rc<UnsafeCell<Ram>>, mut map: Vec<MemoryMapItem>) -> Self {
-        map.sort();
-        Self { map, ram }
-    }
-
-    fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> Result<T, MemError>
-    where
-        T: UnsignedInteger,
-    {
-        if !check_align::<T>(p_addr) {
-            return Err(MemError::LoadMisaligned);
-        }
-        let start = self.map[device_index].start;
-        if p_addr >= start + self.map[device_index].size {
-            // out of range
-            Err(MemError::LoadFault)
-        } else {
-            // in range
-            let device = &mut self.map[device_index].device;
-            device.borrow_mut().read(p_addr - start)
-        }
-    }
-
-    // write data to specific device.
-    fn write_to_device<T>(
-        &mut self,
-        device_index: usize,
-        p_addr: WordType,
-        data: T,
-    ) -> Result<(), MemError>
-    where
-        T: UnsignedInteger,
-    {
-        if !check_align::<T>(p_addr) {
-            return Err(MemError::StoreMisaligned);
-        }
-        let st = self.map[device_index].start;
-        if p_addr >= st + self.map[device_index].size {
-            // out of range
-            Err(MemError::StoreFault)
-        } else {
-            // in range
-            let device = &mut self.map[device_index].device;
-            device.borrow_mut().write(p_addr - st, data)
-        }
-    }
-}
-
-impl Mem for MemoryMapIO {
-    fn read<T>(&mut self, p_addr: WordType) -> Result<T, MemError>
+    pub fn read_by_type<T>(&mut self, p_addr: WordType) -> Result<T, MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -143,7 +98,7 @@ impl Mem for MemoryMapIO {
         }
     }
 
-    fn write<T>(&mut self, p_addr: WordType, data: T) -> Result<(), MemError>
+    pub fn write_by_type<T>(&mut self, p_addr: WordType, data: T) -> Result<(), MemError>
     where
         T: crate::utils::UnsignedInteger,
     {
@@ -175,9 +130,63 @@ impl Mem for MemoryMapIO {
             }
         }
     }
+
+    pub fn from_mmio_items(ram: Rc<UnsafeCell<Ram>>, mut map: Vec<MemoryMapItem>) -> Self {
+        map.sort();
+        Self { map, ram }
+    }
+
+    fn read_from_device<T>(&mut self, device_index: usize, p_addr: WordType) -> Result<T, MemError>
+    where
+        T: UnsignedInteger,
+    {
+        if !check_align::<T>(p_addr) {
+            return Err(MemError::LoadMisaligned);
+        }
+        let start = self.map[device_index].start;
+        if p_addr >= start + self.map[device_index].size {
+            // out of range
+            Err(MemError::LoadFault)
+        } else {
+            // in range
+            let device = &mut self.map[device_index].device;
+            device
+                .borrow_mut()
+                .read(p_addr - start, size_of::<T>() as u32)
+                .map(|x| x.truncate_to())
+        }
+    }
+
+    // write data to specific device.
+    fn write_to_device<T>(
+        &mut self,
+        device_index: usize,
+        p_addr: WordType,
+        data: T,
+    ) -> Result<(), MemError>
+    where
+        T: UnsignedInteger,
+    {
+        if !check_align::<T>(p_addr) {
+            return Err(MemError::StoreMisaligned);
+        }
+        let st = self.map[device_index].start;
+        if p_addr >= st + self.map[device_index].size {
+            // out of range
+            Err(MemError::StoreFault)
+        } else {
+            // in range
+            let device = &mut self.map[device_index].device;
+            device
+                .borrow_mut()
+                .write(p_addr - st, size_of::<T>() as u32, data.truncate_to())
+        }
+    }
 }
 
 impl DeviceTrait for MemoryMapIO {
+    dispatch_read_write! { read_by_type, write_by_type }
+
     fn sync(&mut self) {
         // let _guard = self.lock();
         for item in self.map.iter_mut() {
@@ -204,30 +213,26 @@ mod test {
     fn mmio_mem_test() {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
         let uart1 = FastUart16550::new();
-        let power_manager = Device::PowerManager(PowerManager::new());
+        let power_manager = PowerManager::new();
         let table = vec![
             MemoryMapItem::new(
                 POWER_MANAGER_BASE,
                 POWER_MANAGER_SIZE,
                 Rc::new(RefCell::new(power_manager)),
             ),
-            MemoryMapItem::new(
-                UART_BASE,
-                UART_SIZE,
-                Rc::new(RefCell::new(Device::FastUart16550(uart1))),
-            ),
+            MemoryMapItem::new(UART_BASE, UART_SIZE, Rc::new(RefCell::new(uart1))),
         ];
 
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
         for i in 0 as WordType..100 {
-            mmio.write(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()), i)
+            mmio.write_by_type(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()), i)
                 .unwrap();
         }
 
         for i in 0 as WordType..100 {
             assert_eq!(
                 i,
-                mmio.read(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()))
+                mmio.read_by_type(ram_config::BASE_ADDR + i * (1 << size_of::<WordType>()))
                     .unwrap()
             );
         }
@@ -238,25 +243,21 @@ mod test {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
         let uart1 = FastUart16550::new();
         let io: SimulationIO = SimulationIO::new(uart1.get_io_channel());
-        let power_manager = Device::PowerManager(PowerManager::new());
+        let power_manager = PowerManager::new();
         let table = vec![
             MemoryMapItem::new(
                 POWER_MANAGER_BASE,
                 POWER_MANAGER_SIZE,
                 Rc::new(RefCell::new(power_manager)),
             ),
-            MemoryMapItem::new(
-                UART_BASE,
-                UART_SIZE,
-                Rc::new(RefCell::new(Device::FastUart16550(uart1))),
-            ),
+            MemoryMapItem::new(UART_BASE, UART_SIZE, Rc::new(RefCell::new(uart1))),
         ];
 
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
         let _handles = peripheral_init();
 
-        mmio.write(UART_BASE + 0x00, 'a' as u8).unwrap();
-        assert_ne!((mmio.read::<u8>(UART_BASE + 5).unwrap() & 0x20), 0);
+        mmio.write_by_type(UART_BASE + 0x00, 'a' as u8).unwrap();
+        assert_ne!((mmio.read_by_type::<u8>(UART_BASE + 5).unwrap() & 0x20), 0);
         let data = io.receive_output_data();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0], 'a' as u8);
