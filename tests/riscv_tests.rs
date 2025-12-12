@@ -15,16 +15,6 @@ use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
 use riscv_emulator::load::get_section_addr;
 
-fn get_test_by_name(name: &str) -> PathBuf {
-    let isa_dir = Path::new("riscv-tests/isa");
-    let test_path = isa_dir.join(name);
-    test_path
-}
-
-fn find_tests(prefix: &str) -> Vec<PathBuf> {
-    find_tests_exclude(prefix, &[])
-}
-
 fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let isa_dir = Path::new("riscv-tests/isa");
@@ -56,7 +46,7 @@ fn run_test(elf: &Path) -> bool {
     let result = std::panic::catch_unwind(|| {
         let mut timeout = false;
         let mut run_result = false;
-        let mut emu = Emulator::from_elf(&elf);
+        let emu = Emulator::from_elf(&elf);
         let bytes = std::fs::read(elf).unwrap();
         let tohost: WordType = get_section_addr(&bytes, ".tohost").unwrap();
 
@@ -147,38 +137,46 @@ fn run_test_group_exclude(name: &str, exclude_names: &[&str]) {
 mod rv64_tests {
     use super::*;
 
+    // U mode tests
     #[test]
-    fn run_rv64ui_p() {
+    fn run_rv64ui() {
         run_test_group_exclude("rv64ui-p-", &["ma_data"]);
-    }
-
-    #[test]
-    #[cfg(feature = "riscv64")]
-    fn run_rv64ui_v() {
         run_test_group_exclude("rv64ui-v-", &["ma_data"]);
     }
 
     #[test]
-    #[cfg(feature = "riscv64")]
-    fn run_rv64um_p() {
-        run_test_group("rv64um-p-");
-    }
-
-    #[test]
-    #[cfg(feature = "riscv64")]
-    fn run_rv64mi_p() {
-        run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
-    }
-
-    #[test]
-    #[cfg(feature = "riscv64")]
-    fn run_rv64uf_p() {
+    fn run_rv64uf() {
+        run_test_group("rv64uf-p-");
         run_test_group("rv64uf-p-");
     }
 
     #[test]
-    #[cfg(feature = "riscv64")]
+    fn run_rv64ud() {
+        run_test_group("rv64ud-p-");
+        run_test_group("rv64ud-v-");
+    }
+
+    // #[test]
+    // fn run_rv64ua() {
+    //     run_test_group("rv64ua-p-");
+    //     run_test_group("rv64ua-v-");
+    // }
+
+    #[test]
+    fn run_rv64um() {
+        run_test_group("rv64um-p-");
+        run_test_group("rv64um-v-");
+    }
+
+    // S mode tests
+    #[test]
     fn run_rv64si_p() {
         run_test_group_exclude("rv64si-p-", &["sbreak"]);
+    }
+
+    // M mode tests
+    #[test]
+    fn run_rv64mi_p() {
+        run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
     }
 }

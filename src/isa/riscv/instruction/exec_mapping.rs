@@ -195,10 +195,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         //---------------------------------------
 
         // Arith
-        RiscvInstr::FADD_S => exec_float_arith_r_rm::<f32, AddOp>,
-        RiscvInstr::FSUB_S => exec_float_arith_r_rm::<f32, SubOp>,
-        RiscvInstr::FMUL_S => exec_float_arith_r_rm::<f32, MulOp>,
-        RiscvInstr::FDIV_S => exec_float_arith_r_rm::<f32, DivOp>,
+        RiscvInstr::FADD_S => exec_float_arith_rm::<f32, AddOp>,
+        RiscvInstr::FSUB_S => exec_float_arith_rm::<f32, SubOp>,
+        RiscvInstr::FMUL_S => exec_float_arith_rm::<f32, MulOp>,
+        RiscvInstr::FDIV_S => exec_float_arith_rm::<f32, DivOp>,
         RiscvInstr::FMADD_S => exec_float_arith_r4_rm::<f32, MulAddOp>,
         RiscvInstr::FNMADD_S => exec_float_arith_r4_rm::<f32, NegMulAddOp>,
         RiscvInstr::FMSUB_S => exec_float_arith_r4_rm::<f32, MulSubOp>,
@@ -207,10 +207,26 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FMIN_S => exec_float_min::<f32>,
         RiscvInstr::FMAX_S => exec_float_max::<f32>,
 
+        RiscvInstr::FADD_D => exec_float_arith_rm::<f64, AddOp>,
+        RiscvInstr::FSUB_D => exec_float_arith_rm::<f64, SubOp>,
+        RiscvInstr::FMUL_D => exec_float_arith_rm::<f64, MulOp>,
+        RiscvInstr::FDIV_D => exec_float_arith_rm::<f64, DivOp>,
+        RiscvInstr::FMADD_D => exec_float_arith_r4_rm::<f64, MulAddOp>,
+        RiscvInstr::FNMADD_D => exec_float_arith_r4_rm::<f64, NegMulAddOp>,
+        RiscvInstr::FMSUB_D => exec_float_arith_r4_rm::<f64, MulSubOp>,
+        RiscvInstr::FNMSUB_D => exec_float_arith_r4_rm::<f64, NegMulSubOp>,
+        RiscvInstr::FSQRT_D => exec_float_unary::<f64, SqrtOp>,
+        RiscvInstr::FMIN_D => exec_float_min::<f64>,
+        RiscvInstr::FMAX_D => exec_float_max::<f64>,
+
         // Sign injection
-        RiscvInstr::FSGNJ_S => exec_float_arith_r::<f32, SignInjectOp>,
-        RiscvInstr::FSGNJN_S => exec_float_arith_r::<f32, SignInjectNegOp>,
-        RiscvInstr::FSGNJX_S => exec_float_arith_r::<f32, SignInjectXorOp>,
+        RiscvInstr::FSGNJ_S => exec_float_arith::<f32, SignInjectOp>,
+        RiscvInstr::FSGNJN_S => exec_float_arith::<f32, SignInjectNegOp>,
+        RiscvInstr::FSGNJX_S => exec_float_arith::<f32, SignInjectXorOp>,
+
+        RiscvInstr::FSGNJ_D => exec_float_arith::<f64, SignInjectOp>,
+        RiscvInstr::FSGNJN_D => exec_float_arith::<f64, SignInjectNegOp>,
+        RiscvInstr::FSGNJX_D => exec_float_arith::<f64, SignInjectXorOp>,
 
         // Convert (RV32F)
         RiscvInstr::FCVT_W_S => exec_cvt_i_from_f::<f32, u32>,
@@ -218,27 +234,51 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FCVT_S_W => exec_cvt_f_from_i::<f32, 32>,
         RiscvInstr::FCVT_S_WU => exec_cvt_f_from_u::<f32, 32>,
 
-        // Convert (RV64F)
+        // Convert (RV64F/D)
         RiscvInstr::FCVT_L_S => exec_cvt_i_from_f::<f32, u64>,
         RiscvInstr::FCVT_LU_S => exec_cvt_u_from_f::<f32, u64>,
         RiscvInstr::FCVT_S_L => exec_cvt_f_from_i::<f32, 64>,
         RiscvInstr::FCVT_S_LU => exec_cvt_f_from_u::<f32, 64>,
+
+        RiscvInstr::FCVT_W_D => exec_cvt_i_from_f::<f64, u32>,
+        RiscvInstr::FCVT_WU_D => exec_cvt_u_from_f::<f64, u32>,
+        RiscvInstr::FCVT_D_W => exec_cvt_f_from_i::<f64, 32>,
+        RiscvInstr::FCVT_D_WU => exec_cvt_f_from_u::<f64, 32>,
+
+        RiscvInstr::FCVT_L_D => exec_cvt_i_from_f::<f64, u64>,
+        RiscvInstr::FCVT_LU_D => exec_cvt_u_from_f::<f64, u64>,
+        RiscvInstr::FCVT_D_L => exec_cvt_f_from_i::<f64, 64>,
+        RiscvInstr::FCVT_D_LU => exec_cvt_f_from_u::<f64, 64>,
+
+        RiscvInstr::FCVT_D_S => exec_cvt_float::<f32, f64>,
+        RiscvInstr::FCVT_S_D => exec_cvt_float::<f64, f32>,
 
         // Float Compare
         RiscvInstr::FEQ_S => exec_float_compare::<EqOp, f32>,
         RiscvInstr::FLT_S => exec_float_compare::<LtOp, f32>,
         RiscvInstr::FLE_S => exec_float_compare::<LeOp, f32>,
 
+        RiscvInstr::FEQ_D => exec_float_compare::<EqOp, f64>,
+        RiscvInstr::FLT_D => exec_float_compare::<LtOp, f64>,
+        RiscvInstr::FLE_D => exec_float_compare::<LeOp, f64>,
+
         // Store/Load
         RiscvInstr::FLW => exec_float_load::<f32>,
         RiscvInstr::FSW => exec_float_store::<f32>,
+
+        RiscvInstr::FLD => exec_float_load::<f64>,
+        RiscvInstr::FSD => exec_float_store::<f64>,
 
         // Move
         RiscvInstr::FMV_X_W => exec_mv_x_from_f::<f32, true>,
         RiscvInstr::FMV_W_X => exec_mv_f_from_x::<f32>,
 
+        RiscvInstr::FMV_X_D => exec_mv_x_from_f::<f64, false>,
+        RiscvInstr::FMV_D_X => exec_mv_f_from_x::<f64>,
+
         // Classify
         RiscvInstr::FCLASS_S => exec_float_classify::<f32>,
+        RiscvInstr::FCLASS_D => exec_float_classify::<f64>,
 
         //---------------------------------------
         // RV_A

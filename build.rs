@@ -117,7 +117,8 @@ fn parse_instr<'a>(
                 || fields.contains(&"shamtw")
                 || fields.is_empty()
                 || fields.contains(&"rm")
-                || ext == "rv_s";
+                || ext == "rv_s"
+                || ext == "rv_d";
 
             let s = format!(
                 "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",
@@ -150,6 +151,8 @@ fn main() {
         m.insert("rv_system", "RVSystem");
         m.insert("rv_f", "RV32F");
         m.insert("rv64_f", "RV64F");
+        m.insert("rv_d", "RV32D");
+        m.insert("rv64_d", "RV64D");
         m.insert("rv_s", "RVS");
         m.insert("rv_a", "RV32A");
         m.insert("rv64_a", "RV64A");

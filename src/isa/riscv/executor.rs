@@ -66,6 +66,8 @@ impl RVCPU {
 
         csr.set_current_privileged(PrivilegeLevel::M);
 
+        let fpu = SoftFPU::from(true);
+
         Self {
             reg_file: RegFile::new(),
             memory: v_memory,
@@ -73,7 +75,7 @@ impl RVCPU {
             decoder: Decoder::new(),
             csr: csr,
             icache: SetICache::new(),
-            fpu: SoftFPU::new(),
+            fpu,
             icache_cnt: 0,
             pending_tval: None,
         }
@@ -412,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rv_f() {
+    fn test_rv32_f() {
         run_test_exec_decode(
             0x001015f3, // fsflags a1,zero => csrrw a1, fflags, zero
             |builder| builder.reg(1, 0).csr(3, 0b11011111),
@@ -494,6 +496,15 @@ mod tests {
             0xc0051553, // fcvt.w.s a0,fa0,rtz
             |builder| builder.reg_f32(10, f32::from_bits(0xffffffff)),
             |checker| checker.reg(10, i32::MAX as WordType),
+        );
+    }
+
+    #[test]
+    fn test_rv64_f() {
+        run_test_exec_decode(
+            0xe2068553, // fmv.x.d a0,fa3
+            |builder| builder.reg_f64(13, 3.5),
+            |checker| checker.reg(10, 3.5f64.to_bits()),
         );
     }
 

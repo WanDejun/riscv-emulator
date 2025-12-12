@@ -9,7 +9,7 @@ use rustc_apfloat::Round as APFloatRound;
 
 use crate::{
     fpu::{Classification, Round},
-    utils::{FloatPoint, InFloat, SignedInteger, TruncateFrom, WordTrait},
+    utils::{FloatPoint, InFloat, SignedInteger, TruncateFrom, WordTrait, make_mask},
 };
 
 impl Into<APFloatRound> for Round {
@@ -30,6 +30,15 @@ pub enum APFloat {
     Double(Double),
 }
 
+impl APFloat {
+    fn to_bits(&self) -> u128 {
+        match self {
+            APFloat::Single(s) => s.to_bits(),
+            APFloat::Double(d) => d.to_bits(),
+        }
+    }
+}
+
 impl Into<APFloat> for f32 {
     fn into(self) -> APFloat {
         APFloat::Single(Single::from_bits(self.to_bits() as u128))
@@ -47,7 +56,18 @@ impl From<APFloat> for Single {
     fn from(value: APFloat) -> Self {
         match value {
             APFloat::Single(s) => s,
-            APFloat::Double(d) => Single::from_bits(d.to_bits() as u128),
+            APFloat::Double(d) => {
+                // "Apart from transfer operations described in the previous paragraph, all other floating-point operations on
+                // narrower n-bit operations, n<FLEN, check if the input operands are correctly NaN-boxed, i.e., all upper
+                // FLEN-n bits are 1. If so, the n least-significant bits of the input are used as the input value, otherwise the
+                // input value is treated as an n-bit canonical NaN."
+                if d.to_bits() as u64 & make_mask(32, 63) != make_mask(32, 63) {
+                    // Not a valid NaN-boxed f32
+                    Single::qnan(None)
+                } else {
+                    Single::from_bits(d.to_bits() as u128)
+                }
+            }
         }
     }
 }
@@ -55,7 +75,10 @@ impl From<APFloat> for Single {
 impl From<APFloat> for Double {
     fn from(value: APFloat) -> Self {
         match value {
-            APFloat::Single(s) => Double::from_bits(s.to_bits() as u128),
+            APFloat::Single(s) => {
+                let bits = s.to_bits() as u64;
+                Double::from_bits((bits | make_mask(32, 63)) as u128)
+            }
             APFloat::Double(d) => d,
         }
     }
@@ -311,13 +334,19 @@ impl<F: Float> CmpOp<F> for LeOp {
 pub struct SoftFPU {
     last_status: std::cell::Cell<Status>,
     reg_file: [APFloat; 32],
+    pub unify_cnan: bool,
 }
 
 impl SoftFPU {
     pub fn new() -> Self {
+        Self::from(false)
+    }
+
+    pub fn from(unify_cnan: bool) -> Self {
         Self {
             last_status: std::cell::Cell::new(Status::OK),
             reg_file: [APFloat::Single(Single::from_bits(0)); 32],
+            unify_cnan: unify_cnan,
         }
     }
 
@@ -334,29 +363,8 @@ impl SoftFPU {
         status_and.value
     }
 
-    // Reinterpret current register value to `Single`.
-    fn get_as_single(&self, index: u8) -> Single {
-        self.reg_file[index as usize].into()
-    }
-
-    fn get_as_double(&self, index: u8) -> Double {
-        self.reg_file[index as usize].into()
-    }
-
-    pub fn get_f32(&self, index: u8) -> f32 {
-        f32::from_bits(self.get_as_single(index).to_bits() as u32)
-    }
-
-    pub fn get_f64(&self, index: u8) -> f64 {
-        f64::from_bits(self.get_as_double(index).to_bits() as u64)
-    }
-
-    pub fn set_f32(&mut self, index: u8, value: f32) {
-        self.reg_file[index as usize] = APFloat::Single(Single::from_bits(value.to_bits() as u128));
-    }
-
-    pub fn set_f64(&mut self, index: u8, value: f64) {
-        self.reg_file[index as usize] = APFloat::Double(Double::from_bits(value.to_bits() as u128));
+    pub fn load_raw(&self, index: u8) -> u64 {
+        Double::from(self.reg_file[index as usize]).to_bits() as u64
     }
 
     pub fn load<F: FloatPoint>(&self, index: u8) -> F {
@@ -368,17 +376,17 @@ impl SoftFPU {
         self.reg_file[index as usize] = value.into();
     }
 
-    pub fn store_from_bits<F: APFloatOf>(&mut self, index: u8, value: u128) {
-        self.reg_file[index as usize] = F::Float::from_bits(value).into();
+    pub fn store_raw<F: APFloatOf>(&mut self, index: u8, value: u64) {
+        self.reg_file[index as usize] = F::Float::from_bits(value as u128).into();
     }
 
-    pub fn cvt_u_to_f_and_store<F: FloatPoint>(&mut self, index: u8, value: u128, round: Round) {
+    pub fn cvt_unsigned_and_store<F: FloatPoint>(&mut self, index: u8, value: u128, round: Round) {
         let rst = <F as APFloatOf>::Float::from_u128_r(value, round.into());
         let val = self.save_and_unwrap(rst);
         self.reg_file[index as usize] = val.into();
     }
 
-    pub fn cvt_s_to_f_and_store<F: FloatPoint>(&mut self, index: u8, value: i128, round: Round) {
+    pub fn cvt_signed_and_store<F: FloatPoint>(&mut self, index: u8, value: i128, round: Round) {
         let rst = <F as APFloatOf>::Float::from_i128_r(value, round.into());
         let val = self.save_and_unwrap(rst);
         self.reg_file[index as usize] = val.into();
@@ -420,17 +428,17 @@ impl SoftFPU {
         value
     }
 
-    pub fn float_convert_r<F: APFloatOf, T: APFloatOf>(
-        &mut self,
-        index: u8,
-        round: Round,
-    ) -> T::Float
+    pub fn cvt_float_and_store<F: APFloatOf, T: APFloatOf>(&mut self, rd: u8, rs: u8, round: Round)
     where
         F::Float: FloatConvert<T::Float>,
     {
         let mut _loses_info = true;
-        let f: F::Float = self.reg_file[index as usize].into();
-        self.save_and_unwrap(f.convert_r(round.into(), &mut _loses_info))
+        let f: F::Float = self.reg_file[rs as usize].into();
+        let mut f: T::Float = self.save_and_unwrap(f.convert_r(round.into(), &mut _loses_info));
+        if self.unify_cnan && f.is_nan() {
+            f = T::Float::qnan(None);
+        }
+        self.reg_file[rd as usize] = f.into();
     }
 
     pub fn classify<T: APFloatOf>(&self, rs: u8) -> Classification {
@@ -452,6 +460,11 @@ impl SoftFPU {
             self.last_status.set(Status::INVALID_OP);
         }
 
+        if self.unify_cnan && a.is_nan() && b.is_nan() {
+            self.reg_file[rd as usize] = <T as APFloatOf>::Float::qnan(None).into();
+            return;
+        }
+
         self.reg_file[rd as usize] = a.min(b).into();
     }
 
@@ -463,6 +476,11 @@ impl SoftFPU {
             self.last_status.set(Status::INVALID_OP);
         }
 
+        if self.unify_cnan && a.is_nan() && b.is_nan() {
+            self.reg_file[rd as usize] = <T as APFloatOf>::Float::qnan(None).into();
+            return;
+        }
+
         self.reg_file[rd as usize] = a.max(b).into();
     }
 
@@ -471,10 +489,16 @@ impl SoftFPU {
         Op: UnaryOp<T::Float>,
     {
         let a: T::Float = self.reg_file[rs1 as usize].into();
-        self.reg_file[rd as usize] = Op::apply(a).into();
+        let mut res = Op::apply(a);
+        if self.unify_cnan && res.is_nan() {
+            res = <T as APFloatOf>::Float::qnan(None);
+        }
+        self.reg_file[rd as usize] = res.into();
     }
 
-    pub fn exec_binary<Op, T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8)
+    /// This function is used for operations like sign injection in RISC-V,
+    /// which should not change the payload of NaN.
+    pub fn exec_binary_ignore_cnan<Op, T: FloatPoint>(&mut self, rs1: u8, rs2: u8, rd: u8)
     where
         Op: BinaryOp<T::Float>,
     {
@@ -489,7 +513,11 @@ impl SoftFPU {
     {
         let a: T::Float = self.reg_file[rs1 as usize].into();
         let b: T::Float = self.reg_file[rs2 as usize].into();
-        self.reg_file[rd as usize] = self.save_and_unwrap(Op::apply(a, b, round)).into();
+        let mut res = self.save_and_unwrap(Op::apply(a, b, round));
+        if self.unify_cnan && res.is_nan() {
+            res = <T as APFloatOf>::Float::qnan(None);
+        }
+        self.reg_file[rd as usize] = res.into();
     }
 
     pub fn exec_ternary_r<Op, T: FloatPoint>(
@@ -505,7 +533,11 @@ impl SoftFPU {
         let a: T::Float = self.reg_file[rs1 as usize].into();
         let b: T::Float = self.reg_file[rs2 as usize].into();
         let c: T::Float = self.reg_file[rs3 as usize].into();
-        self.reg_file[rd as usize] = self.save_and_unwrap(Op::apply(a, b, c, round)).into();
+        let mut res = self.save_and_unwrap(Op::apply(a, b, c, round));
+        if self.unify_cnan && res.is_nan() {
+            res = <T as APFloatOf>::Float::qnan(None);
+        }
+        self.reg_file[rd as usize] = res.into();
     }
 }
 
@@ -515,67 +547,67 @@ mod tests {
 
     #[test]
     fn test_simple_arith() {
-        let mut fpu = SoftFPU::new();
-        fpu.set_f32(1, 2.0f32);
-        fpu.set_f32(2, 3.0f32);
+        let mut fpu = SoftFPU::from(true);
+        fpu.store::<f32>(1, 2.0f32);
+        fpu.store::<f32>(2, 3.0f32);
 
         // add
         fpu.exec_binary_r::<AddOp, f32>(1, 2, 3, Round::NearestTiesToEven);
-        assert_eq!(fpu.get_f32(3), 5.0f32);
+        assert_eq!(fpu.load::<f32>(3), 5.0f32);
 
         // sub
         fpu.exec_binary_r::<SubOp, f32>(2, 1, 6, Round::NearestTiesToEven);
-        assert_eq!(fpu.get_f32(6), 1.0f32);
+        assert_eq!(fpu.load::<f32>(6), 1.0f32);
 
         // mul
         fpu.exec_binary_r::<MulOp, f32>(1, 2, 4, Round::NearestTiesToEven);
-        assert_eq!(fpu.get_f32(4), 6.0f32);
+        assert_eq!(fpu.load::<f32>(4), 6.0f32);
 
         // div
         fpu.exec_binary_r::<DivOp, f32>(2, 1, 5, Round::NearestTiesToEven);
-        assert_eq!(fpu.get_f32(5), 1.5f32);
+        assert_eq!(fpu.load::<f32>(5), 1.5f32);
     }
 
     #[test]
     fn test_ternary_mul_add() {
-        let mut fpu = SoftFPU::new();
-        fpu.set_f64(1, 1.5f64);
-        fpu.set_f64(2, 2.0f64);
-        fpu.set_f64(3, 0.5f64);
+        let mut fpu = SoftFPU::from(true);
+        fpu.store::<f64>(1, 1.5f64);
+        fpu.store::<f64>(2, 2.0f64);
+        fpu.store::<f64>(3, 0.5f64);
 
         fpu.exec_ternary_r::<MulAddOp, f64>(1, 2, 3, 4, Round::NearestTiesToEven);
-        assert_eq!(fpu.get_f64(4), 1.5f64 * 2.0f64 + 0.5f64);
+        assert_eq!(fpu.load::<f64>(4), 1.5f64 * 2.0f64 + 0.5f64);
     }
 
     #[test]
     fn test_classify() {
-        let mut fpu = SoftFPU::new();
+        let mut fpu = SoftFPU::from(true);
 
-        fpu.set_f32(1, 0.0f32);
+        fpu.store::<f32>(1, 0.0f32);
         assert!(matches!(
             fpu.classify::<f32>(1),
             Classification::PositiveZero
         ));
 
-        fpu.set_f32(1, -0.0f32);
+        fpu.store::<f32>(1, -0.0f32);
         assert!(matches!(
             fpu.classify::<f32>(1),
             Classification::NegativeZero
         ));
 
-        fpu.set_f32(2, f32::INFINITY);
+        fpu.store::<f32>(2, f32::INFINITY);
         assert!(matches!(
             fpu.classify::<f32>(2),
             Classification::PositiveInfinity
         ));
 
-        fpu.set_f32(2, f32::NEG_INFINITY);
+        fpu.store::<f32>(2, f32::NEG_INFINITY);
         assert!(matches!(
             fpu.classify::<f32>(2),
             Classification::NegativeInfinity
         ));
 
-        fpu.set_f32(3, f32::NAN);
+        fpu.store::<f32>(3, f32::NAN);
         let c = fpu.classify::<f32>(3);
         assert!(matches!(
             c,
@@ -585,17 +617,17 @@ mod tests {
 
     #[test]
     fn test_subnormal_and_sign() {
-        let mut fpu = SoftFPU::new();
+        let mut fpu = SoftFPU::from(true);
 
         // smallest positive subnormal for f32
-        fpu.set_f32(1, f32::from_bits(0x0000_0001));
+        fpu.store::<f32>(1, f32::from_bits(0x0000_0001));
         assert!(matches!(
             fpu.classify::<f32>(1),
             Classification::SubnormalPositive
         ));
 
         // smallest negative subnormal
-        fpu.set_f32(1, f32::from_bits(0x8000_0001));
+        fpu.store::<f32>(1, f32::from_bits(0x8000_0001));
         assert!(matches!(
             fpu.classify::<f32>(1),
             Classification::SubnormalNegative
@@ -606,13 +638,13 @@ mod tests {
     fn test_div_inexact_status() {
         use rustc_apfloat::Status;
 
-        let mut fpu = SoftFPU::new();
-        fpu.set_f32(1, 1.0f32);
-        fpu.set_f32(2, 3.0f32);
+        let mut fpu = SoftFPU::from(true);
+        fpu.store::<f32>(1, 1.0f32);
+        fpu.store::<f32>(2, 3.0f32);
 
         // 1/3 is inexact in binary32
         fpu.exec_binary_r::<DivOp, f32>(1, 2, 3, Round::NearestTiesToEven);
-        let r = fpu.get_f32(3);
+        let r = fpu.load::<f32>(3);
 
         assert!((r - (1.0f32 / 3.0f32)).abs() < 1e-7);
         assert!(fpu.last_status.get().contains(Status::INEXACT));
@@ -621,18 +653,18 @@ mod tests {
     #[test]
     fn test_float_convert() {
         // f32 -> f64 conversion should preserve value for a simple value
-        let mut fpu = SoftFPU::new();
-        fpu.set_f32(1, 1.5f32);
+        let mut fpu = SoftFPU::from(true);
+        fpu.store::<f32>(1, 1.5f32);
 
-        let d = fpu.float_convert_r::<f32, f64>(1, Round::NearestTiesToEven);
+        fpu.cvt_float_and_store::<f32, f64>(2, 1, Round::NearestTiesToEven);
 
-        let as_u64 = d.to_bits() as u64;
+        let as_u64 = fpu.load::<f64>(2).to_bits() as u64;
         assert_eq!(as_u64, f64::from(1.5f32).to_bits());
     }
 
     #[test]
     fn test_float_cmp() {
-        let mut fpu = SoftFPU::new();
+        let mut fpu = SoftFPU::from(true);
 
         fpu.store::<f32>(1, 3.0);
         fpu.store::<f32>(2, 3.0);
@@ -644,7 +676,7 @@ mod tests {
         assert!(fpu.compare::<EqOp, f32>(1, 2) == false);
         assert!(fpu.last_status() == Status::OK);
 
-        fpu.store_from_bits::<f32>(1, Single::snan(None).to_bits());
+        fpu.store_raw::<f32>(1, Single::snan(None).to_bits() as u64);
         fpu.store::<f32>(2, 3.0);
         assert!(fpu.compare::<EqOp, f32>(1, 2) == false);
         assert!(fpu.last_status() == Status::INVALID_OP);
@@ -659,9 +691,114 @@ mod tests {
         assert!(fpu.compare::<LtOp, f32>(1, 2) == false);
         assert!(fpu.last_status() == Status::INVALID_OP);
 
-        fpu.store_from_bits::<f32>(1, Single::snan(None).to_bits());
+        fpu.store_raw::<f32>(1, Single::snan(None).to_bits() as u64);
         fpu.store::<f32>(2, 3.0);
         assert!(fpu.compare::<LtOp, f32>(1, 2) == false);
         assert!(fpu.last_status() == Status::INVALID_OP);
+    }
+
+    #[test]
+    fn test_nan_generation() {
+        let mut fpu = SoftFPU::from(true);
+
+        fpu.store::<f32>(1, 0.0f32);
+        fpu.store::<f32>(2, 0.0f32);
+
+        // 0.0 / 0.0 = NaN
+        fpu.exec_binary_r::<DivOp, f32>(1, 2, 3, Round::NearestTiesToEven);
+        let r = fpu.load::<f32>(3);
+        assert!(r.is_nan());
+
+        // Check for canonical NaN (0x7fc00000)
+        assert_eq!(r.to_bits(), 0x7fc00000);
+    }
+
+    #[test]
+    fn test_nan_propagation() {
+        let mut fpu = SoftFPU::from(true);
+
+        // A quiet NaN but not canonical (payload != 0)
+        fpu.store::<f32>(1, f32::from_bits(0x7fc00001));
+        fpu.store::<f32>(2, 1.0f32);
+
+        // NaN + 1.0 = NaN
+        fpu.exec_binary_r::<AddOp, f32>(1, 2, 3, Round::NearestTiesToEven);
+        let r = fpu.load::<f32>(3);
+        assert!(r.is_nan());
+        assert_eq!(r.to_bits(), 0x7fc00000);
+    }
+
+    #[test]
+    fn test_min_max_nan() {
+        let mut fpu = SoftFPU::from(true);
+
+        fpu.store::<f32>(1, f32::from_bits(0x7fc00001)); // QNaN with payload
+        fpu.store::<f32>(2, f32::from_bits(0x7fc00002)); // QNaN with payload
+
+        // min(QNaN, QNaN) -> Canonical NaN
+        fpu.min_num::<f32>(1, 2, 3);
+        let r = fpu.load::<f32>(3);
+        assert_eq!(r.to_bits(), 0x7fc00000);
+
+        fpu.store::<f32>(4, 1.0);
+        // min(QNaN, 1.0) -> 1.0
+        fpu.min_num::<f32>(1, 4, 5);
+        let r = fpu.load::<f32>(5);
+        assert_eq!(r, 1.0);
+    }
+
+    #[test]
+    fn test_sign_injection_nan() {
+        let mut fpu = SoftFPU::from(true);
+
+        // Source is a NaN with payload
+        let payload = 0x7fc00001;
+        fpu.store::<f32>(1, f32::from_bits(payload));
+        fpu.store::<f32>(2, -1.0f32); // Negative sign
+
+        // FSGNJ (copy sign from rs2 to rs1)
+        // Should preserve payload of rs1, but take sign of rs2
+        fpu.exec_binary_ignore_cnan::<SignInjectOp, f32>(1, 2, 3);
+        let r = fpu.load::<f32>(3);
+
+        assert!(r.is_nan());
+        // Sign bit is MSB (bit 31).
+        // Original payload: 0x7fc00001 (positive)
+        // New value should be: 0xffc00001 (negative)
+        assert_eq!(r.to_bits(), 0xffc00001);
+    }
+
+    #[test]
+    fn test_nan_boxing() {
+        let mut fpu = SoftFPU::from(true);
+
+        // 1. Test Boxing: f32 -> f64
+        let val_f32 = 1.2345f32;
+        fpu.store::<f32>(1, val_f32);
+
+        // When reading as f64, it should be NaN boxed
+        let val_f64 = fpu.load::<f64>(1);
+        let val_u64 = val_f64.to_bits();
+
+        // Check upper 32 bits are all 1s
+        assert_eq!((val_u64 >> 32), 0xFFFFFFFF);
+
+        // Check lower 32 bits match the f32 value
+        assert_eq!((val_u64 & 0xFFFFFFFF) as u32, val_f32.to_bits());
+
+        // 2. Test Unboxing: f64 (boxed) -> f32
+        // Manually create a boxed value
+        let boxed_val = 0xFFFFFFFF00000000u64 | (val_f32.to_bits() as u64);
+        fpu.store::<f64>(2, f64::from_bits(boxed_val));
+
+        // Read back as f32
+        let res_f32 = fpu.load::<f32>(2);
+        assert_eq!(res_f32.to_bits(), val_f32.to_bits());
+
+        // 3. Test Unboxing with invalid box
+        // If upper bits are not all 1s, it should be Canonical NaN.
+        let not_boxed = 0x00000000_12345678u64;
+        fpu.store::<f64>(3, f64::from_bits(not_boxed));
+        assert_eq!(fpu.load_raw(3), 0x12345678);
     }
 }

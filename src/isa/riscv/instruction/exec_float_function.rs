@@ -1,4 +1,4 @@
-use rustc_apfloat::Status;
+use rustc_apfloat::{FloatConvert, Status};
 
 use super::normal_float_exec;
 use crate::{
@@ -10,7 +10,9 @@ use crate::{
         instruction::RVInstrInfo,
         trap::Exception,
     },
-    utils::{FloatPoint, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed},
+    utils::{
+        FloatPoint, TruncateTo, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed,
+    },
 };
 
 fn rm_to_round(cpu: &mut RVCPU, rm: u8) -> Round {
@@ -65,7 +67,7 @@ where
 
             match rst {
                 Ok(data) => {
-                    cpu.fpu.store(rd, F::from_bits(data));
+                    cpu.fpu.store_raw::<F>(rd, data.truncate_to());
                 }
                 Err(err) => {
                     cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
@@ -85,11 +87,11 @@ where
 {
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::S { rs1, rs2, imm } = info {
-            let val1 = cpu.reg_file.read(rs1, 0).0;
-            let val2 = cpu.fpu.load::<F>(rs2);
-            let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
+            let addr = cpu.reg_file.read(rs1, 0).0;
+            let val: F::BitsType = cpu.fpu.load_raw(rs2).truncate_to();
+            let addr = wrapping_add_as_signed(addr, sign_extend(imm, 12));
 
-            let ret = cpu.memory.write(addr, val2.to_bits(), &mut cpu.csr);
+            let ret = cpu.memory.write(addr, val, &mut cpu.csr);
             if let Err(err) = ret {
                 cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
                 return Err(Exception::from_memory_err(err));
@@ -128,7 +130,7 @@ where
     })
 }
 
-pub(super) fn exec_float_arith_r_rm<F, Op>(
+pub(super) fn exec_float_arith_rm<F, Op>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
 ) -> Result<(), Exception>
@@ -149,7 +151,7 @@ where
     })
 }
 
-pub(super) fn exec_float_arith_r<F, Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+pub(super) fn exec_float_arith<F, Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     Op: BinaryOp<<F as APFloatOf>::Float>,
@@ -157,7 +159,7 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2, rd } = info {
             // TODO: The order of FPU exec and here is reverfsed.
-            cpu.fpu.exec_binary::<Op, F>(rs1, rs2, rd);
+            cpu.fpu.exec_binary_ignore_cnan::<Op, F>(rs1, rs2, rd);
         } else {
             std::unreachable!();
         }
@@ -254,7 +256,7 @@ where
             let val = cpu.reg_file.read(rs1, 0).0;
             let rm = rm_to_round(cpu, rm);
             cpu.fpu
-                .cvt_u_to_f_and_store::<F>(rd, val.truncate_to_bits(BITS) as u128, rm);
+                .cvt_unsigned_and_store::<F>(rd, val.truncate_to_bits(BITS) as u128, rm);
             save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
@@ -281,11 +283,37 @@ where
             let val = cpu.reg_file.read(rs1, 0).0;
             let rm = rm_to_round(cpu, rm);
             cpu.fpu
-                .cvt_s_to_f_and_store::<F>(rd, val.cast_signed() as i128, rm);
+                .cvt_signed_and_store::<F>(rd, val.cast_signed() as i128, rm);
             save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
+        Ok(())
+    })
+}
+
+pub(super) fn exec_cvt_float<F: FloatPoint, T: FloatPoint>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    F::Float: FloatConvert<T::Float>,
+{
+    normal_float_exec(cpu, |cpu| {
+        let RVInstrInfo::R_rm {
+            rs1,
+            rs2: _,
+            rd,
+            rm,
+        } = info
+        else {
+            std::unreachable!();
+        };
+
+        let round = rm_to_round(cpu, rm);
+        cpu.fpu.cvt_float_and_store::<F, T>(rd, rs1, round);
+        save_fflags_to_cpu(cpu);
+
         Ok(())
     })
 }
@@ -331,7 +359,7 @@ where
 {
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2: _, rd } = info {
-            let mut rst: WordType = cpu.fpu.load::<f32>(rs1).to_bits().into();
+            let mut rst: WordType = cpu.fpu.load_raw(rs1).truncate_to();
 
             #[cfg(feature = "riscv64")]
             if EXTEND {
@@ -346,18 +374,6 @@ where
     })
 }
 
-pub(super) fn exec_mv_x_from_f64(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
-    normal_float_exec(cpu, |cpu| {
-        if let RVInstrInfo::R { rs1, rs2: _, rd } = info {
-            let rst = cpu.fpu.load::<f64>(rs1).to_bits();
-            cpu.reg_file.write(rd, rst.into());
-        } else {
-            std::unreachable!();
-        }
-        Ok(())
-    })
-}
-
 pub(super) fn exec_mv_f_from_x<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -365,7 +381,7 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2: _, rd } = info {
             let rst = cpu.reg_file.read(rs1, 0).0;
-            cpu.fpu.store_from_bits::<F>(rd, rst as u128);
+            cpu.fpu.store_raw::<F>(rd, rst.truncate_to());
         } else {
             std::unreachable!();
         }

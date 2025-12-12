@@ -41,6 +41,8 @@ impl Decoder {
             .add(TABLE_RVSYSTEM)
             .add(TABLE_RV32F)
             .add(TABLE_RV64F)
+            .add(TABLE_RV32D)
+            .add(TABLE_RV64D)
             .add(TABLE_RVS)
             .add(TABLE_RV32A)
             .add(TABLE_RV64A);
