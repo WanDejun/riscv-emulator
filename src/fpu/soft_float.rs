@@ -98,7 +98,7 @@ impl Into<APFloat> for Double {
 
 /// Map a Rust primitive float type to its `rustc_apfloat` representation.
 pub trait APFloatOf: Into<APFloat> {
-    type Float: Float + Into<APFloat> + From<APFloat>;
+    type Float: Float + Into<APFloat> + From<APFloat> + InFloat;
 }
 
 impl APFloatOf for f32 {
@@ -133,8 +133,8 @@ impl InFloat for Double {
     }
 }
 
-pub trait UnaryOp<F> {
-    fn apply(a: F) -> F;
+pub trait UnaryOpWithRound<F> {
+    fn apply(a: F, round: Round) -> F;
 }
 
 pub trait BinaryOp<F> {
@@ -201,26 +201,14 @@ impl<F: Float> TernaryOpWithRound<F> for MulSubOp {
 pub struct NegMulAddOp;
 impl<F: Float> TernaryOpWithRound<F> for NegMulAddOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        (-a).mul_add_r(b, c, round.into())
+        (-a).mul_add_r(b, -c, round.into())
     }
 }
 
 pub struct NegMulSubOp;
 impl<F: Float> TernaryOpWithRound<F> for NegMulSubOp {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F> {
-        (-a).mul_add_r(b, -c, round.into())
-    }
-}
-
-pub struct SqrtOp;
-impl<F: Float> UnaryOp<F> for SqrtOp
-where
-    F: Into<APFloat> + InFloat,
-{
-    fn apply(a: F) -> F {
-        // TODO: rustc_apfloat doesn't provide sqrt;
-        // current implementation is not comply with IEEE 754.
-        F::from_float(a.into_float().sqrt())
+        (-a).mul_add_r(b, c, round.into())
     }
 }
 
@@ -458,10 +446,24 @@ impl SoftFPU {
 
         if a.is_signaling() || b.is_signaling() {
             self.last_status.set(Status::INVALID_OP);
+            if self.unify_cnan && a.is_nan() && b.is_nan() {
+                self.reg_file[rd as usize] = <T as APFloatOf>::Float::qnan(None).into();
+                return;
+            }
+            self.reg_file[rd as usize] = a.min(b).into();
+            return;
+        } else {
+            self.last_status.set(Status::OK);
         }
 
         if self.unify_cnan && a.is_nan() && b.is_nan() {
             self.reg_file[rd as usize] = <T as APFloatOf>::Float::qnan(None).into();
+            return;
+        }
+
+        // RISC-V requires -0.0 < +0.0 for min/max
+        if a.is_zero() && b.is_zero() && a.is_negative() != b.is_negative() {
+            self.reg_file[rd as usize] = if a.is_negative() { a.into() } else { b.into() };
             return;
         }
 
@@ -474,6 +476,14 @@ impl SoftFPU {
 
         if a.is_signaling() || b.is_signaling() {
             self.last_status.set(Status::INVALID_OP);
+            if self.unify_cnan && a.is_nan() && b.is_nan() {
+                self.reg_file[rd as usize] = <T as APFloatOf>::Float::qnan(None).into();
+                return;
+            }
+            self.reg_file[rd as usize] = a.max(b).into();
+            return;
+        } else {
+            self.last_status.set(Status::OK);
         }
 
         if self.unify_cnan && a.is_nan() && b.is_nan() {
@@ -481,18 +491,50 @@ impl SoftFPU {
             return;
         }
 
+        // -0.0 < +0.0 for min/max
+        if a.is_zero() && b.is_zero() && a.is_negative() != b.is_negative() {
+            self.reg_file[rd as usize] = if a.is_negative() { b.into() } else { a.into() };
+            return;
+        }
+
         self.reg_file[rd as usize] = a.max(b).into();
     }
 
-    pub fn exec_unary<Op, T: FloatPoint>(&mut self, rs1: u8, rd: u8)
-    where
-        Op: UnaryOp<T::Float>,
-    {
-        let a: T::Float = self.reg_file[rs1 as usize].into();
-        let mut res = Op::apply(a);
+    /// APFloat doesn't support sqrt, so current implementation use native float sqrt.
+    ///
+    /// This may not be fully IEEE 754 compliant.
+    pub fn sqrt<T: FloatPoint>(&mut self, rs: u8, rd: u8, _round: Round) {
+        let f: T::Float = self.reg_file[rs as usize].into();
+        let mut status = Status::OK;
+
+        if f.is_nan() {
+            if f.is_signaling() {
+                status |= Status::INVALID_OP;
+            }
+        } else if f.is_negative() && !f.is_zero() {
+            status |= Status::INVALID_OP;
+        }
+
+        let f_native = f.into_float();
+        let res_native = f_native.sqrt();
+        let mut res = T::Float::from_float(res_native);
+
+        if status == Status::OK {
+            if !res.is_infinite() && !res.is_nan() && !res.is_zero() {
+                // Use fused multiply-add to check for inexactness.
+                // If sqrt(x) is exact, then res * res - x == 0.
+                // We use mul_add(res, res, -f_native) which computes res * res - f_native with only one rounding.
+                let zero = <T::Float as InFloat>::Float::from(0.0f32);
+                if res_native.mul_add(res_native, -f_native) != zero {
+                    status |= Status::INEXACT;
+                }
+            }
+        }
+
         if self.unify_cnan && res.is_nan() {
             res = <T as APFloatOf>::Float::qnan(None);
         }
+        self.last_status.set(status);
         self.reg_file[rd as usize] = res.into();
     }
 
@@ -800,5 +842,82 @@ mod tests {
         let not_boxed = 0x00000000_12345678u64;
         fpu.store::<f64>(3, f64::from_bits(not_boxed));
         assert_eq!(fpu.load_raw(3), 0x12345678);
+    }
+
+    #[test]
+    fn test_sqrt() {
+        let mut fpu = SoftFPU::from(true);
+
+        // sqrt(4.0) = 2.0 (Exact)
+        fpu.store::<f32>(1, 4.0);
+        fpu.sqrt::<f32>(1, 2, Round::NearestTiesToEven);
+        assert_eq!(fpu.load::<f32>(2), 2.0);
+        assert_eq!(fpu.last_status(), Status::OK);
+
+        // sqrt(2.0) (Inexact)
+        fpu.store::<f32>(1, 2.0);
+        fpu.sqrt::<f32>(1, 2, Round::NearestTiesToEven);
+        let r = fpu.load::<f32>(2);
+        assert!((r - 2.0f32.sqrt()).abs() < 1e-7);
+        assert!(fpu.last_status().contains(Status::INEXACT));
+
+        // sqrt(-1.0) (Invalid)
+        fpu.store::<f32>(1, -1.0);
+        fpu.sqrt::<f32>(1, 2, Round::NearestTiesToEven);
+        assert!(fpu.load::<f32>(2).is_nan());
+        assert!(fpu.last_status().contains(Status::INVALID_OP));
+
+        // sqrt(-0.0) = -0.0
+        fpu.store::<f32>(1, -0.0);
+        fpu.sqrt::<f32>(1, 2, Round::NearestTiesToEven);
+        let r = fpu.load::<f32>(2);
+        assert_eq!(r, -0.0);
+        assert!(r.is_sign_negative());
+        assert_eq!(fpu.last_status(), Status::OK);
+
+        // sqrt(3.14159265) (Inexact, but tricky in f32)
+        fpu.store::<f32>(1, 3.14159265);
+        fpu.sqrt::<f32>(1, 2, Round::NearestTiesToEven);
+        assert!(fpu.last_status().contains(Status::INEXACT));
+    }
+
+    #[test]
+    fn test_sqrt_exact_f64() {
+        let mut fpu = SoftFPU::from(true);
+        fpu.store::<f64>(1, 10000.0);
+        fpu.sqrt::<f64>(1, 2, Round::NearestTiesToEven);
+        assert_eq!(fpu.load::<f64>(2), 100.0);
+        assert_eq!(fpu.last_status(), Status::OK);
+    }
+
+    #[test]
+    fn test_min_max_signed_zero() {
+        let mut fpu = SoftFPU::from(true);
+
+        // fmin(-0.0, 0.0) -> -0.0
+        fpu.store::<f32>(1, -0.0);
+        fpu.store::<f32>(2, 0.0);
+        fpu.min_num::<f32>(1, 2, 3);
+        let r = fpu.load::<f32>(3);
+        assert_eq!(r, -0.0);
+        assert!(r.is_sign_negative());
+
+        // fmin(0.0, -0.0) -> -0.0
+        fpu.min_num::<f32>(2, 1, 4);
+        let r = fpu.load::<f32>(4);
+        assert_eq!(r, -0.0);
+        assert!(r.is_sign_negative());
+
+        // fmax(-0.0, 0.0) -> 0.0
+        fpu.max_num::<f32>(1, 2, 5);
+        let r = fpu.load::<f32>(5);
+        assert_eq!(r, 0.0);
+        assert!(r.is_sign_positive());
+
+        // fmax(0.0, -0.0) -> 0.0
+        fpu.max_num::<f32>(2, 1, 6);
+        let r = fpu.load::<f32>(6);
+        assert_eq!(r, 0.0);
+        assert!(r.is_sign_positive());
     }
 }

@@ -35,7 +35,7 @@ fn rm_to_round(cpu: &mut RVCPU, rm: u8) -> Round {
     }
 }
 
-fn status_to_fflags(status: Status) -> u8 {
+pub fn status_to_fflags(status: Status) -> u8 {
     let old = status.bits();
     let mut rst: u8 = 0;
 
@@ -47,7 +47,7 @@ fn status_to_fflags(status: Status) -> u8 {
     rst
 }
 
-fn save_fflags_to_cpu(cpu: &mut RVCPU) {
+pub fn save_fflags_to_cpu(cpu: &mut RVCPU) {
     let fflags = status_to_fflags(cpu.fpu.last_status());
 
     cpu.csr
@@ -167,20 +167,20 @@ where
     })
 }
 
-pub(super) fn exec_float_unary<F, Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+pub(super) fn exec_sqrt<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
-    Op: UnaryOp<<F as APFloatOf>::Float>,
 {
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R_rm {
             rs1,
             rs2: _,
             rd,
-            rm: _,
+            rm,
         } = info
         {
-            cpu.fpu.exec_unary::<Op, F>(rs1, rd);
+            let round = rm_to_round(cpu, rm);
+            cpu.fpu.sqrt::<F>(rs1, rd, round);
         } else {
             std::unreachable!();
         }

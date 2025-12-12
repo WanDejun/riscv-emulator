@@ -11,6 +11,7 @@ use crate::{
         self,
         csr_reg::csr_macro::{Minstret, Mstatus},
         executor::RVCPU,
+        instruction::exec_function::save_fflags_to_cpu,
     },
 };
 
@@ -44,7 +45,11 @@ where
         return Err(riscv::trap::Exception::IllegalInstruction);
     }
 
-    normal_exec(cpu, f)
+    normal_exec(cpu, f)?;
+
+    save_fflags_to_cpu(cpu);
+
+    Ok(())
 }
 
 type ExecFn = fn(RVInstrInfo, &mut RVCPU) -> Result<(), riscv::trap::Exception>;

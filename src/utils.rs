@@ -445,6 +445,7 @@ pub trait FloatPoint:
     + Sub<Output = Self>
     + Mul<Output = Self>
     + Div<Output = Self>
+    + Neg<Output = Self>
     + PartialEq
     + PartialOrd
     + Copy
@@ -458,6 +459,7 @@ pub trait FloatPoint:
     type BitsType: UnsignedInteger;
 
     fn sqrt(self) -> Self;
+    fn mul_add(self, a: Self, b: Self) -> Self;
 }
 
 impl InBits<u32> for f32 {
@@ -489,12 +491,20 @@ impl FloatPoint for f32 {
     fn sqrt(self) -> Self {
         self.sqrt()
     }
+
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        self.mul_add(a, b)
+    }
 }
 impl FloatPoint for f64 {
     type BitsType = u64;
 
     fn sqrt(self) -> Self {
         self.sqrt()
+    }
+
+    fn mul_add(self, a: Self, b: Self) -> Self {
+        self.mul_add(a, b)
     }
 }
 

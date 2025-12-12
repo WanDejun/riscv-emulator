@@ -203,7 +203,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FNMADD_S => exec_float_arith_r4_rm::<f32, NegMulAddOp>,
         RiscvInstr::FMSUB_S => exec_float_arith_r4_rm::<f32, MulSubOp>,
         RiscvInstr::FNMSUB_S => exec_float_arith_r4_rm::<f32, NegMulSubOp>,
-        RiscvInstr::FSQRT_S => exec_float_unary::<f32, SqrtOp>,
+        RiscvInstr::FSQRT_S => exec_sqrt::<f32>,
         RiscvInstr::FMIN_S => exec_float_min::<f32>,
         RiscvInstr::FMAX_S => exec_float_max::<f32>,
 
@@ -215,7 +215,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FNMADD_D => exec_float_arith_r4_rm::<f64, NegMulAddOp>,
         RiscvInstr::FMSUB_D => exec_float_arith_r4_rm::<f64, MulSubOp>,
         RiscvInstr::FNMSUB_D => exec_float_arith_r4_rm::<f64, NegMulSubOp>,
-        RiscvInstr::FSQRT_D => exec_float_unary::<f64, SqrtOp>,
+        RiscvInstr::FSQRT_D => exec_sqrt::<f64>,
         RiscvInstr::FMIN_D => exec_float_min::<f64>,
         RiscvInstr::FMAX_D => exec_float_max::<f64>,
 
