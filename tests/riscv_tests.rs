@@ -154,7 +154,7 @@ fn run_rv64ui_p_tests() {
 #[cfg(feature = "riscv64")]
 #[cfg(feature = "riscv-tests")]
 fn run_rv64ui_v_tests() {
-    run_test_group_exclude("rv64ui-v-", &["fence_i", "ma_data"]);
+    run_test_group_exclude("rv64ui-v-", &["ma_data"]);
 }
 
 #[test]

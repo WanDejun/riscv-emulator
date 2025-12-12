@@ -42,7 +42,6 @@ pub(crate) mod csr_index {
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
-/// Only support machine_mode now.
 pub enum PrivilegeLevel {
     U = 0,
     S = 1,
@@ -97,8 +96,6 @@ const CSR_PRIVILEGE_TABLE: &[(WordType, PrivilegeLevel)] = &[
     (0xFC0, PrivilegeLevel::M), // 0xFFF (Custom)
 ];
 
-impl PrivilegeLevel {}
-
 impl From<u8> for PrivilegeLevel {
     fn from(value: u8) -> PrivilegeLevel {
         match value {
@@ -110,8 +107,6 @@ impl From<u8> for PrivilegeLevel {
         }
     }
 }
-
-const DEFAULT_PRIVILEGE_LEVEL: PrivilegeLevel = PrivilegeLevel::M;
 
 pub(crate) trait NamedCsrReg {
     fn new(data: *mut CsrReg, ctx: *mut CsrContext) -> Self;
@@ -262,7 +257,7 @@ impl CsrRegFile {
 
         Self {
             table,
-            cpl: DEFAULT_PRIVILEGE_LEVEL,
+            cpl: PrivilegeLevel::M,
             ctx: CsrContext::new(),
         }
     }

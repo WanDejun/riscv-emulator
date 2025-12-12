@@ -233,13 +233,13 @@ impl VirtBoard {
             cold_path();
             self.cpu.power_off()?;
 
-            log::debug!("iCache hit for {} times.", self.cpu.icache_cnt);
+            log::info!("iCache hit for {} times.", self.cpu.icache_cnt);
             let rate = self.cpu.icache_cnt as f64 / self.clock.now() as f64;
-            log::debug!("iCache hit rate {}", rate);
+            log::info!("iCache hit rate {}", rate);
 
             self.status = BoardStatus::Halt;
 
-            log::debug!("Total cycles: {}", self.clock.now());
+            log::info!("Total cycles: {}", self.clock.now());
         }
 
         unsafe { self.timer.as_mut_unchecked() }.tick();

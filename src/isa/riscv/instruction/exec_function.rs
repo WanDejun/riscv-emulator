@@ -1,6 +1,7 @@
 use std::{hint::unlikely, marker::PhantomData};
 
 pub(super) use super::exec_float_function::*;
+use super::normal_exec;
 
 use crate::{
     config::arch_config::{SignedWordType, WordType},
@@ -25,33 +26,28 @@ pub(super) trait ExecTrait<T> {
 
 /// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I.
 ///
-/// # NOTE
-///
-/// Not sure about extended ISAs.
-///
 /// This will always do signed extension to `imm` as 12 bit.
 pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     F: ExecTrait<Result<WordType, Exception>>,
 {
-    let (rd, rst) = match info {
-        RVInstrInfo::R { rs1, rs2, rd } => {
-            let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-            (rd, F::exec(val1, val2)?)
-        }
-        RVInstrInfo::I { rs1, rd, imm } => {
-            let val1 = cpu.reg_file.read(rs1, 0).0;
-            let simm = sign_extend(imm, 12);
-            (rd, F::exec(val1, simm)?)
-        }
-        _ => std::unreachable!(),
-    };
+    normal_exec(cpu, |cpu| {
+        let (rd, rst) = match info {
+            RVInstrInfo::R { rs1, rs2, rd } => {
+                let (val1, val2) = cpu.reg_file.read(rs1, rs2);
+                (rd, F::exec(val1, val2)?)
+            }
+            RVInstrInfo::I { rs1, rd, imm } => {
+                let val1 = cpu.reg_file.read(rs1, 0).0;
+                let simm = sign_extend(imm, 12);
+                (rd, F::exec(val1, simm)?)
+            }
+            _ => std::unreachable!(),
+        };
 
-    cpu.reg_file.write(rd, rst);
-    cpu.pc = cpu.pc.wrapping_add(4);
-    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
-
-    Ok(())
+        cpu.reg_file.write(rd, rst);
+        Ok(())
+    })
 }
 
 pub(super) fn exec_branch<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
@@ -89,54 +85,52 @@ pub(super) fn exec_load<T, const EXTEND: bool>(
 where
     T: UnsignedInteger,
 {
-    if let RVInstrInfo::I { rs1, rd, imm } = info {
-        let val = cpu.reg_file.read(rs1, 0).0;
-        let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
-        let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::I { rs1, rd, imm } = info {
+            let val = cpu.reg_file.read(rs1, 0).0;
+            let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
+            let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
 
-        match ret {
-            Ok(data) => {
-                let data_64: u64 = data.into();
-                let mut data = data_64 as WordType;
-                if EXTEND {
-                    data = sign_extend(data, (size_of::<T>() as u32) * 8);
+            match ret {
+                Ok(data) => {
+                    let data_64: u64 = data.into();
+                    let mut data = data_64 as WordType;
+                    if EXTEND {
+                        data = sign_extend(data, (size_of::<T>() as u32) * 8);
+                    }
+                    cpu.reg_file.write(rd, data);
                 }
-                cpu.reg_file.write(rd, data);
+                Err(err) => {
+                    cpu.pending_tval = Some(addr);
+                    return Err(Exception::from_memory_err(err));
+                }
             }
-            Err(err) => {
-                cpu.pending_tval = Some(addr);
-                return Err(Exception::from_memory_err(err));
-            }
+        } else {
+            std::unreachable!();
         }
-    } else {
-        std::unreachable!();
-    }
-
-    cpu.pc = cpu.pc.wrapping_add(4);
-    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
-    Ok(())
+        Ok(())
+    })
 }
 
 pub(super) fn exec_store<T>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
 where
     T: UnsignedInteger,
 {
-    if let RVInstrInfo::S { rs1, rs2, imm } = info {
-        let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-        let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::S { rs1, rs2, imm } = info {
+            let (val1, val2) = cpu.reg_file.read(rs1, rs2);
+            let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
 
-        let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
-        if let Err(err) = ret {
-            cpu.pending_tval = Some(addr);
-            return Err(Exception::from_memory_err(err));
+            let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
+            if let Err(err) = ret {
+                cpu.pending_tval = Some(addr);
+                return Err(Exception::from_memory_err(err));
+            }
+        } else {
+            std::unreachable!();
         }
-    } else {
-        std::unreachable!();
-    }
-
-    cpu.pc = cpu.pc.wrapping_add(4);
-    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
-    Ok(())
+        Ok(())
+    })
 }
 
 pub(super) fn exec_csrw<const UIMM: bool>(
@@ -200,9 +194,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
 }
 
 pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception> {
-    cpu.pc = cpu.pc.wrapping_add(4);
-    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
-    Ok(())
+    normal_exec(cpu, |_| Ok(()))
 }
 
 // =============================================

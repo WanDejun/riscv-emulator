@@ -5,7 +5,49 @@ pub(super) mod exec_function;
 pub mod exec_mapping;
 pub mod rv32i_table;
 
-use crate::config::arch_config::WordType;
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv::{
+        self,
+        csr_reg::csr_macro::{Minstret, Mstatus},
+        executor::RV32CPU,
+    },
+};
+
+/// A helper function for normal instruction execution.
+///
+/// It takes a closure `f` that performs the actual instruction logic.
+/// If `f` executes successfully, it will increase PC by 4 and increase the Minstret CSR by 1.
+#[inline(always)]
+pub(super) fn normal_exec<F>(cpu: &mut RV32CPU, f: F) -> Result<(), riscv::trap::Exception>
+where
+    F: FnOnce(&mut RV32CPU) -> Result<(), riscv::trap::Exception>,
+{
+    f(cpu)?;
+    cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+    Ok(())
+}
+
+/// A helper function for normal floating-point instruction execution.
+///
+/// It first checks if the floating-point unit is enabled by examining the FS field in the Mstatus CSR.
+///
+/// If the FS field is 0, it returns an illegal instruction exception.
+/// Otherwise, it calls [`normal_exec`].
+#[inline(always)]
+pub(super) fn normal_float_exec<F>(cpu: &mut RV32CPU, f: F) -> Result<(), riscv::trap::Exception>
+where
+    F: FnOnce(&mut RV32CPU) -> Result<(), riscv::trap::Exception>,
+{
+    if cpu.csr.get_by_type_existing::<Mstatus>().get_fs() == 0 {
+        return Err(riscv::trap::Exception::IllegalInstruction);
+    }
+
+    normal_exec(cpu, f)
+}
+
+type ExecFn = fn(RVInstrInfo, &mut RV32CPU) -> Result<(), riscv::trap::Exception>;
 
 /// `imm` value is shifted:
 ///
@@ -102,6 +144,18 @@ macro_rules! define_riscv_isa {
 
         define_instr_enum!($tot_instr_name, $($($name,)*)*);
 
+        impl $tot_instr_name {
+            pub fn isa_name(&self) -> &'static str {
+                match self {
+                    $(
+                        $(
+                            $tot_instr_name::$name => stringify!($isa_name),
+                        )*
+                    )*
+                }
+            }
+        }
+
         #[derive(Debug, Clone)]
         pub struct RV32Desc {
             pub opcode: u8,
@@ -132,6 +186,3 @@ macro_rules! define_riscv_isa {
         )*
     };
 }
-
-// call [`define_riscv_isa!`] to generate instructions
-// include!(concat!(env!("OUT_DIR"), "/rv32i_gen.rs"));

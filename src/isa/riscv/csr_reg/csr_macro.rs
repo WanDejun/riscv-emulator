@@ -229,7 +229,6 @@ gen_csr_regfile! {
         5,  1, stie;
         8,  1, ueie; // User External Interrupt Enable
         9,  1, seie;
-        // 0, XLEN, mip;
     ];
 
     Stvec, "stvec", 0x105u64, 0x00, [
@@ -284,10 +283,10 @@ gen_csr_regfile! {
         6,  1, ube;
         7,  1, mpie;
         8,  1, spp;
-        9,  2, vs;
+        9,  2, vs, validate_readonly;
         11, 2, mpp;
         13, 2, fs;
-        15, 2, xs;
+        15, 2, xs, validate_readonly;
         17, 1, mprv;
         18, 1, sum;
         19, 1, mxr;
@@ -329,7 +328,6 @@ gen_csr_regfile! {
         12, 1, instruction_page_fault;
         13, 1, load_page_fault;
         15, 1, store_page_fault;
-        // 0, XLEN, medeleg;
     ];
 
     // see mip.
@@ -337,7 +335,6 @@ gen_csr_regfile! {
         1, 1, ssip; // Delegate Supervisor Software Interrupt.
         5, 1, stip; // Delegate Supervisor Time     Interrupt.
         9, 1, seip; // Delegate Supervisor External Interrupt.
-        0, XLEN, mideleg;
     ];
 
     Mie, "mie", 0x304u64, 0x00, [
@@ -357,7 +354,6 @@ gen_csr_regfile! {
         11, 1, meie;
         12, 1, sgeie; // Supervisor Guest External Interrupt Enable
         13, 1, hgeie; // Hypervisor Guest External Interrupt Enable
-        // 0, XLEN, mip;
     ];
 
     Mtvec, "mtvec", 0x305u64, 0x00, [
@@ -404,7 +400,6 @@ gen_csr_regfile! {
 
         12, 1, sgeip;
         13, 1, hgeip;
-        // 0, XLEN, mip;
     ];
 
     Mcycle, "mcycle", 0xB00u64, 0x00, [

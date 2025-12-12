@@ -10,6 +10,7 @@ use crate::{
     isa::{
         DecoderTrait,
         riscv::{
+            csr_reg::csr_macro::Mstatus,
             decoder::DecodeInstr,
             executor::RV32CPU,
             instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
@@ -30,9 +31,10 @@ impl TestCPUBuilder {
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
-        Self {
-            cpu: RV32CPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio)),
-        }
+        let mut cpu =
+            RV32CPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience
+        Self { cpu: cpu }
     }
 
     pub(super) fn reg(mut self, idx: u8, value: WordType) -> Self {
