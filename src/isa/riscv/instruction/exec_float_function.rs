@@ -5,10 +5,7 @@ use crate::{
     config::arch_config::WordType,
     fpu::{Round, soft_float::*},
     isa::riscv::{
-        csr_reg::{csr_index, csr_macro::Fcsr},
-        executor::RVCPU,
-        instruction::RVInstrInfo,
-        trap::Exception,
+        csr_reg::csr_macro::Fcsr, executor::RVCPU, instruction::RVInstrInfo, trap::Exception,
     },
     utils::{
         FloatPoint, TruncateTo, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed,
@@ -70,7 +67,7 @@ where
                     cpu.fpu.store_raw::<F>(rd, data.truncate_to());
                 }
                 Err(err) => {
-                    cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
+                    cpu.pending_tval = Some(addr);
                     return Err(Exception::from_memory_err(err));
                 }
             }
@@ -93,7 +90,7 @@ where
 
             let ret = cpu.memory.write(addr, val, &mut cpu.csr);
             if let Err(err) = ret {
-                cpu.csr.write_uncheck_privilege(csr_index::mtval, addr);
+                cpu.pending_tval = Some(addr);
                 return Err(Exception::from_memory_err(err));
             }
         } else {

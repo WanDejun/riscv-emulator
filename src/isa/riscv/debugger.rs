@@ -139,7 +139,7 @@ pub struct Breakpoint {
     pub addr: Address,
 }
 
-const SAVE_PC_CNT: usize = 50;
+const SAVE_PC_CNT: usize = 128;
 
 pub struct Debugger<'a, I: ISATypes> {
     breakpoints: Vec<Breakpoint>,
