@@ -31,8 +31,8 @@ enum TargetFormat {
     Bin,
 }
 
-fn device_list_display(devices: &Vec<DeviceConfig>) {
-    println!("\x1b[{}mdevices list:", 34);
+fn display_device_list(devices: &Vec<DeviceConfig>) {
+    println!("\x1b[{}mdevice list:", 34);
     for device in devices {
         println!("\t{:#?}: {:#?}", device.dev_type, device.path);
     }
@@ -53,6 +53,10 @@ struct Args {
     #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
 
+    /// Script file for debugger REPL, will be ignored if --debug is not set.
+    #[arg(short = 'S', long = "script")]
+    script: Option<std::path::PathBuf>,
+
     /// Enable to print more details.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -72,11 +76,14 @@ struct Args {
 
 fn main() {
     display_welcome_message();
-    device_list_display(&cli_args.devices);
-    println!(
-        "path = {:?}, debug = {}, verbose = {}.\r",
-        cli_args.path, cli_args.debug, cli_args.verbose
-    );
+
+    if cli_args.verbose {
+        println!(
+            "path = {:?}, debug = {}, verbose = {}, log_level = {:?}.\r",
+            cli_args.path, cli_args.debug, cli_args.verbose, cli_args.log_level
+        );
+        display_device_list(&cli_args.devices);
+    }
 
     // Init emulator configuration by cli_args.
     let mut emu_cfg = EmulatorConfigurator::new();
@@ -94,25 +101,36 @@ fn main() {
         cli_args.path.extension() == Some("elf".as_ref()),
     ) {
         (TargetFormat::Elf, _) | (TargetFormat::Auto, true) => {
-            println!("ELF file detected\r");
+            if cli_args.verbose {
+                println!("ELF file detected\r");
+            }
             let bytes = std::fs::read(cli_args.path.clone()).unwrap();
             VirtBoard::from_binary(&bytes)
         }
         _ => {
-            println!("Non-ELF file detected\r");
-            todo!();
+            if cli_args.verbose {
+                println!("Non-ELF file detected\r");
+            }
+            log::error!("Only ELF format is supported currently.");
+            panic!();
         }
     };
 
     if cli_args.debug {
-        DebugREPL::<RiscvTypes>::new(&mut board).run();
+        let mut repl = DebugREPL::<RiscvTypes>::new(&mut board);
+        if let Some(script) = &cli_args.script {
+            let script_content = std::fs::read_to_string(script).unwrap();
+            let lines: Vec<String> = script_content.lines().map(|s| s.to_string()).collect();
+            repl.run_script(&lines);
+        }
+        repl.run();
     } else {
         let now = Instant::now();
         let emulator = Emulator::from_board(board);
         match emulator.run() {
             Ok(()) => {}
             Err(e) => {
-                eprintln!("Error occurred while running emulator: {:?}\r", e);
+                log::error!("Error occurred while running emulator: {:?}\r", e);
             }
         }
         println!("Used time: {}s", now.elapsed().as_secs_f32());

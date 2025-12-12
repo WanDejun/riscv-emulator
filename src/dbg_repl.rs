@@ -163,6 +163,28 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         }
     }
 
+    /// Run multiple lines of commands in sequence.
+    pub fn run_script(&mut self, lines: &[String]) {
+        for line in lines {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            println!("{}{}", PROMPT, line);
+            match self.respond(line) {
+                Ok(quit) => {
+                    if quit {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            }
+        }
+    }
+
+    /// REPL main loop.
     pub fn run(&mut self) {
         let mut last_line = String::new();
         loop {
