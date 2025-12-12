@@ -4,7 +4,7 @@ use crate::{
         DebugTarget,
         riscv::{
             csr_reg::{NamedCsrReg, PrivilegeLevel, csr_index, csr_macro::*},
-            executor::RV32CPU,
+            executor::RVCPU,
             trap::{Exception, Interrupt, Trap},
         },
     },
@@ -21,12 +21,12 @@ impl TrapController {
     // ======================================
     //                M-Mode
     // ======================================
-    fn is_exception_delegated_m_mode(cpu: &mut RV32CPU, exception: Exception) -> bool {
+    fn is_exception_delegated_m_mode(cpu: &mut RVCPU, exception: Exception) -> bool {
         let medeleg_val = cpu.debug_csr(Medeleg::get_index(), None).unwrap();
         (medeleg_val & (1 << exception as u8)) != 0
     }
 
-    fn is_interrupt_delegated_m_mode(cpu: &mut RV32CPU, interrupt: Interrupt) -> bool {
+    fn is_interrupt_delegated_m_mode(cpu: &mut RVCPU, interrupt: Interrupt) -> bool {
         let mideleg = cpu.csr.get_by_type::<Mideleg>().unwrap();
         match interrupt {
             Interrupt::MachineExternal | Interrupt::MachineSoft | Interrupt::MachineTimer => false,
@@ -39,14 +39,14 @@ impl TrapController {
         }
     }
 
-    fn is_delegated_m_mode(cpu: &mut RV32CPU, cause: Trap) -> bool {
+    fn is_delegated_m_mode(cpu: &mut RVCPU, cause: Trap) -> bool {
         match cause {
             Trap::Interrupt(interrupt) => Self::is_interrupt_delegated_m_mode(cpu, interrupt),
             Trap::Exception(exception) => Self::is_exception_delegated_m_mode(cpu, exception),
         }
     }
 
-    fn send_trap_signal_m_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+    fn send_trap_signal_m_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
         cpu.csr
             .get_by_type::<Mstatus>()
             .unwrap()
@@ -71,7 +71,7 @@ impl TrapController {
         ));
     }
 
-    pub fn mret(cpu: &mut RV32CPU) {
+    pub fn mret(cpu: &mut RVCPU) {
         let mstatus = cpu.csr.get_by_type_existing::<Mstatus>();
         mstatus.set_mie(mstatus.get_mpie());
         mstatus.set_mpie(1);
@@ -90,7 +90,7 @@ impl TrapController {
     // ======================================
     //                S-Mode
     // ======================================
-    fn send_trap_signal_s_mode(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) {
+    fn send_trap_signal_s_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
         cpu.csr
             .get_by_type_existing::<Sstatus>()
             .set_spp(cpu.csr.privelege_level() as u8 as WordType);
@@ -116,7 +116,7 @@ impl TrapController {
         ));
     }
 
-    pub fn sret(cpu: &mut RV32CPU) {
+    pub fn sret(cpu: &mut RVCPU) {
         let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
         sstatus.set_sie(sstatus.get_spie());
         sstatus.set_spie(1);
@@ -136,7 +136,7 @@ impl TrapController {
     //                 Common
     // ======================================
 
-    pub fn try_send_trap_signal(cpu: &mut RV32CPU, cause: Trap, trap_value: WordType) -> bool {
+    pub fn try_send_trap_signal(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) -> bool {
         if cpu.csr.privelege_level() == PrivilegeLevel::M
             || Self::is_delegated_m_mode(cpu, cause) == false
         {
@@ -172,7 +172,7 @@ impl TrapController {
         }
     }
 
-    pub fn check_interrupt(cpu: &mut RV32CPU) -> Option<Interrupt> {
+    pub fn check_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
         let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
         if mstatus.get_mie() == 0 {
             return None;

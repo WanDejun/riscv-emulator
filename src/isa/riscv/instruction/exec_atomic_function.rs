@@ -2,7 +2,7 @@ use std::sync::atomic;
 
 use crate::{
     isa::riscv::{
-        csr_reg::csr_macro::Minstret, executor::RV32CPU, instruction::RVInstrInfo, trap::Exception,
+        csr_reg::csr_macro::Minstret, executor::RVCPU, instruction::RVInstrInfo, trap::Exception,
     },
     utils::UnsignedInteger,
 };
@@ -215,7 +215,7 @@ fn get_amo_order(aq: bool, rl: bool) -> std::sync::atomic::Ordering {
 /// mem[x[[rs1]]] = t OP x[[rs2]];
 pub(crate) fn exec_atomic_memory_operation<F, T>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     T: UnsignedInteger,

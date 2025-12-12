@@ -7,7 +7,7 @@ use crate::{
     config::arch_config::{SignedWordType, WordType},
     isa::riscv::{
         csr_reg::{NamedCsrReg, csr_macro::Minstret},
-        executor::RV32CPU,
+        executor::RVCPU,
         instruction::RVInstrInfo,
         trap::Exception,
     },
@@ -24,10 +24,10 @@ pub(super) trait ExecTrait<T> {
     fn exec(a: WordType, b: WordType) -> T;
 }
 
-/// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I.
+/// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I/RV64I.
 ///
 /// This will always do signed extension to `imm` as 12 bit.
-pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: ExecTrait<Result<WordType, Exception>>,
 {
@@ -50,7 +50,7 @@ where
     })
 }
 
-pub(super) fn exec_branch<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_branch<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: ExecTrait<bool>,
 {
@@ -80,7 +80,7 @@ where
 
 pub(super) fn exec_load<T, const EXTEND: bool>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     T: UnsignedInteger,
@@ -112,7 +112,7 @@ where
     })
 }
 
-pub(super) fn exec_store<T>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_store<T>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     T: UnsignedInteger,
 {
@@ -135,7 +135,7 @@ where
 
 pub(super) fn exec_csrw<const UIMM: bool>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         // read generate register.
@@ -165,7 +165,7 @@ pub(super) fn exec_csrw<const UIMM: bool>(
 
 pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
         let rhs = if UIMM {
@@ -193,7 +193,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     Ok(())
 }
 
-pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception> {
+pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
     normal_exec(cpu, |_| Ok(()))
 }
 

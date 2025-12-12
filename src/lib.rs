@@ -27,7 +27,7 @@ use lazy_static::lazy_static;
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
     device::{fast_uart::virtual_io::SerialDestination, virtio::virtio_mmio::VirtIODeviceID},
-    isa::riscv::{executor::RV32CPU, trap::Exception},
+    isa::riscv::{executor::RVCPU, trap::Exception},
 };
 use std::{
     path::{Path, PathBuf},
@@ -115,7 +115,7 @@ impl Emulator {
 
     pub fn run_until<F>(mut self, f: &mut F) -> Result<(), Exception>
     where
-        F: FnMut(&mut RV32CPU, usize) -> bool,
+        F: FnMut(&mut RVCPU, usize) -> bool,
     {
         while self.board.status() != BoardStatus::Halt {
             self.board.step_and_halt_if(f)?;

@@ -13,7 +13,7 @@ use crate::{
             RiscvTypes,
             csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
-            instruction::{RVInstrInfo, exec_mapping::get_exec_func, rv32i_table::RiscvInstr},
+            instruction::{RVInstrInfo, exec_mapping::get_exec_func, instr_table::RiscvInstr},
             mmu::VirtAddrManager,
             trap::{Exception, Interrupt, Trap, trap_controller::TrapController},
         },
@@ -21,7 +21,7 @@ use crate::{
     ram_config::DEFAULT_PC_VALUE,
 };
 
-pub struct RV32CPU {
+pub struct RVCPU {
     pub(super) reg_file: RegFile,
     pub(super) memory: VirtAddrManager,
     pub(super) pc: WordType,
@@ -35,7 +35,7 @@ pub struct RV32CPU {
     pub(super) pending_tval: Option<WordType>,
 }
 
-impl RV32CPU {
+impl RVCPU {
     pub(crate) fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
         let mut csr = CsrRegFile::new();
 
@@ -191,7 +191,7 @@ impl RV32CPU {
     }
 }
 
-impl RiscvIRQHandler for RV32CPU {
+impl RiscvIRQHandler for RVCPU {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool) {
         let mip = self.csr.get_by_type_existing::<Mip>();
         let level = level as WordType;

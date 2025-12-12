@@ -10,9 +10,9 @@ use crate::{
                 PrivilegeLevel,
                 csr_macro::{Minstret, Mstatus},
             },
-            executor::RV32CPU,
+            executor::RVCPU,
             instruction::{
-                RVInstrInfo, exec_atomic_function::*, exec_function::*, rv32i_table::RiscvInstr,
+                RVInstrInfo, exec_atomic_function::*, exec_function::*, instr_table::RiscvInstr,
             },
             trap::{Exception, trap_controller::TrapController},
         },
@@ -22,7 +22,7 @@ use crate::{
 
 pub(in crate::isa::riscv) fn get_exec_func(
     instr: RiscvInstr,
-) -> fn(RVInstrInfo, &mut RV32CPU) -> Result<(), Exception> {
+) -> fn(RVInstrInfo, &mut RVCPU) -> Result<(), Exception> {
     match instr {
         //---------------------------------------
         // RV_I
@@ -90,7 +90,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::SD => exec_store::<u64>,
 
         // Jump and link
-        RiscvInstr::JAL => |inst_info: RVInstrInfo, cpu: &mut RV32CPU| {
+        RiscvInstr::JAL => |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
             if let RVInstrInfo::J { rd, imm } = inst_info {
                 let target = cpu.pc.wrapping_add(sign_extend(imm, 21));
 
@@ -110,7 +110,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             Ok(())
         },
 
-        RiscvInstr::JALR => |inst_info: RVInstrInfo, cpu: &mut RV32CPU| {
+        RiscvInstr::JALR => |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
             if let RVInstrInfo::I { rs1, rd, imm } = inst_info {
                 let t = cpu.pc + 4;
                 let val = cpu.reg_file.read(rs1, 0).0;

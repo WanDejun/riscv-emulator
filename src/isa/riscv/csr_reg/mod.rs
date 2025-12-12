@@ -2,19 +2,18 @@
 mod write_validator;
 #[macro_use]
 mod read_validator;
+
+mod m_utils;
+
 pub mod csr_macro;
-pub mod m_utils;
 
-use std::cmp::Ordering;
-
-use crate::{
-    config::arch_config::WordType,
-    isa::riscv::csr_reg::{
-        csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
-        read_validator::ReadValidator,
-        write_validator::WriteValidator,
-    },
+use self::{
+    csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
+    read_validator::ReadValidator,
+    write_validator::WriteValidator,
 };
+use crate::config::arch_config::WordType;
+use std::cmp::Ordering;
 
 /// Constants in this module are not complete. Use `get_index` static method for each CSR type, like [`Mstatus::get_index`].
 // TODO: Consider replace all uses of `csr_index` with the corresponding `CSRType::get_index`, 
@@ -299,10 +298,10 @@ impl CsrRegFile {
 
     /// Write with privilege check and validation.
     ///
-    /// XXX: In most cases, you should use [`RV32CPU::write_csr`] in `executor.rs` instead of this function directly,
+    /// XXX: In most cases, you should use [`RVCPU::write_csr`] instead of this function directly,
     /// because writting to CSR may have other side-effects in CPU.
     ///
-    /// [`RV32CPU::write_csr`]: crate::isa::riscv::executor::RV32CPU::write_csr
+    /// [`RVCPU::write_csr`]: crate::isa::riscv::executor::RVCPU::write_csr
     ///
     /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
     #[must_use]

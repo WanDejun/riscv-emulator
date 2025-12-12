@@ -6,7 +6,7 @@ use crate::{
     isa::{
         DebugTarget, DecoderTrait, ISATypes,
         riscv::{
-            RiscvTypes, csr_reg::PrivilegeLevel, decoder::DecodeInstr, executor::RV32CPU,
+            RiscvTypes, csr_reg::PrivilegeLevel, decoder::DecodeInstr, executor::RVCPU,
             trap::Exception,
         },
     },
@@ -37,7 +37,7 @@ impl<I: ISATypes> From<MemError> for DebugError<I> {
     }
 }
 
-impl DebugTarget<RiscvTypes> for RV32CPU {
+impl DebugTarget<RiscvTypes> for RVCPU {
     fn read_pc(&self) -> WordType {
         self.pc
     }
@@ -87,7 +87,7 @@ impl DebugTarget<RiscvTypes> for RV32CPU {
     }
 
     fn step(&mut self) -> Result<(), Exception> {
-        RV32CPU::step(self)
+        RVCPU::step(self)
     }
 
     fn decoded_instr(&self, instr: u32) -> Option<DecodeInstr> {

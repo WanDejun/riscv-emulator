@@ -12,8 +12,8 @@ use crate::{
         riscv::{
             csr_reg::csr_macro::Mstatus,
             decoder::DecodeInstr,
-            executor::RV32CPU,
-            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+            executor::RVCPU,
+            instruction::{RVInstrInfo, instr_table::RiscvInstr},
             mmu::VirtAddrManager,
         },
     },
@@ -23,7 +23,7 @@ use crate::{
 };
 
 pub(super) struct TestCPUBuilder {
-    cpu: RV32CPU,
+    cpu: RVCPU,
 }
 
 /// Build a CISC-V CPU, only has RAM, don't have other devices.
@@ -31,8 +31,7 @@ impl TestCPUBuilder {
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
-        let mut cpu =
-            RV32CPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience
         Self { cpu: cpu }
     }
@@ -91,17 +90,17 @@ impl TestCPUBuilder {
         self
     }
 
-    pub(super) fn build(self) -> RV32CPU {
+    pub(super) fn build(self) -> RVCPU {
         self.cpu
     }
 }
 
 pub(super) struct CPUChecker<'a> {
-    pub(super) cpu: &'a mut RV32CPU,
+    pub(super) cpu: &'a mut RVCPU,
 }
 
 impl<'a> CPUChecker<'a> {
-    pub(super) fn new(cpu: &'a mut RV32CPU) -> Self {
+    pub(super) fn new(cpu: &'a mut RVCPU) -> Self {
         Self { cpu }.reg(0, 0) // x0 is always 0
     }
 

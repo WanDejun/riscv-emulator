@@ -4,7 +4,7 @@ use crate::isa::{
         decoder::{DecodeInstr, DecoderTrait, decode_info},
         instruction::{
             InstrFormat,
-            rv32i_table::{RV32Desc, RiscvInstr},
+            instr_table::{RVInstrDesc, RiscvInstr},
         },
     },
     utils::DecodeMask,
@@ -25,7 +25,7 @@ impl DecoderTrait<RiscvTypes> for MaskDecoder {
         None
     }
 
-    fn from_isa(instrs: &[RV32Desc]) -> Self {
+    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
         let mut masks = vec![];
         for desc in instrs {
             if desc.use_mask {

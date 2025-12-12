@@ -3,14 +3,14 @@ mod exec_float_function;
 
 pub(super) mod exec_function;
 pub mod exec_mapping;
-pub mod rv32i_table;
+pub mod instr_table;
 
 use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         self,
         csr_reg::csr_macro::{Minstret, Mstatus},
-        executor::RV32CPU,
+        executor::RVCPU,
     },
 };
 
@@ -19,9 +19,9 @@ use crate::{
 /// It takes a closure `f` that performs the actual instruction logic.
 /// If `f` executes successfully, it will increase PC by 4 and increase the Minstret CSR by 1.
 #[inline(always)]
-pub(super) fn normal_exec<F>(cpu: &mut RV32CPU, f: F) -> Result<(), riscv::trap::Exception>
+pub(super) fn normal_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
 where
-    F: FnOnce(&mut RV32CPU) -> Result<(), riscv::trap::Exception>,
+    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
 {
     f(cpu)?;
     cpu.pc = cpu.pc.wrapping_add(4);
@@ -36,9 +36,9 @@ where
 /// If the FS field is 0, it returns an illegal instruction exception.
 /// Otherwise, it calls [`normal_exec`].
 #[inline(always)]
-pub(super) fn normal_float_exec<F>(cpu: &mut RV32CPU, f: F) -> Result<(), riscv::trap::Exception>
+pub(super) fn normal_float_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
 where
-    F: FnOnce(&mut RV32CPU) -> Result<(), riscv::trap::Exception>,
+    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
 {
     if cpu.csr.get_by_type_existing::<Mstatus>().get_fs() == 0 {
         return Err(riscv::trap::Exception::IllegalInstruction);
@@ -47,7 +47,7 @@ where
     normal_exec(cpu, f)
 }
 
-type ExecFn = fn(RVInstrInfo, &mut RV32CPU) -> Result<(), riscv::trap::Exception>;
+type ExecFn = fn(RVInstrInfo, &mut RVCPU) -> Result<(), riscv::trap::Exception>;
 
 /// `imm` value is shifted:
 ///
@@ -157,7 +157,7 @@ macro_rules! define_riscv_isa {
         }
 
         #[derive(Debug, Clone)]
-        pub struct RV32Desc {
+        pub struct RVInstrDesc {
             pub opcode: u8,
             pub funct3: u8,
             pub funct7: u8,
@@ -169,9 +169,9 @@ macro_rules! define_riscv_isa {
         }
 
         $(
-            pub const $isa_table_name: &[RV32Desc] = &[
+            pub const $isa_table_name: &[RVInstrDesc] = &[
                 $(
-                    RV32Desc {
+                    RVInstrDesc {
                         opcode: $opcode,
                         funct3: $funct3,
                         funct7: $funct7,

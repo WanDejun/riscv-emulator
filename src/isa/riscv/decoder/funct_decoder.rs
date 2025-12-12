@@ -4,7 +4,7 @@ use crate::isa::riscv::{
     RiscvTypes,
     decoder::{DecodeInstr, DecoderTrait, decode_info},
     instruction::{
-        rv32i_table::{RV32Desc, RiscvInstr},
+        instr_table::{RVInstrDesc, RiscvInstr},
         *,
     },
 };
@@ -61,7 +61,7 @@ pub(super) struct Decoder {
 }
 
 impl DecoderTrait<RiscvTypes> for Decoder {
-    fn from_isa(instrs: &[RV32Desc]) -> Self {
+    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
         let mut decode_table = vec![(PartialDecode::Unknown, SmallMap::new()); 1 << 7];
 
         for desc in instrs {
@@ -69,7 +69,7 @@ impl DecoderTrait<RiscvTypes> for Decoder {
                 continue;
             }
 
-            let RV32Desc {
+            let RVInstrDesc {
                 opcode,
                 funct3,
                 funct7,

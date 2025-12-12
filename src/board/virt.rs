@@ -35,7 +35,7 @@ use crate::{
     emulator_panic,
     isa::riscv::{
         RiscvTypes,
-        executor::RV32CPU,
+        executor::RVCPU,
         mmu::VirtAddrManager,
         trap::{Exception, Interrupt},
     },
@@ -74,7 +74,7 @@ impl IRQLine {
 const PLIC_FREQUENCY_DIVISION: usize = 128;
 
 pub struct VirtBoard {
-    cpu: Box<RV32CPU>,
+    cpu: Box<RVCPU>,
     clock: VirtualClockRef,
     timer: Rc<UnsafeCell<Timer>>,
 
@@ -173,7 +173,7 @@ impl VirtBoard {
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), mmio_items);
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
-        let mut cpu = Box::new(RV32CPU::from_vaddr_manager(vaddr_manager));
+        let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
 
         // register irq line for timer.
         let timer_irq_line = IRQLine::new(
@@ -212,7 +212,7 @@ impl VirtBoard {
 
     pub fn step_and_halt_if<F>(&mut self, f: &mut F) -> Result<(), Exception>
     where
-        F: FnMut(&mut RV32CPU, usize) -> bool,
+        F: FnMut(&mut RVCPU, usize) -> bool,
     {
         self.plic_freq_counter += 1;
         if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
@@ -259,7 +259,7 @@ impl Board for VirtBoard {
         self.status
     }
 
-    fn cpu_mut(&mut self) -> &mut RV32CPU {
+    fn cpu_mut(&mut self) -> &mut RVCPU {
         &mut self.cpu
     }
 }

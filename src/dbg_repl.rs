@@ -18,7 +18,7 @@ use riscv_emulator::{
             },
             debugger::{Address, DebugEvent, Debugger},
             decoder::DecodeInstr,
-            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+            instruction::{RVInstrInfo, instr_table::RiscvInstr},
         },
     },
 };

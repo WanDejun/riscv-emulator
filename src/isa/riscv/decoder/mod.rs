@@ -6,7 +6,7 @@ use crate::{
         DecoderTrait,
         riscv::{
             RiscvTypes,
-            instruction::{InstrFormat, RVInstrInfo, rv32i_table::*},
+            instruction::{InstrFormat, RVInstrInfo, instr_table::*},
         },
         utils::ISABuilder,
     },
@@ -53,7 +53,7 @@ impl Decoder {
 }
 
 impl DecoderTrait<RiscvTypes> for Decoder {
-    fn from_isa(instrs: &[RV32Desc]) -> Self {
+    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
         Self {
             funct3_decoder: funct_decoder::Decoder::from_isa(instrs),
             mask_decoder: mask_decoder::MaskDecoder::from_isa(instrs),
@@ -160,7 +160,7 @@ mod tests {
         config::arch_config::WordType,
         isa::riscv::{
             csr_reg::csr_index,
-            instruction::{RVInstrInfo, rv32i_table::RiscvInstr},
+            instruction::{RVInstrInfo, instr_table::RiscvInstr},
         },
         utils::{TruncateToBits, negative_of},
     };

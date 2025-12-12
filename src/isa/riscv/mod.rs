@@ -1,6 +1,6 @@
 use crate::isa::{
     ISATypes,
-    riscv::{decoder::DecodeInstr, executor::RV32CPU, instruction::rv32i_table::RV32Desc},
+    riscv::{decoder::DecodeInstr, executor::RVCPU, instruction::instr_table::RVInstrDesc},
 };
 
 mod cpu_tester;
@@ -19,9 +19,9 @@ impl ISATypes for RiscvTypes {
     const EBREAK: u32 = 0x00100073;
 
     type RawInstr = u32;
-    type ISADesc = RV32Desc;
+    type ISADesc = RVInstrDesc;
     type DecodeRst = DecodeInstr;
     type StepException = trap::Exception;
     type Decoder = decoder::Decoder;
-    type CPU = RV32CPU;
+    type CPU = RVCPU;
 }

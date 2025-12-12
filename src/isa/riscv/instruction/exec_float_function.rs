@@ -6,14 +6,14 @@ use crate::{
     fpu::{Round, soft_float::*},
     isa::riscv::{
         csr_reg::{csr_index, csr_macro::Fcsr},
-        executor::RV32CPU,
+        executor::RVCPU,
         instruction::RVInstrInfo,
         trap::Exception,
     },
     utils::{FloatPoint, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed},
 };
 
-fn rm_to_round(cpu: &mut RV32CPU, rm: u8) -> Round {
+fn rm_to_round(cpu: &mut RVCPU, rm: u8) -> Round {
     match rm {
         0b000 => Round::NearestTiesToEven,
         0b001 => Round::TowardZero,
@@ -45,7 +45,7 @@ fn status_to_fflags(status: Status) -> u8 {
     rst
 }
 
-fn save_fflags_to_cpu(cpu: &mut RV32CPU) {
+fn save_fflags_to_cpu(cpu: &mut RVCPU) {
     let fflags = status_to_fflags(cpu.fpu.last_status());
 
     cpu.csr
@@ -53,7 +53,7 @@ fn save_fflags_to_cpu(cpu: &mut RV32CPU) {
         .set_fflags(fflags as WordType);
 }
 
-pub(super) fn exec_float_load<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_load<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
@@ -79,7 +79,7 @@ where
     })
 }
 
-pub(super) fn exec_float_store<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_store<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
@@ -103,7 +103,7 @@ where
 
 pub(super) fn exec_float_arith_r4_rm<F, Op>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -130,7 +130,7 @@ where
 
 pub(super) fn exec_float_arith_r_rm<F, Op>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -149,10 +149,7 @@ where
     })
 }
 
-pub(super) fn exec_float_arith_r<F, Op>(
-    info: RVInstrInfo,
-    cpu: &mut RV32CPU,
-) -> Result<(), Exception>
+pub(super) fn exec_float_arith_r<F, Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     Op: BinaryOp<<F as APFloatOf>::Float>,
@@ -168,7 +165,7 @@ where
     })
 }
 
-pub(super) fn exec_float_unary<F, Op>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_unary<F, Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     Op: UnaryOp<<F as APFloatOf>::Float>,
@@ -189,7 +186,7 @@ where
     })
 }
 
-pub(super) fn exec_cvt_u_from_f<F, U>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_cvt_u_from_f<F, U>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     U: WordTrait,
@@ -214,7 +211,7 @@ where
     })
 }
 
-pub(super) fn exec_cvt_i_from_f<F, U>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_cvt_i_from_f<F, U>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     U: WordTrait,
@@ -241,7 +238,7 @@ where
 
 pub(super) fn exec_cvt_f_from_u<F, const BITS: u32>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -268,7 +265,7 @@ where
 
 pub(super) fn exec_cvt_f_from_i<F, const BITS: u32>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -293,10 +290,7 @@ where
     })
 }
 
-pub(super) fn exec_float_compare<Op, F>(
-    info: RVInstrInfo,
-    cpu: &mut RV32CPU,
-) -> Result<(), Exception>
+pub(super) fn exec_float_compare<Op, F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
     Op: CmpOp<<F as APFloatOf>::Float>,
@@ -313,7 +307,7 @@ where
     })
 }
 
-pub(super) fn exec_float_classify<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_classify<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
@@ -330,7 +324,7 @@ where
 
 pub(super) fn exec_mv_x_from_f<F, const EXTEND: bool>(
     info: RVInstrInfo,
-    cpu: &mut RV32CPU,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     F: FloatPoint,
@@ -352,7 +346,7 @@ where
     })
 }
 
-pub(super) fn exec_mv_x_from_f64(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception> {
+pub(super) fn exec_mv_x_from_f64(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2: _, rd } = info {
             let rst = cpu.fpu.load::<f64>(rs1).to_bits();
@@ -364,7 +358,7 @@ pub(super) fn exec_mv_x_from_f64(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result
     })
 }
 
-pub(super) fn exec_mv_f_from_x<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_mv_f_from_x<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
@@ -379,7 +373,7 @@ where
     })
 }
 
-pub(super) fn exec_float_min<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_min<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
@@ -394,7 +388,7 @@ where
     })
 }
 
-pub(super) fn exec_float_max<F>(info: RVInstrInfo, cpu: &mut RV32CPU) -> Result<(), Exception>
+pub(super) fn exec_float_max<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: FloatPoint,
 {
