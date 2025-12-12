@@ -3,7 +3,7 @@
 //!
 //! [`riscv-tests`]: https://github.com/riscv-software-src/riscv-tests
 
-#![allow(unused)]
+#![cfg(feature = "riscv-tests")]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -143,44 +143,42 @@ fn run_test_group_exclude(name: &str, exclude_names: &[&str]) {
     assert!(fail_cnt == 0);
 }
 
-#[test]
 #[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64ui_p_tests() {
-    run_test_group_exclude("rv64ui-p-", &["ma_data"]);
-}
+mod rv64_tests {
+    use super::*;
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64ui_v_tests() {
-    run_test_group_exclude("rv64ui-v-", &["ma_data"]);
-}
+    #[test]
+    fn run_rv64ui_p() {
+        run_test_group_exclude("rv64ui-p-", &["ma_data"]);
+    }
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64um_p_tests() {
-    run_test_group("rv64um-p-");
-}
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn run_rv64ui_v() {
+        run_test_group_exclude("rv64ui-v-", &["ma_data"]);
+    }
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64mi_p_tests() {
-    run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
-}
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn run_rv64um_p() {
+        run_test_group("rv64um-p-");
+    }
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64uf_p_tests() {
-    run_test_group("rv64uf-p-");
-}
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn run_rv64mi_p() {
+        run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
+    }
 
-#[test]
-#[cfg(feature = "riscv64")]
-#[cfg(feature = "riscv-tests")]
-fn run_rv64si_p_tests() {
-    run_test_group_exclude("rv64si-p-", &["sbreak"]);
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn run_rv64uf_p() {
+        run_test_group("rv64uf-p-");
+    }
+
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn run_rv64si_p() {
+        run_test_group_exclude("rv64si-p-", &["sbreak"]);
+    }
 }

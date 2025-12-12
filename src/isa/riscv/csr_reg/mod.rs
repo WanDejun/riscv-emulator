@@ -261,7 +261,7 @@ impl CsrRegFile {
         }
     }
 
-    fn is_read_priv_legal(&mut self, csr_addr: WordType) -> bool {
+    pub fn is_read_priv_legal(&mut self, csr_addr: WordType) -> bool {
         if csr_addr == Satp::get_index() && self.get_by_type_existing::<Mstatus>().get_tvm() == 1 {
             return false;
         }
@@ -280,7 +280,7 @@ impl CsrRegFile {
         }
     }
 
-    fn is_write_priv_legal(&mut self, csr_addr: WordType) -> bool {
+    pub fn is_write_priv_legal(&mut self, csr_addr: WordType) -> bool {
         if csr_addr >= 0xC00 {
             false
         } else {

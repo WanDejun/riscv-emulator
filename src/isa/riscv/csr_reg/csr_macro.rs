@@ -199,8 +199,12 @@ gen_csr_regfile! {
         5, 3, rm;
     ];
 
-    Cycle, "cycle", 0xC01u64, 0x00, @shadow Mcycle, [
+    Cycle, "cycle", 0xC00u64, 0x00, @shadow Mcycle, [
         0, XLEN, cycle, validate_readonly;
+    ];
+
+    Instret, "instret", 0xC02u64, 0x00, @shadow Minstret, [
+        0, XLEN, instret, validate_readonly;
     ];
 
     // ==================================

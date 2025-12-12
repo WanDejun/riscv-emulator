@@ -138,14 +138,17 @@ pub(super) fn exec_csrw<const UIMM: bool>(
     cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
-        // read generate register.
+        // Check write permission before read CSR.
+        if cpu.csr.is_write_priv_legal(imm) == false {
+            return Err(Exception::IllegalInstruction);
+        }
+
         let new_val = if UIMM {
             rs1 as WordType
         } else {
             cpu.reg_file.read(rs1, rs1).0
         };
 
-        // write generate register.
         if rd != 0 {
             let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
             cpu.reg_file.write(rd, value);
@@ -167,24 +170,34 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
-    if let RVInstrInfo::I { rs1, rd, imm } = info {
-        let rhs = if UIMM {
-            rs1 as WordType
-        } else {
-            cpu.reg_file.read(rs1, rs1).0
-        };
+    let RVInstrInfo::I { rs1, rd, imm } = info else {
+        unreachable!();
+    };
+
+    let rhs = if UIMM {
+        rs1 as WordType
+    } else {
+        cpu.reg_file.read(rs1, rs1).0
+    };
+
+    if rhs == 0 {
+        // Only read CSR, no write permission check needed.
+        let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
+        cpu.reg_file.write(rd, value);
+    } else {
+        // Check write permission before read CSR.
+        if cpu.csr.is_write_priv_legal(imm) == false {
+            return Err(Exception::IllegalInstruction);
+        }
 
         let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
         cpu.reg_file.write(rd, value);
 
-        // This check is necessary because some CSR is read-only.
-        if rhs != 0 {
-            let data = if SET { value | rhs } else { value & !rhs };
-            cpu.write_csr(imm, data)?;
+        let data = if SET { value | rhs } else { value & !rhs };
+        cpu.write_csr(imm, data)?;
 
-            if imm != Minstret::get_index() {
-                cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
-            }
+        if imm != Minstret::get_index() {
+            cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
         }
     }
 
