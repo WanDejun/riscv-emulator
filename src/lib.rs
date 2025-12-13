@@ -98,10 +98,17 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn from_elf(path: &Path) -> Self {
+    pub fn from_binary(path: &Path) -> Self {
         let bytes = std::fs::read(path).unwrap();
         Self {
             board: VirtBoard::from_binary(&bytes),
+        }
+    }
+
+    pub fn from_elf(path: &Path) -> Self {
+        let bytes = std::fs::read(path).unwrap();
+        Self {
+            board: VirtBoard::from_elf(&bytes),
         }
     }
 

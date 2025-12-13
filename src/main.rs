@@ -69,7 +69,7 @@ struct Args {
     #[arg(value_enum, long = "serial", default_value_t = SerialDestination::Stdio)]
     serial_destination: SerialDestination,
 
-    /// Add devices to emulator. Arguments like --device:virtio-device:/dev/null, --device:virtio-console:/dev/tty20
+    /// Add devices to emulator. Example: --device=virtio-block:./tmp/img_blk
     #[arg(long = "device", action = clap::ArgAction::Append)]
     devices: Vec<DeviceConfig>,
 }
@@ -96,22 +96,31 @@ fn main() {
     let _logger_handle = logging::init(cli_args.log_level);
     let _init_handle = peripheral_init();
 
-    let mut board = match (
-        cli_args.format,
-        cli_args.path.extension() == Some("elf".as_ref()),
-    ) {
-        (TargetFormat::Elf, _) | (TargetFormat::Auto, true) => {
+    let ext = cli_args
+        .path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("<unknown>");
+
+    let mut board = match (cli_args.format, ext) {
+        (TargetFormat::Elf, _) | (TargetFormat::Auto, "elf") => {
             if cli_args.verbose {
                 println!("ELF file detected\r");
             }
-            let bytes = std::fs::read(cli_args.path.clone()).unwrap();
+            let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
+            VirtBoard::from_elf(&bytes)
+        }
+
+        (TargetFormat::Bin, _) | (TargetFormat::Auto, "bin") => {
+            if cli_args.verbose {
+                println!("Binary file detected\r");
+            }
+            let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
             VirtBoard::from_binary(&bytes)
         }
+
         _ => {
-            if cli_args.verbose {
-                println!("Non-ELF file detected\r");
-            }
-            log::error!("Only ELF format is supported currently.");
+            log::error!("Format is not supported at present.");
             panic!();
         }
     };

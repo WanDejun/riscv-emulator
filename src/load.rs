@@ -1,6 +1,5 @@
 use crate::{config::arch_config::WordType, ram::Ram, ram_config::BASE_ADDR};
 
-#[allow(unused)]
 pub fn load_elf(ram: &mut Ram, elf_data: &[u8]) {
     let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
     let elf_header = elf.header;
@@ -14,7 +13,7 @@ pub fn load_elf(ram: &mut Ram, elf_data: &[u8]) {
 
         if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
             let start_addr = (ph.virtual_addr() as usize) as WordType;
-            let end_addr = ((ph.virtual_addr() + ph.mem_size()) as usize) as WordType;
+            // let end_addr = ((ph.virtual_addr() + ph.mem_size()) as usize) as WordType;
 
             ram.insert_section(
                 &elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
@@ -39,7 +38,6 @@ pub fn get_section_addr(elf_data: &[u8], section_name: &str) -> Option<WordType>
     None
 }
 
-#[allow(unused)]
-fn load_bin(ram: &mut Ram, raw_data: &[u8]) {
+pub fn load_bin(ram: &mut Ram, raw_data: &[u8]) {
     ram.insert_section(raw_data, BASE_ADDR);
 }

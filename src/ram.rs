@@ -28,7 +28,6 @@ impl IndexMut<usize> for Ram {
 }
 
 impl Ram {
-    /// TODO: use random init for better debug.
     pub fn new() -> Self {
         Self {
             data: vec![0u8; ram_config::SIZE].into_boxed_slice(),
@@ -38,6 +37,21 @@ impl Ram {
     pub fn with_init(byte: u8) -> Self {
         Self {
             data: vec![byte; ram_config::SIZE].into_boxed_slice(),
+        }
+    }
+
+    pub fn with_data(mut data: Vec<u8>) -> Self {
+        if data.len() > ram_config::SIZE {
+            log::error!(
+                "ram::with_data data size {} exceeds RAM size {}",
+                data.len(),
+                ram_config::SIZE
+            );
+            panic!();
+        }
+        data.resize(ram_config::SIZE, 0);
+        Self {
+            data: data.into_boxed_slice(),
         }
     }
 

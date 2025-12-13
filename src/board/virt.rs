@@ -39,7 +39,7 @@ use crate::{
         mmu::VirtAddrManager,
         trap::{Exception, Interrupt},
     },
-    load::load_elf,
+    load::{load_bin, load_elf},
     ram::Ram,
     vclock::{Timer, VirtualClockRef},
 };
@@ -89,6 +89,12 @@ pub struct VirtBoard {
 
 impl VirtBoard {
     pub fn from_binary(bytes: &[u8]) -> Self {
+        let mut ram = Ram::new();
+        load_bin(&mut ram, bytes);
+        Self::from_ram(ram)
+    }
+
+    pub fn from_elf(bytes: &[u8]) -> Self {
         let mut ram = Ram::new();
         load_elf(&mut ram, bytes);
         Self::from_ram(ram)
