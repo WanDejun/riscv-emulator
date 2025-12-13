@@ -17,7 +17,6 @@ pub mod board;
 pub mod cli_coordinator;
 pub mod config;
 pub mod device;
-pub mod handle_trait;
 pub mod isa;
 pub mod load;
 
@@ -27,7 +26,7 @@ use lazy_static::lazy_static;
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
     device::{fast_uart::virtual_io::SerialDestination, virtio::virtio_mmio::VirtIODeviceID},
-    isa::riscv::{executor::RVCPU, trap::Exception},
+    isa::riscv::trap::Exception,
 };
 use std::{
     path::{Path, PathBuf},
@@ -116,18 +115,18 @@ impl Emulator {
         Self { board }
     }
 
-    pub fn run(self) -> Result<(), Exception> {
-        self.run_until(&mut |_, _| false)
-    }
-
-    pub fn run_until<F>(mut self, f: &mut F) -> Result<(), Exception>
-    where
-        F: FnMut(&mut RVCPU, usize) -> bool,
-    {
+    pub fn run(&mut self) -> Result<(), Exception> {
         while self.board.status() != BoardStatus::Halt {
-            self.board.step_and_halt_if(f)?;
+            self.board.step()?;
         }
 
+        Ok(())
+    }
+
+    pub fn step(&mut self) -> Result<(), Exception> {
+        if self.board.status() != BoardStatus::Halt {
+            self.board.step()?;
+        }
         Ok(())
     }
 }

@@ -4,11 +4,8 @@ use std::path::PathBuf;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
 use riscv_emulator::Emulator;
-use riscv_emulator::device::peripheral_init;
 
 fn bench_emulator_run(c: &mut Criterion) {
-    let _handles = peripheral_init();
-
     let mut group = c.benchmark_group("emulator_run");
     group.sample_size(50);
 
@@ -32,7 +29,7 @@ fn bench_emulator_run(c: &mut Criterion) {
                 let bench_name = format!("load_and_run_{}", name);
                 group.bench_function(&bench_name, move |b| {
                     b.iter(|| {
-                        let emu = Emulator::from_elf(&path);
+                        let mut emu = Emulator::from_elf(&path);
                         black_box(emu.run().unwrap());
                     })
                 });

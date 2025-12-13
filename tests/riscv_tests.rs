@@ -9,7 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crossterm::style::Stylize;
-use riscv_emulator::Emulator;
+use riscv_emulator::board::virt::VirtBoard;
+use riscv_emulator::board::{Board, BoardStatus};
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
@@ -41,39 +42,36 @@ fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
 }
 
 #[must_use]
-fn run_test(elf: &Path) -> bool {
+fn run_test(elf_path: &Path) -> bool {
     // Load the ELF file and run it
     let result = std::panic::catch_unwind(|| {
         let mut timeout = false;
         let mut run_result = false;
-        let emu = Emulator::from_elf(&elf);
-        let bytes = std::fs::read(elf).unwrap();
-        let tohost: WordType = get_section_addr(&bytes, ".tohost").unwrap();
+        let elf = std::fs::read(elf_path).unwrap();
+        let mut board = VirtBoard::from_elf(&elf);
+        let tohost: WordType = get_section_addr(&elf, ".tohost").unwrap();
 
-        emu.run_until(&mut |cpu, instr_cnt| {
+        while board.status() != BoardStatus::Halt {
+            board.step().unwrap();
+
             // Handle tohost
+            let instr_cnt = board.clock.now();
             if (instr_cnt & (0xFFF)) == 0 {
-                let msg = cpu.read_memory::<u64>(Address::Phys(tohost)).unwrap();
+                let msg = board.cpu.read_memory::<u64>(Address::Phys(tohost)).unwrap();
 
                 if msg != 0 {
                     run_result = msg == 1;
-                    // if msg != 1 {
-                    //     eprintln!("Test {:?} finished with message: {}", elf, msg);
-                    // }
-                    return true;
+                    break;
                 }
             }
 
             if instr_cnt > 100_000 {
                 timeout = true;
-                return true;
+                break;
             }
+        }
 
-            false
-        })
-        .unwrap();
-
-        (run_result, timeout)
+        return (run_result, timeout);
     });
 
     let width = 48;
@@ -82,7 +80,7 @@ fn run_test(elf: &Path) -> bool {
         Err(e) => {
             eprintln!(
                 "Test {:<width$}{}: {:?}",
-                elf.display(),
+                elf_path.display(),
                 "panicked".red(),
                 e
             );
@@ -91,15 +89,15 @@ fn run_test(elf: &Path) -> bool {
 
         Ok((false, timeout)) => {
             if timeout {
-                eprintln!("Test {:<width$}{}", elf.display(), "timedout".red());
+                eprintln!("Test {:<width$}{}", elf_path.display(), "timedout".red());
             } else {
-                eprintln!("Test {:<width$}{}", elf.display(), "failed".red());
+                eprintln!("Test {:<width$}{}", elf_path.display(), "failed".red());
             }
             false
         }
 
         Ok((true, _)) => {
-            eprintln!("Test {:<width$}{}", elf.display(), "passed".green());
+            eprintln!("Test {:<width$}{}", elf_path.display(), "passed".green());
             true
         }
     }

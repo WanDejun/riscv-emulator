@@ -203,7 +203,6 @@ mod test {
     use crate::device::{
         config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
         fast_uart::{FastUart16550, virtual_io::SimulationIO},
-        peripheral_init,
         power_manager::PowerManager,
     };
 
@@ -254,7 +253,6 @@ mod test {
         ];
 
         let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
-        let _handles = peripheral_init();
 
         mmio.write_by_type(UART_BASE + 0x00, 'a' as u8).unwrap();
         assert_ne!((mmio.read_by_type::<u8>(UART_BASE + 5).unwrap() & 0x20), 0);

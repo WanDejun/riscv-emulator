@@ -74,15 +74,15 @@ impl IRQLine {
 const PLIC_FREQUENCY_DIVISION: usize = 128;
 
 pub struct VirtBoard {
-    cpu: Box<RVCPU>,
-    clock: VirtualClockRef,
-    timer: Rc<UnsafeCell<Timer>>,
+    pub cpu: Box<RVCPU>,
+    pub clock: VirtualClockRef,
+    pub timer: Rc<UnsafeCell<Timer>>,
 
     // interrupt manager.
-    clint: Rc<RefCell<Clint>>,
-    plic: Rc<RefCell<PLIC>>,
-    plic_freq_counter: usize,
-    async_poller: AsyncPoller,
+    pub clint: Rc<RefCell<Clint>>,
+    pub plic: Rc<RefCell<PLIC>>,
+    pub plic_freq_counter: usize,
+    pub async_poller: AsyncPoller,
 
     status: BoardStatus,
 }
@@ -215,11 +215,12 @@ impl VirtBoard {
             status: BoardStatus::Running,
         }
     }
+}
 
-    pub fn step_and_halt_if<F>(&mut self, f: &mut F) -> Result<(), Exception>
-    where
-        F: FnMut(&mut RVCPU, usize) -> bool,
-    {
+impl Board for VirtBoard {
+    type ISA = RiscvTypes;
+
+    fn step(&mut self) -> Result<(), Exception> {
         self.plic_freq_counter += 1;
         if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
             self.plic_freq_counter = 0;
@@ -233,9 +234,7 @@ impl VirtBoard {
         self.cpu.step()?;
         self.clock.advance(1);
 
-        if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE)
-            || f(&mut self.cpu, self.clock.now() as usize)
-        {
+        if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
             cold_path();
             self.cpu.power_off()?;
 
@@ -251,14 +250,6 @@ impl VirtBoard {
         unsafe { self.timer.as_mut_unchecked() }.tick();
 
         Ok(())
-    }
-}
-
-impl Board for VirtBoard {
-    type ISA = RiscvTypes;
-
-    fn step(&mut self) -> Result<(), Exception> {
-        self.step_and_halt_if(&mut |_, _| false)
     }
 
     fn status(&self) -> BoardStatus {

@@ -15,7 +15,6 @@ use std::{
 };
 
 use crossbeam::channel::{self, Receiver, Sender};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use crate::{
     EMULATOR_CONFIG, async_poller,
@@ -25,7 +24,6 @@ use crate::{
         config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
         fast_uart::virtual_io::{SerialDestination, TerminalIO},
     },
-    handle_trait::HandleTrait,
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -346,24 +344,6 @@ impl MemMappedDeviceTrait for FastUart16550 {
     }
 }
 
-/// Set terminal to raw mode. RAII to unset terminal raw mode.
-pub struct FastUart16550Handle {}
-impl FastUart16550Handle {
-    pub fn new() -> Self {
-        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            enable_raw_mode().unwrap();
-        }
-
-        Self {}
-    }
-}
-impl HandleTrait for FastUart16550Handle {}
-impl Drop for FastUart16550Handle {
-    fn drop(&mut self) {
-        disable_raw_mode().unwrap(); // 恢复终端原始状态
-    }
-}
-
 #[cfg(test)]
 mod test {
     use crate::{EmulatorConfigurator, device::fast_uart::virtual_io::SimulationIO};
@@ -374,7 +354,6 @@ mod test {
     fn output_test() {
         EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test); // set test mode
         let mut uart = FastUart16550::new();
-        let _handler = FastUart16550Handle::new();
         let uart_dest = SimulationIO::new(uart.get_io_channel());
 
         uart.write_impl(0, 'a' as u8).unwrap();
@@ -388,7 +367,6 @@ mod test {
     fn input_test() {
         EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test);
         let mut uart = FastUart16550::new();
-        let _handler = FastUart16550Handle::new();
         let uart_dest = SimulationIO::new(uart.get_io_channel());
 
         uart_dest.send_input_data(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);

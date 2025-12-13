@@ -1,7 +1,4 @@
-use crate::{
-    async_poller::PollingEvent, config::arch_config::WordType,
-    device::fast_uart::FastUart16550Handle, handle_trait::HandleTrait,
-};
+use crate::{async_poller::PollingEvent, config::arch_config::WordType};
 
 macro_rules! dispatch_read_write {
     ($read_impl: ident, $write_impl: ident) => {
@@ -104,10 +101,4 @@ pub trait DeviceTrait {
 pub trait MemMappedDeviceTrait: DeviceTrait {
     fn base() -> WordType;
     fn size() -> WordType;
-}
-
-// TODO: Check if it is not needed anymore.
-// Peripheral initialization
-pub fn peripheral_init() -> Vec<Box<dyn HandleTrait>> {
-    return vec![Box::new(FastUart16550Handle::new())];
 }

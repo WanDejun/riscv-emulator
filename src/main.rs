@@ -12,10 +12,8 @@ use std::time::Instant;
 use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{
-    DeviceConfig, Emulator, EmulatorConfigurator,
-    board::virt::VirtBoard,
-    device::{fast_uart::virtual_io::SerialDestination, peripheral_init},
-    isa::riscv::RiscvTypes,
+    DeviceConfig, Emulator, EmulatorConfigurator, board::virt::VirtBoard,
+    device::fast_uart::virtual_io::SerialDestination, isa::riscv::RiscvTypes,
 };
 
 use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
@@ -94,7 +92,6 @@ fn main() {
     drop(emu_cfg);
 
     let _logger_handle = logging::init(cli_args.log_level);
-    let _init_handle = peripheral_init();
 
     let ext = cli_args
         .path
@@ -135,7 +132,7 @@ fn main() {
         repl.run();
     } else {
         let now = Instant::now();
-        let emulator = Emulator::from_board(board);
+        let mut emulator = Emulator::from_board(board);
         match emulator.run() {
             Ok(()) => {}
             Err(e) => {
