@@ -4,13 +4,9 @@ use crate::{
     device::{fast_uart::UartIOChannel, plic::ExternalInterrupt},
 };
 use clap::ValueEnum;
-use crossbeam::channel::{Receiver, Sender};
 use crossterm::event::{self, Event, KeyCode};
-use lazy_static::lazy_static;
 use std::{
     io::{self, Write},
-    sync::{Arc, Mutex, atomic::AtomicBool},
-    thread,
     time::Duration,
 };
 
@@ -47,7 +43,7 @@ impl SimulationIO {
     {
         let input_tx = &self.channel.input_tx;
         for byte in data.into_iter() {
-            input_tx.send(byte);
+            let _ = input_tx.send(byte);
         }
     }
 

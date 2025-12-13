@@ -6,32 +6,19 @@
 //! - [ ] Even/Odd Parity
 //! - [ ] Different length of data bits;
 
-#![allow(unused)]
 pub mod virtual_io;
 
 use std::{
     cell::RefCell,
-    io::{self, Write},
-    sync::{Arc, WaitTimeoutResult, atomic::AtomicBool},
-    thread,
-    time::Duration,
+    sync::{Arc, atomic::AtomicBool},
     u8,
 };
 
 use crossbeam::channel::{self, Receiver, Sender};
-use crossterm::{
-    event::{self, Event, KeyCode},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
-use lazy_static::lazy_static;
-use log::error;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
-#[cfg(test)]
-use crate::EmulatorConfigurator;
 use crate::{
-    EMULATOR_CONFIG,
-    async_poller::{self, PollingEventTrait},
-    cli_coordinator::CliCoordinator,
+    EMULATOR_CONFIG, async_poller,
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
@@ -39,7 +26,6 @@ use crate::{
         fast_uart::virtual_io::{SerialDestination, TerminalIO},
     },
     handle_trait::HandleTrait,
-    isa::riscv::trap::Exception,
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -267,7 +253,7 @@ impl FastUart16550 {
             // Normal
             for i in inner_addr..8.min(inner_addr + size) {
                 if i == 0 {
-                    self.output_tx.send((data & (0xff)) as u8);
+                    let _ = self.output_tx.send((data & (0xff)) as u8);
                 } else {
                     unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
                 }
@@ -329,6 +315,9 @@ impl DeviceTrait for FastUart16550 {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Test {
+            return;
+        }
         loop {
             if self.output_rx.is_empty() {
                 loop {
@@ -377,7 +366,7 @@ impl Drop for FastUart16550Handle {
 
 #[cfg(test)]
 mod test {
-    use crate::device::fast_uart::virtual_io::{SimulationIO, TerminalIO};
+    use crate::{EmulatorConfigurator, device::fast_uart::virtual_io::SimulationIO};
 
     use super::*;
 
@@ -388,8 +377,7 @@ mod test {
         let _handler = FastUart16550Handle::new();
         let uart_dest = SimulationIO::new(uart.get_io_channel());
 
-        uart.write_impl(0, 'a' as u8);
-        // uart.sync();
+        uart.write_impl(0, 'a' as u8).unwrap();
 
         let receive = uart_dest.receive_output_data();
         assert_eq!(receive.len(), 1);
@@ -411,34 +399,5 @@ mod test {
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'c' as u8);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'd' as u8);
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 0);
-    }
-
-    #[test]
-    #[ignore = "terminal_io test"]
-    fn cli_output_test() {
-        let mut uart = FastUart16550::new();
-        let _handler = FastUart16550Handle::new();
-        let terminal_io = TerminalIO::new(uart.get_io_channel());
-
-        uart.write_impl(0, 'a' as u8);
-        uart.sync();
-    }
-
-    #[test]
-    #[ignore = "terminal_io test"]
-    fn cli_input_test() {
-        let mut uart = FastUart16550::new();
-        let _handler = FastUart16550Handle::new();
-        let terminal_io = TerminalIO::new(uart.get_io_channel());
-
-        loop {
-            if read_bit(&uart.read_impl::<u8>(5).unwrap(), 0) {
-                break;
-            }
-        }
-        let data = uart.read_impl::<u8>(0).unwrap();
-        uart.write_impl(0, data);
-
-        uart.sync();
     }
 }

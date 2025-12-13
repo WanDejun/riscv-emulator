@@ -376,6 +376,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 const LIST_INSTR: WordType = 10;
 
                 // TODO: This may not a valid instruction start for variable-length ISA.
+                // FIXME: Handle sub underflow.
                 let curr_addr = (self.dbg.read_pc() - LIST_INSTR * 2) as WordType;
                 let mut curr_addr = Address::Virt(curr_addr);
 

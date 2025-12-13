@@ -64,6 +64,7 @@ impl MemMappedDeviceTrait for PowerManager {
 
 impl PowerManager {
     pub fn new() -> Self {
+        POWER_STATUS.store(0, std::sync::atomic::Ordering::Release);
         Self { reg: 0 }
     }
 

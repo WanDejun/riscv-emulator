@@ -1,5 +1,5 @@
+use std::fs;
 use std::path::PathBuf;
-use std::{fs, time::Duration};
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
@@ -10,12 +10,12 @@ fn bench_emulator_run(c: &mut Criterion) {
     let _handles = peripheral_init();
 
     let mut group = c.benchmark_group("emulator_run");
-    group
-        .sample_size(30)
-        .measurement_time(Duration::from_secs(30));
+    group.sample_size(50);
 
     let bin_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_resources/bin");
     let entries = fs::read_dir(&bin_dir).expect("Failed to read bench ELF dir.");
+
+    const IGNORE: [&str; 1] = ["virtio_blk_test"];
 
     for e in entries {
         if let Ok(entry) = e {
@@ -25,6 +25,10 @@ fn bench_emulator_run(c: &mut Criterion) {
             }
 
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                if IGNORE.contains(&name) {
+                    continue;
+                }
+
                 let bench_name = format!("load_and_run_{}", name);
                 group.bench_function(&bench_name, move |b| {
                     b.iter(|| {
