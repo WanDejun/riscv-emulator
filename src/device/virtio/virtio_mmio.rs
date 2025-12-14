@@ -357,8 +357,8 @@ impl DeviceTrait for VirtIOMMIO {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
-        self.device.get_mut().get_poll_enent()
+    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+        self.device.get_mut().get_poll_event()
     }
 }
 

@@ -1,6 +1,9 @@
-use crate::device::{
-    DeviceTrait, MemError, MemMappedDeviceTrait,
-    config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
+use crate::{
+    device::{
+        DeviceTrait, MemError, MemMappedDeviceTrait,
+        config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
+    },
+    device_poller::PollingEventTrait,
 };
 use std::sync::atomic::AtomicU16;
 
@@ -47,7 +50,7 @@ impl DeviceTrait for PowerManager {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
         None
     }
 }

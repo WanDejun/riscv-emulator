@@ -413,7 +413,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
         self.config_region.into_slice_mut()[idx as usize] = data
     }
 
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
         None
     }
 }

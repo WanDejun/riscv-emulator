@@ -443,7 +443,7 @@ impl PLIC {
 impl DeviceTrait for PLIC {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
         None
     }
     fn sync(&mut self) {

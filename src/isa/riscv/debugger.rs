@@ -215,28 +215,21 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
         }
 
         let mut remain = max_steps;
-        if self.on_breakpoint() {
-            self.push_history();
-            if let Err(e) = self.target.step() {
-                return Err(DebugError::TargetException(e));
-            }
-            remain -= 1;
-        }
 
         loop {
             if remain == 0 {
                 return Ok(DebugEvent::StepCompleted);
             }
 
-            if self.on_breakpoint() {
-                return Ok(DebugEvent::BreakpointHit);
-            }
-
             self.push_history();
             if let Err(e) = self.target.step() {
                 return Err(DebugError::TargetException(e));
             }
             remain -= 1;
+
+            if self.on_breakpoint() {
+                return Ok(DebugEvent::BreakpointHit);
+            }
         }
     }
 

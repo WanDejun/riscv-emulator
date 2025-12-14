@@ -161,7 +161,7 @@ impl DeviceTrait for Clint {
     fn sync(&mut self) {
         // Nothing to do
     }
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
         None
     }
 }

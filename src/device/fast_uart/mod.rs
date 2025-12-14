@@ -17,7 +17,7 @@ use std::{
 use crossbeam::channel::{self, Receiver, Sender};
 
 use crate::{
-    EMULATOR_CONFIG, async_poller,
+    EMULATOR_CONFIG,
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
@@ -328,10 +328,8 @@ impl DeviceTrait for FastUart16550 {
         }
     }
 
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
-        Some(async_poller::PollingEvent::Uart(TerminalIO::new(
-            self.get_io_channel(),
-        )))
+    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+        Some(Box::new(TerminalIO::new(self.get_io_channel())))
     }
 }
 

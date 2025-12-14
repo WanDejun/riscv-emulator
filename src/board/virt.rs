@@ -12,7 +12,6 @@ use crate::device::{
 };
 use crate::{
     EMULATOR_CONFIG,
-    async_poller::AsyncPoller,
     board::{Board, BoardStatus},
     device::{
         self, DeviceTrait,
@@ -32,6 +31,7 @@ use crate::{
             virtio_mmio::{VirtIODeviceID, VirtIOMMIO},
         },
     },
+    device_poller::DevicePoller,
     emulator_panic,
     isa::riscv::{
         RiscvTypes,
@@ -82,7 +82,7 @@ pub struct VirtBoard {
     pub clint: Rc<RefCell<Clint>>,
     pub plic: Rc<RefCell<PLIC>>,
     pub plic_freq_counter: usize,
-    pub async_poller: AsyncPoller,
+    pub device_poller: DevicePoller,
 
     status: BoardStatus,
 }
@@ -100,10 +100,10 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
-    fn register_uart_poll_event(poller: &mut AsyncPoller, uart: &mut FastUart16550) {
+    fn register_uart_poll_event(poller: &mut DevicePoller, uart: &mut FastUart16550) {
         if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            if let Some(enent) = uart.get_poll_enent() {
-                poller.add_event(enent);
+            if let Some(event) = uart.get_poll_event() {
+                poller.add_event(event);
             }
         }
     }
@@ -112,13 +112,13 @@ impl VirtBoard {
         let clock = VirtualClockRef::new();
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
         let ram_ref = Rc::new(UnsafeCell::new(ram));
-        let mut async_poller = AsyncPoller::new();
+        let mut device_poller = DevicePoller::new();
 
         // Construct devices
         let mut uart_allocator = device::IdAllocator::new::<FastUart16550>(0, String::from("uart"));
         let uart1_info = uart_allocator.get();
         let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
-        Self::register_uart_poll_event(&mut async_poller, &mut *uart1.borrow_mut());
+        Self::register_uart_poll_event(&mut device_poller, &mut *uart1.borrow_mut());
 
         let power_manager = Rc::new(RefCell::new(PowerManager::new()));
         let clint = Rc::new(RefCell::new(Clint::new(
@@ -133,12 +133,12 @@ impl VirtBoard {
         let test_device = Rc::new(RefCell::new(TestDevice::new()));
 
         #[cfg(feature = "test-device")]
-        async_poller.add_event(test_device.borrow_mut().get_poll_enent().unwrap());
+        device_poller.add_event(test_device.borrow_mut().get_poll_event().unwrap());
 
         // PLIC init.
         let plic = Rc::new(RefCell::new(PLIC::new()));
         let poller_plic_irq_line = PlicIRQLine::new(&mut *plic.borrow_mut());
-        async_poller.set_irq_line(poller_plic_irq_line, 0);
+        device_poller.set_irq_line(poller_plic_irq_line, 0);
 
         let mut mmio_items = vec![
             MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
@@ -203,12 +203,12 @@ impl VirtBoard {
         plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
 
         Self {
-            cpu: cpu,
-            clock: clock,
-            timer: timer,
+            cpu,
+            clock,
+            timer,
 
-            async_poller: async_poller.start_polling(),
-            clint: clint,
+            device_poller: device_poller.start_polling(),
+            clint,
             plic,
             plic_freq_counter: 0,
 
@@ -226,7 +226,7 @@ impl Board for VirtBoard {
             self.plic_freq_counter = 0;
 
             // TODO: use external irq lines to trigger plic interrupts.
-            self.async_poller.trigger_external_interrupt();
+            self.device_poller.trigger_external_interrupt();
 
             self.plic.borrow_mut().try_get_interrupt(0);
             self.plic.borrow_mut().try_get_interrupt(1);

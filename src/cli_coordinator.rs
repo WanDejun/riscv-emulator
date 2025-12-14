@@ -50,6 +50,7 @@ impl CliCoordinator {
         {
             let mut s = lock.lock().unwrap();
             *s = CliThreadState::Pausing;
+            // FIXME: If the uart thread is dead, this may deadlock.
             while *s != CliThreadState::Paused {
                 s = cvar.wait(s).unwrap();
             }

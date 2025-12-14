@@ -1,4 +1,4 @@
-use crate::{async_poller::PollingEvent, config::arch_config::WordType};
+use crate::{config::arch_config::WordType, device_poller::PollingEventTrait};
 
 macro_rules! dispatch_read_write {
     ($read_impl: ident, $write_impl: ident) => {
@@ -95,7 +95,7 @@ pub trait DeviceTrait {
     impl_write_for_type! { u64 }
 
     fn sync(&mut self);
-    fn get_poll_enent(&mut self) -> Option<PollingEvent>;
+    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>>;
 }
 
 pub trait MemMappedDeviceTrait: DeviceTrait {

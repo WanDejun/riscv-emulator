@@ -1,7 +1,7 @@
 use crate::{
-    async_poller::PollingEventTrait,
     cli_coordinator::CliCoordinator,
     device::{fast_uart::UartIOChannel, plic::ExternalInterrupt},
+    device_poller::PollingEventTrait,
 };
 use clap::ValueEnum;
 use crossterm::event::{self, Event, KeyCode};
@@ -58,15 +58,10 @@ impl SimulationIO {
     }
 }
 
-// pub struct UartPollingEvent {
-//     // pub poll_function: fn(Sender<u8>, Receiver<u8>, Arc<AtomicBool>),
-//     pub input_tx: Sender<u8>,
-//     pub output_rx: Receiver<u8>,
-//     pub sync_lock: Arc<AtomicBool>,
-// }
-
 impl PollingEventTrait for TerminalIO {
     fn poll(&mut self) -> Option<ExternalInterrupt> {
+        // TODO: CliCoordinator and TerminalIO::UartIOChannel are both coordinating the usage of terminal.
+        // We should merge them in the future.
         CliCoordinator::global().confirm_pause_and_wait();
 
         // output epoll
@@ -80,10 +75,12 @@ impl PollingEventTrait for TerminalIO {
                 break;
             }
         }
+
         while let Ok(v) = self.channel.output_rx.try_recv() {
             print!("{}", v as char);
         }
         io::stdout().flush().unwrap();
+
         self.channel
             .busy
             .store(false, std::sync::atomic::Ordering::Release);
@@ -120,7 +117,6 @@ impl PollingEventTrait for TerminalIO {
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(2));
         None
     }
 }

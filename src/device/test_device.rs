@@ -14,8 +14,8 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
-    async_poller::PollingEventTrait,
     device::{DeviceTrait, MemError, plic::ExternalInterrupt},
+    device_poller::PollingEventTrait,
     utils::check_align,
 };
 
@@ -138,12 +138,12 @@ impl TestDevice {
 impl DeviceTrait for TestDevice {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn get_poll_enent(&mut self) -> Option<crate::async_poller::PollingEvent> {
+    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
         let poller = TestDevicePoller::new(
             self.receiver.clone(),
             self.layout.interrupt_mask_register.clone(),
         );
-        Some(crate::async_poller::PollingEvent::TestDevice(poller))
+        Some(Box::new(poller))
     }
     fn sync(&mut self) {
         // nothing to do.
