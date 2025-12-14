@@ -329,7 +329,11 @@ impl DeviceTrait for FastUart16550 {
     }
 
     fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
-        Some(Box::new(TerminalIO::new(self.get_io_channel())))
+        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
+            Some(Box::new(TerminalIO::new(self.get_io_channel())))
+        } else {
+            None
+        }
     }
 }
 

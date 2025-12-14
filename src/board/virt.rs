@@ -1,31 +1,29 @@
 use std::{
+    any::TypeId,
     cell::{RefCell, UnsafeCell},
+    collections::HashMap,
     hint::cold_path,
     rc::Rc,
     sync::atomic::Ordering,
 };
 
-#[cfg(feature = "test-device")]
-use crate::device::{
-    config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
-    test_device::TestDevice,
-};
 use crate::{
-    EMULATOR_CONFIG,
+    DeviceConfig, EMULATOR_CONFIG,
     board::{Board, BoardStatus},
     device::{
-        self, DeviceTrait,
+        self, DeviceTrait, IdAllocator,
         aclint::Clint,
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
-        fast_uart::{FastUart16550, virtual_io::SerialDestination},
+        fast_uart::FastUart16550,
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
             PLIC,
             irq_line::{PlicIRQLine, PlicIRQSource},
         },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
+        test_device::TestDevice,
         virtio::{
             virtio_blk::VirtIOBlkDeviceBuilder,
             virtio_mmio::{VirtIODeviceID, VirtIOMMIO},
@@ -73,6 +71,150 @@ impl IRQLine {
 
 const PLIC_FREQUENCY_DIVISION: usize = 128;
 
+pub struct RVBoardBuilder {
+    extra_plic_devices: Vec<Rc<RefCell<dyn DeviceTrait>>>,
+    virtio_devices: Vec<DeviceConfig>,
+    mmio_items: Vec<MemoryMapItem>,
+    id_allocators: HashMap<TypeId, IdAllocator>,
+    device_poller: DevicePoller,
+}
+
+impl RVBoardBuilder {
+    pub fn new() -> Self {
+        Self {
+            extra_plic_devices: Vec::new(),
+            virtio_devices: Vec::new(),
+            mmio_items: Vec::new(),
+            id_allocators: HashMap::new(),
+            device_poller: DevicePoller::new(),
+        }
+    }
+
+    pub fn add_plic_device<D: device::MemMappedDeviceTrait + 'static>(
+        mut self,
+        device: Rc<RefCell<D>>,
+    ) -> Self {
+        let type_id = TypeId::of::<D>();
+        let allocator = self
+            .id_allocators
+            .entry(type_id)
+            .or_insert_with(|| device::IdAllocator::new::<D>(0, stringify!(D).to_string()));
+
+        let info = allocator.get();
+        self.mmio_items
+            .push(MemoryMapItem::new(info.base, info.size, device.clone()));
+
+        if let Some(event) = device.borrow_mut().get_poll_event() {
+            self.device_poller.add_event(event);
+        }
+
+        self.extra_plic_devices.push(device);
+
+        self
+    }
+
+    pub fn add_virtio_devices(mut self, devices: &mut Vec<DeviceConfig>) -> Self {
+        self.virtio_devices.append(devices);
+        self
+    }
+
+    pub fn build(mut self, ram: Ram) -> VirtBoard {
+        let clock = VirtualClockRef::new();
+        let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
+        let ram_ref = Rc::new(UnsafeCell::new(ram));
+
+        // Construct devices
+        let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
+        self = self.add_plic_device(uart1);
+
+        let power_manager = Rc::new(RefCell::new(PowerManager::new()));
+        let clint = Rc::new(RefCell::new(Clint::new(
+            1,
+            0x7ff8,
+            0,
+            clock.clone(),
+            timer.clone(),
+        )));
+
+        // PLIC init.
+        let plic = Rc::new(RefCell::new(PLIC::new()));
+        let poller_plic_irq_line = PlicIRQLine::new(&mut *plic.borrow_mut());
+        self.device_poller.set_irq_line(poller_plic_irq_line, 0);
+
+        self.mmio_items.append(&mut vec![
+            MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
+            MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
+            MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic.clone()),
+        ]);
+
+        // Add VirtIO device.
+        let mut virtio_allocator =
+            device::IdAllocator::new::<VirtIOMMIO>(0, String::from("virtio"));
+        for virtio_device_cfg in self.virtio_devices.iter() {
+            let virtio_device = match virtio_device_cfg.dev_type {
+                VirtIODeviceID::Block => {
+                    let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
+                    VirtIOBlkDeviceBuilder::new(
+                        ram_raw_base,
+                        String::from(virtio_device_cfg.path.to_str().unwrap()),
+                    )
+                    .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::BlockSize)
+                    .get()
+                }
+                dev_type => {
+                    emulator_panic!("unsupport device: {:#?}", dev_type);
+                }
+            };
+            let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
+            let virtio_info = virtio_allocator.get();
+            self.mmio_items.push(MemoryMapItem::new(
+                virtio_info.base,
+                virtio_info.size,
+                Rc::new(RefCell::new(virtio_mmio_device)),
+            ));
+        }
+
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), self.mmio_items);
+        let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
+
+        let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
+
+        // register irq line for timer.
+        let timer_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn RiscvIRQHandler,
+            Interrupt::MachineTimer,
+        );
+
+        clint.borrow_mut().set_irq_line(timer_irq_line, 0);
+
+        // register irq line for plic.
+        let plic_mathine_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn RiscvIRQHandler,
+            Interrupt::MachineExternal,
+        );
+        let plic_supervisor_irq_line = IRQLine::new(
+            &mut *cpu as *mut dyn RiscvIRQHandler,
+            Interrupt::SupervisorExternal,
+        );
+
+        plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
+        plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
+
+        VirtBoard {
+            cpu,
+            clock,
+            timer,
+
+            device_poller: self.device_poller.start_polling(),
+            clint,
+            plic,
+            plic_freq_counter: 0,
+
+            status: BoardStatus::Running,
+        }
+    }
+}
+
 pub struct VirtBoard {
     pub cpu: Box<RVCPU>,
     pub clock: VirtualClockRef,
@@ -100,120 +242,16 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
-    fn register_uart_poll_event(poller: &mut DevicePoller, uart: &mut FastUart16550) {
-        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            if let Some(event) = uart.get_poll_event() {
-                poller.add_event(event);
-            }
-        }
-    }
-
     pub fn from_ram(ram: Ram) -> Self {
-        let clock = VirtualClockRef::new();
-        let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
-        let ram_ref = Rc::new(UnsafeCell::new(ram));
-        let mut device_poller = DevicePoller::new();
-
-        // Construct devices
-        let mut uart_allocator = device::IdAllocator::new::<FastUart16550>(0, String::from("uart"));
-        let uart1_info = uart_allocator.get();
-        let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
-        Self::register_uart_poll_event(&mut device_poller, &mut *uart1.borrow_mut());
-
-        let power_manager = Rc::new(RefCell::new(PowerManager::new()));
-        let clint = Rc::new(RefCell::new(Clint::new(
-            1,
-            0x7ff8,
-            0,
-            clock.clone(),
-            timer.clone(),
-        )));
+        let mut builder =
+            RVBoardBuilder::new().add_virtio_devices(&mut EMULATOR_CONFIG.lock().unwrap().devices);
 
         #[cfg(feature = "test-device")]
-        let test_device = Rc::new(RefCell::new(TestDevice::new()));
-
-        #[cfg(feature = "test-device")]
-        device_poller.add_event(test_device.borrow_mut().get_poll_event().unwrap());
-
-        // PLIC init.
-        let plic = Rc::new(RefCell::new(PLIC::new()));
-        let poller_plic_irq_line = PlicIRQLine::new(&mut *plic.borrow_mut());
-        device_poller.set_irq_line(poller_plic_irq_line, 0);
-
-        let mut mmio_items = vec![
-            MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
-            #[cfg(feature = "test-device")]
-            MemoryMapItem::new(TEST_DEVICE_BASE, TEST_DEVICE_SIZE, test_device),
-            MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
-            MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic.clone()),
-            MemoryMapItem::new(uart1_info.base, uart1_info.size, uart1),
-        ];
-
-        // Add VirtIO device.
-        let mut virtio_allocator =
-            device::IdAllocator::new::<VirtIOMMIO>(0, String::from("virtio"));
-        for virtio_device_cfg in EMULATOR_CONFIG.lock().unwrap().devices.iter() {
-            let virtio_device = match virtio_device_cfg.dev_type {
-                VirtIODeviceID::Block => {
-                    let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
-                    VirtIOBlkDeviceBuilder::new(
-                        ram_raw_base,
-                        String::from(virtio_device_cfg.path.to_str().unwrap()),
-                    )
-                    .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::BlockSize)
-                    .get()
-                }
-                dev_type => {
-                    emulator_panic!("unsupport device: {:#?}", dev_type);
-                }
-            };
-            let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
-            let virtio_info = virtio_allocator.get();
-            mmio_items.push(MemoryMapItem::new(
-                virtio_info.base,
-                virtio_info.size,
-                Rc::new(RefCell::new(virtio_mmio_device)),
-            ));
+        {
+            builder = builder.add_plic_device(Rc::new(RefCell::new(TestDevice::new())));
         }
 
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), mmio_items);
-        let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
-
-        let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
-
-        // register irq line for timer.
-        let timer_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn RiscvIRQHandler,
-            Interrupt::MachineTimer,
-        );
-
-        clint.borrow_mut().set_irq_line(timer_irq_line, 0);
-
-        // register irq line for plic.
-        let plic_mathine_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn RiscvIRQHandler,
-            Interrupt::MachineExternal,
-        );
-        let plic_supervisor_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn RiscvIRQHandler,
-            Interrupt::SupervisorExternal,
-        );
-
-        plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
-        plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
-
-        Self {
-            cpu,
-            clock,
-            timer,
-
-            device_poller: device_poller.start_polling(),
-            clint,
-            plic,
-            plic_freq_counter: 0,
-
-            status: BoardStatus::Running,
-        }
+        builder.build(ram)
     }
 }
 
@@ -365,6 +403,7 @@ mod tests {
     fn test_plic() {
         use std::{thread::sleep, time::Duration};
 
+        use crate::device::config::TEST_DEVICE_BASE;
         use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
         use crate::ram_config;
         use crate::{config::arch_config::WordType, isa::riscv::debugger::Address};

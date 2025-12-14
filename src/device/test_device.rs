@@ -14,7 +14,12 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
-    device::{DeviceTrait, MemError, plic::ExternalInterrupt},
+    config::arch_config::WordType,
+    device::{
+        DeviceTrait, MemError, MemMappedDeviceTrait,
+        config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
+        plic::ExternalInterrupt,
+    },
     device_poller::PollingEventTrait,
     utils::check_align,
 };
@@ -147,6 +152,15 @@ impl DeviceTrait for TestDevice {
     }
     fn sync(&mut self) {
         // nothing to do.
+    }
+}
+
+impl MemMappedDeviceTrait for TestDevice {
+    fn base() -> WordType {
+        TEST_DEVICE_BASE
+    }
+    fn size() -> WordType {
+        TEST_DEVICE_SIZE
     }
 }
 
