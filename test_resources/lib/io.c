@@ -167,6 +167,61 @@ void print_oct(unsigned long long val, int width, char pad_char) {
     }
 }
 
+void print_float(double val, int width, int precision, char pad_char) {
+    char buf[64];
+    int len = 0;
+    int neg = 0;
+
+    if (precision < 0) precision = 6;
+
+    if (val < 0) {
+        neg = 1;
+        val = -val;
+    }
+
+    // Integer part
+    unsigned long long int_part = (unsigned long long)val;
+    double rem = val - int_part;
+
+    // Convert integer part to string (reverse)
+    char int_buf[32];
+    int int_len = 0;
+    do {
+        int_buf[int_len++] = '0' + (int_part % 10);
+        int_part /= 10;
+    } while (int_part);
+
+    // Put into main buffer (normal order)
+    if (neg) buf[len++] = '-';
+    while (int_len > 0) {
+        buf[len++] = int_buf[--int_len];
+    }
+
+    // Decimal point and fractional part
+    if (precision > 0) {
+        buf[len++] = '.';
+        while (precision--) {
+            rem *= 10;
+            int digit = (int)rem;
+            buf[len++] = '0' + digit;
+            rem -= digit;
+        }
+    }
+
+    buf[len] = '\0';
+
+    // Padding
+    int pad_len = width - len;
+    if (pad_len > 0) {
+        while (pad_len--) uart_putc(pad_char);
+    }
+    
+    // Print buffer
+    for (int i = 0; i < len; i++) {
+        uart_putc(buf[i]);
+    }
+}
+
 void vprintf(const char* fmt, va_list ap) {
     while (*fmt) {
         if (*fmt != '%') {
@@ -188,6 +243,17 @@ void vprintf(const char* fmt, va_list ap) {
         while (*fmt >= '0' && *fmt <= '9') {
             width = width * 10 + (*fmt - '0');
             fmt++;
+        }
+
+        // 解析精度
+        int precision = -1;
+        if (*fmt == '.') {
+            fmt++;
+            precision = 0;
+            while (*fmt >= '0' && *fmt <= '9') {
+                precision = precision * 10 + (*fmt - '0');
+                fmt++;
+            }
         }
 
         // 解析长度修饰符
@@ -236,6 +302,12 @@ void vprintf(const char* fmt, va_list ap) {
             else
                 val = va_arg(ap, unsigned int);
             print_hex(val, width, pad_char);
+            break;
+        }
+
+        case 'f': {
+            double val = va_arg(ap, double);
+            print_float(val, width, precision, pad_char);
             break;
         }
 
@@ -305,6 +377,39 @@ long long input_dec() {
     return num;
 }
 
+double input_float() {
+    double num = 0.0;
+    int sign = 1;
+    
+    while (!isdigit(glimpse) && glimpse != '-' && glimpse != '.') {
+        glimpse = uart_getc();
+    }
+    
+    if (glimpse == '-') {
+        sign = -1;
+        glimpse = uart_getc();
+    }
+    
+    // Integer part
+    while (isdigit(glimpse)) {
+        num = num * 10.0 + (glimpse - '0');
+        glimpse = uart_getc();
+    }
+    
+    // Fractional part
+    if (glimpse == '.') {
+        glimpse = uart_getc();
+        double weight = 0.1;
+        while (isdigit(glimpse)) {
+            num += (glimpse - '0') * weight;
+            weight *= 0.1;
+            glimpse = uart_getc();
+        }
+    }
+    
+    return num * sign;
+}
+
 uint8_t input_char() {
     while (!isprint(glimpse)) {
         glimpse = uart_getc();
@@ -343,6 +448,16 @@ int scanf(const char* fmt, ...) {
                 count++;
                 p++;  // 多走一步（匹配到 "lld"）
             }
+            else if (*p == 'f') {
+                double* dp = va_arg(args, double*);
+                *dp = input_float();
+                count++;
+            }
+        }
+        else if (*p == 'f') {
+            float* fp = va_arg(args, float*);
+            *fp = (float)input_float();
+            count++;
         }
         else if (*p == 'c') {
             char* cp = va_arg(args, char*);
