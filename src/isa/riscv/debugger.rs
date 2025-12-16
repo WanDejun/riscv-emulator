@@ -74,8 +74,8 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         self.csr.privelege_level()
     }
 
-    fn read_float_reg(&self, idx: u8) -> f64 {
-        self.fpu.load::<f32>(idx) as f64 // TODO: Support debugging f64 (which needs to implement NAN boxing).
+    fn read_float_reg(&self, idx: u8) -> (f32, f64) {
+        (self.fpu.load::<f32>(idx), self.fpu.load::<f64>(idx))
     }
 
     /// match input {
@@ -272,7 +272,7 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
         self.target.write_pc(val)
     }
 
-    pub fn read_float_reg(&self, idx: u8) -> f64 {
+    pub fn read_float_reg(&self, idx: u8) -> (f32, f64) {
         self.target.read_float_reg(idx)
     }
 

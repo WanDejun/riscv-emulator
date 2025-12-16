@@ -479,11 +479,12 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
     }
 
     fn print_float_reg(&self, idx: u8) -> Result<(), String> {
-        let val = self.dbg.read_float_reg(idx);
+        let (f32_val, f64_val) = self.dbg.read_float_reg(idx);
         println!(
-            "{} = {:.4}",
+            "{} = {{f32: {}, f64: {}}}",
             palette.reg(FLOAT_REG_NAME[idx as usize], 0),
-            val
+            f32_val,
+            f64_val,
         );
         Ok(())
     }

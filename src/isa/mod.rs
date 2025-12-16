@@ -18,7 +18,7 @@ pub trait DebugTarget<I: ISATypes> {
 
     fn read_reg(&self, idx: u8) -> WordType;
     fn write_reg(&mut self, idx: u8, value: WordType);
-    fn read_float_reg(&self, idx: u8) -> f64;
+    fn read_float_reg(&self, idx: u8) -> (f32, f64);
 
     fn read_instr(&mut self, addr: WordType) -> Result<I::RawInstr, MemError>;
     fn read_instr_directly(&mut self, addr: Address) -> Result<I::RawInstr, MemError>;
