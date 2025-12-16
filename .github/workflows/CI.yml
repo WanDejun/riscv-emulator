@@ -16,12 +16,61 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    env:
+      TOOLCHAIN_URL: https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2025.11.21/riscv64-elf-ubuntu-22.04-gcc.tar.xz
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
-      - run: cargo test
+      - name: Get riscv-tests commit hash
+        id: riscv-tests-hash
+        run: echo "hash=$(git submodule status riscv-tests | awk '{print $1}' | sed 's/^[+-]//')" >> $GITHUB_OUTPUT
+      - name: Cache riscv-tests
+        id: cache-riscv-tests
+        uses: actions/cache@v3
+        with:
+          path: riscv-tests/isa
+          key: ${{ runner.os }}-riscv-tests-${{ steps.riscv-tests-hash.outputs.hash }}
+
+      - name: Get the toolchain from cache (if available)
+        if: steps.cache-riscv-tests.outputs.cache-hit != 'true'
+        id: cache-restore-toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/riscv
+          key: "toolchain-${{env.TOOLCHAIN_URL}}"
+
+      - if: steps.cache-riscv-tests.outputs.cache-hit != 'true' && steps.cache-restore-toolchain.outputs.cache-hit != 'true'
+        name: Download Toolchain (if not cached)
+        run: |
+          mkdir -p /opt/riscv
+          wget --progress=dot:giga $TOOLCHAIN_URL -O /tmp/toolchain.tar.xz
+
+      - if: steps.cache-riscv-tests.outputs.cache-hit != 'true' && steps.cache-restore-toolchain.outputs.cache-hit != 'true'
+        name: Install Toolchain (if not cached)
+        run: tar -xvf /tmp/toolchain.tar.xz --strip-components=1 -C /opt/riscv
+
+      - name: Save the toolchain to the cache (if necessary)
+        if: steps.cache-riscv-tests.outputs.cache-hit != 'true' && steps.cache-restore-toolchain.outputs.cache-hit != 'true'
+        id: cache-save-toolchain
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/riscv
+          key: "toolchain-${{env.TOOLCHAIN_URL}}"
+
+      - name: Build riscv-tests
+        if: steps.cache-riscv-tests.outputs.cache-hit != 'true'
+        run: |
+          export PATH=/opt/riscv/bin:$PATH
+          cd riscv-tests
+          autoconf
+          ./configure --prefix=/opt/riscv
+          make
+
+      - run: cargo test --features riscv-tests
 
   fmt:
     name: Rustfmt
