@@ -292,7 +292,10 @@ pub trait UnsignedInteger:
     + Ord
     + Debug
     + Display
-    + TruncateFrom<WordType>
+    + TruncateFrom<u8>
+    + TruncateFrom<u16>
+    + TruncateFrom<u32>
+    + TruncateFrom<u64>
     + TruncateFrom<u128>
     + TruncateTo<u8>
     + TruncateTo<u16>

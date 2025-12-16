@@ -111,6 +111,8 @@ pub(crate) trait NamedCsrReg {
     fn new(data: *mut CsrReg, ctx: *mut CsrContext) -> Self;
     fn get_index() -> WordType;
     fn data(&self) -> WordType;
+    fn set_data(&mut self, val: WordType);
+    fn set_data_directly(&mut self, data: WordType);
 }
 
 /// Write `value` to the bits specified by `mask`.
@@ -423,6 +425,7 @@ impl CsrRegFile {
     /// - In debug builds, this function will panic if the CSR does not exist.
     /// - In release builds, this function will skip the runtime check for performance.
     /// TODO: Almost all old code can assumes the CSR exists, replace them with this function.
+    #[must_use]
     pub fn get_by_type_existing<T>(&mut self) -> T
     where
         T: NamedCsrReg,

@@ -13,19 +13,23 @@ use crate::{
 
 pub struct Clint {
     hart_num: u32,
+    msip_base: u64,
     time_base: u64,
     timecmp_base: u64,
     time_offset: u64,
     clock: VirtualClockRef,
     timer: Rc<UnsafeCell<Timer>>,
+    msip: Vec<u32>,
     time_cmp: Vec<u64>,
-    irq_line: Option<IRQLine>,
+    timer_irq_line: Option<IRQLine>, // TODO: Current implementation only supports 1 hart.
+    software_irq_line: Option<IRQLine>,
     timer_cb_id: u64,
 }
 
 impl Clint {
     pub fn new(
         hart_num: u32,
+        msip_base: u64,
         mtime_base: u64,
         mtimecmp_base: u64,
         clock: VirtualClockRef,
@@ -33,13 +37,16 @@ impl Clint {
     ) -> Self {
         Self {
             hart_num,
+            msip_base,
             time_base: mtime_base,
             timecmp_base: mtimecmp_base,
             time_offset: negative_of(clock.now()),
             clock,
             timer,
+            msip: vec![0u32; hart_num as usize],
             time_cmp: vec![0u64; hart_num as usize],
-            irq_line: None,
+            timer_irq_line: None,
+            software_irq_line: None,
             timer_cb_id: u64::MAX,
         }
     }
@@ -53,7 +60,7 @@ impl Clint {
     fn handle_mtimecmp_write(&mut self, hartid: usize, value: u64) {
         self.time_cmp[hartid] = value;
         if self.time_cmp[hartid] <= self.get_time() {
-            self.irq_line.as_mut().unwrap().set_irq(true);
+            self.timer_irq_line.as_mut().unwrap().set_irq(true);
         } else {
             unsafe { self.timer.as_mut_unchecked() }.set_due(self.timer_cb_id, value);
         }
@@ -63,9 +70,15 @@ impl Clint {
     where
         T: crate::utils::UnsignedInteger,
     {
-        log::trace!("Clint::read: addr = {:#x}", addr);
-
-        if self.timecmp_base <= addr && addr < self.timecmp_base + ((self.hart_num as u64) << 3) {
+        if self.msip_base <= addr && addr < self.msip_base + ((self.hart_num as u64) << 2) {
+            let hartid = ((addr - self.msip_base) >> 2) as usize;
+            if hartid >= self.msip.len() {
+                return Err(MemError::LoadFault);
+            }
+            return Ok(T::truncate_from(self.msip[hartid]));
+        } else if self.timecmp_base <= addr
+            && addr < self.timecmp_base + ((self.hart_num as u64) << 3)
+        {
             // timecmp
             let hartid = ((addr - self.timecmp_base) >> 3) as usize;
 
@@ -97,7 +110,21 @@ impl Clint {
     {
         log::trace!("Clint::write: addr = {:#x}", addr);
 
-        if self.timecmp_base <= addr && addr < self.timecmp_base + ((self.hart_num as u64) << 3) {
+        if self.msip_base <= addr && addr < self.msip_base + ((self.hart_num as u64) << 2) {
+            let hartid = ((addr - self.msip_base) >> 2) as usize;
+            if hartid >= self.msip.len() {
+                return Err(MemError::StoreFault);
+            }
+            let val: u32 = data.truncate_to();
+            self.msip[hartid] = val;
+
+            if let Some(irq) = &mut self.software_irq_line {
+                irq.set_irq((val & 1) != 0);
+            }
+            Ok(())
+        } else if self.timecmp_base <= addr
+            && addr < self.timecmp_base + ((self.hart_num as u64) << 3)
+        {
             // timecmp
             let hartid = ((addr - self.timecmp_base) >> 3) as usize;
 
@@ -144,14 +171,18 @@ impl Clint {
 }
 
 impl RiscvIRQSource for Clint {
-    fn set_irq_line(&mut self, line: IRQLine, _id: usize) {
-        self.irq_line = Some(line);
-        self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({
-            let irq_line_ptr = self.irq_line.as_mut().unwrap() as *mut IRQLine;
-            move || {
-                unsafe { &mut *irq_line_ptr }.set_irq(true);
-            }
-        });
+    fn set_irq_line(&mut self, line: IRQLine, id: usize) {
+        if id == 0 {
+            self.timer_irq_line = Some(line);
+            self.timer_cb_id = unsafe { self.timer.as_mut_unchecked() }.register({
+                let irq_line_ptr = self.timer_irq_line.as_mut().unwrap() as *mut IRQLine;
+                move || {
+                    unsafe { &mut *irq_line_ptr }.set_irq(true);
+                }
+            });
+        } else if id == 1 {
+            self.software_irq_line = Some(line);
+        }
     }
 }
 
@@ -178,22 +209,26 @@ impl MemMappedDeviceTrait for Clint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::virt::RiscvIRQHandler;
+    use crate::isa::riscv::trap::Interrupt;
+
+    struct MockIrqHandler {
+        triggered: bool,
+        level: bool,
+    }
+
+    impl RiscvIRQHandler for MockIrqHandler {
+        fn handle_irq(&mut self, _interrupt: Interrupt, level: bool) {
+            self.triggered = true;
+            self.level = level;
+        }
+    }
 
     fn create_test_clint() -> (Clint, Rc<UnsafeCell<Timer>>) {
         let clock = VirtualClockRef::new();
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
-        let clint = Clint::new(1, 0x0200bff8, 0x02004000, clock, timer.clone());
+        let clint = Clint::new(1, 0x02000000, 0x0200bff8, 0x02004000, clock, timer.clone());
         (clint, timer)
-    }
-
-    #[test]
-    fn test_clint_creation() {
-        let (clint, _timer) = create_test_clint();
-        assert_eq!(clint.hart_num, 1);
-        assert_eq!(clint.time_base, 0x0200bff8);
-        assert_eq!(clint.timecmp_base, 0x02004000);
-        assert_eq!(clint.time_cmp.len(), 1);
-        assert!(clint.irq_line.is_none());
     }
 
     #[test]
@@ -251,5 +286,56 @@ mod tests {
 
         let result = clint.write_impl::<u32>(0x12345678, 0xdeadbeef);
         assert_eq!(result, Err(MemError::StoreFault));
+    }
+
+    #[test]
+    fn test_clint_creation() {
+        let (clint, _timer) = create_test_clint();
+        assert_eq!(clint.hart_num, 1);
+        assert_eq!(clint.msip_base, 0x02000000);
+        assert_eq!(clint.time_base, 0x0200bff8);
+        assert_eq!(clint.timecmp_base, 0x02004000);
+        assert_eq!(clint.time_cmp.len(), 1);
+        assert!(clint.timer_irq_line.is_none());
+        assert!(clint.software_irq_line.is_none());
+    }
+
+    #[test]
+    fn test_msip_read_write() {
+        let (mut clint, _timer) = create_test_clint();
+
+        let mut mock_handler = MockIrqHandler {
+            triggered: false,
+            level: false,
+        };
+        let irq_line = IRQLine::new(
+            &mut mock_handler as *mut MockIrqHandler,
+            Interrupt::MachineSoft,
+        );
+        clint.set_irq_line(irq_line, 1);
+
+        // Read MSIP (Hart 0)
+        let initial_msip: u32 = clint.read_impl(0x02000000).unwrap();
+        assert_eq!(initial_msip, 0);
+
+        // Write MSIP (Hart 0)
+        clint.write_impl::<u32>(0x02000000, 1).unwrap();
+        let msip: u32 = clint.read_impl(0x02000000).unwrap();
+        assert_eq!(msip, 1);
+        assert!(mock_handler.triggered);
+        assert!(mock_handler.level);
+
+        // Clear MSIP (Hart 0)
+        mock_handler.triggered = false;
+        clint.write_impl::<u32>(0x02000000, 0).unwrap();
+        let msip: u32 = clint.read_impl(0x02000000).unwrap();
+        assert_eq!(msip, 0);
+        assert!(mock_handler.triggered);
+        assert!(!mock_handler.level);
+
+        // Write MSIP (Hart 0) with other bits
+        clint.write_impl::<u32>(0x02000000, 0x12345678).unwrap();
+        let msip: u32 = clint.read_impl(0x02000000).unwrap();
+        assert_eq!(msip, 0x12345678);
     }
 }

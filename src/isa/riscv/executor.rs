@@ -119,14 +119,14 @@ impl RVCPU {
 
         debug_assert!(self.pending_tval.is_none());
 
-        rst
-    }
-
-    fn step_impl(&mut self) -> Result<(), Exception> {
         if let Some(interrupt) = TrapController::check_interrupt(self) {
             TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0);
         }
 
+        rst
+    }
+
+    fn step_impl(&mut self) -> Result<(), Exception> {
         let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
             self.icache_cnt += 1;
             decode_instr
@@ -207,6 +207,10 @@ impl RiscvIRQHandler for RVCPU {
             }
             Interrupt::SupervisorExternal => {
                 mip.set_seip(level);
+            }
+
+            Interrupt::MachineSoft => {
+                mip.set_msip(level);
             }
 
             _ => {

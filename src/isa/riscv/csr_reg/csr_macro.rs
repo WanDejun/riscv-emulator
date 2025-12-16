@@ -29,6 +29,16 @@ macro_rules! gen_csr_reg {
                 unsafe { (*self.reg).value() }
             }
 
+            fn set_data(&mut self, val: WordType) {
+                let reg = unsafe { &mut *self.reg };
+                reg.write(val, unsafe {&*self.ctx});
+            }
+
+            fn set_data_directly(&mut self, val: WordType) {
+                let reg = unsafe { &mut *self.reg };
+                reg.write_directly(val);
+            }
+
             #[inline]
             fn get_index() -> WordType {
                 $addr

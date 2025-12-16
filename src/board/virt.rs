@@ -130,8 +130,9 @@ impl RVBoardBuilder {
         let power_manager = Rc::new(RefCell::new(PowerManager::new()));
         let clint = Rc::new(RefCell::new(Clint::new(
             1,
-            0x7ff8,
             0,
+            0x7ff8,
+            0x4000,
             clock.clone(),
             timer.clone(),
         )));
@@ -180,12 +181,20 @@ impl RVBoardBuilder {
         let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
 
         // register irq line for timer.
-        let timer_irq_line = IRQLine::new(
-            &mut *cpu as *mut dyn RiscvIRQHandler,
-            Interrupt::MachineTimer,
+        clint.borrow_mut().set_irq_line(
+            IRQLine::new(
+                &mut *cpu as *mut dyn RiscvIRQHandler,
+                Interrupt::MachineTimer,
+            ),
+            0,
         );
-
-        clint.borrow_mut().set_irq_line(timer_irq_line, 0);
+        clint.borrow_mut().set_irq_line(
+            IRQLine::new(
+                &mut *cpu as *mut dyn RiscvIRQHandler,
+                Interrupt::MachineSoft,
+            ),
+            1,
+        );
 
         // register irq line for plic.
         let plic_mathine_irq_line = IRQLine::new(
@@ -302,12 +311,15 @@ impl Board for VirtBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::arch_config::XLEN;
     use crate::isa::DebugTarget;
-    use crate::isa::riscv::csr_reg::csr_index;
+    use crate::isa::riscv::csr_reg::csr_macro::Mcause;
+    use crate::isa::riscv::csr_reg::{NamedCsrReg, csr_index};
+    use crate::ram_config;
 
     fn create_test_board() -> VirtBoard {
         let mut ram = Ram::new();
-        for i in 0..=0x10000 {
+        for i in 0..=0x100000 {
             ram.write::<u32>(4 * i, 0x13).unwrap(); // NOP
         }
 
@@ -323,8 +335,7 @@ mod tests {
         // 直接测试 CLINT 设备
         let mut clint = board.clint.borrow_mut();
         // 测试 mtime 读取
-        let initial_time: u64 = clint.read_u64(0x7ff8).unwrap_or(0);
-        println!("Initial mtime: {:#x}", initial_time);
+        let _ = clint.read_u64(0x7ff8).unwrap();
 
         // 测试 mtime 写入
         let test_time = 0x123456789abcdef0u64;
@@ -339,26 +350,24 @@ mod tests {
         let read_time: u64 = clint.read_u64(0x7ff8).unwrap();
         assert_eq!(read_time, test_time, "mtime write/read mismatch");
 
-        // 测试 mtimecmp 访问 (mtimecmp_base = 0)
+        // 测试 mtimecmp 访问
         let timecmp_value = 0xfedcba9876543210u64;
-        let write_result = clint.write_u64(0x0, timecmp_value);
+        let write_result = clint.write_u64(0x4000, timecmp_value);
         assert!(
             write_result.is_ok(),
             "Failed to write to mtimecmp: {:?}",
             write_result
         );
 
-        let read_timecmp: u64 = clint.read_u64(0x0).unwrap();
+        let read_timecmp: u64 = clint.read_u64(0x4000).unwrap();
         assert_eq!(read_timecmp, timecmp_value, "mtimecmp write/read mismatch");
-
-        println!("CLINT MMIO access test passed!");
     }
 
     #[test]
     fn test_clint_timer_interrupt() {
         let mut board = create_test_board();
 
-        let interrupt_handler_addr = 0x1000;
+        let interrupt_handler_addr = ram_config::BASE_ADDR + 0x1000;
         board
             .cpu_mut()
             .debug_csr(csr_index::mtvec, Some(interrupt_handler_addr));
@@ -372,14 +381,14 @@ mod tests {
         let target_time = 5;
         {
             let mut clint = board.clint.borrow_mut();
-            clint.write_u64(0x0, target_time).unwrap();
+            clint.write_u64(0x4000, target_time).unwrap();
         }
 
         println!("Running board steps to test timer interrupt...");
 
         let mut reach_mtvec = false;
-        for i in 0..20 {
-            assert!(board.step().is_ok());
+        for i in 0..128 {
+            board.step().unwrap();
 
             let pc = board.cpu_mut().read_pc();
 
@@ -396,6 +405,29 @@ mod tests {
             Some(1 << 7)
         );
         assert!(board.clock.now() >= target_time);
+
+        // Test MSIP (software interrupt)
+        board.cpu_mut().write_pc(ram_config::BASE_ADDR);
+
+        // Re-enable MIE in mstatus
+        board.cpu_mut().debug_csr(csr_index::mstatus, Some(1 << 3));
+
+        // Disable MTIE and enable MSIE
+        board.cpu_mut().debug_csr(csr_index::mie, Some(1 << 3));
+
+        {
+            let mut clint = board.clint.borrow_mut();
+            clint.write_u64(0x0, 1).unwrap();
+        }
+
+        board.step().unwrap();
+        assert!(board.cpu_mut().read_pc() == interrupt_handler_addr);
+
+        let mcause = board
+            .cpu_mut()
+            .debug_csr(Mcause::get_index(), None)
+            .unwrap();
+        assert_eq!(mcause, (1u64 << (XLEN - 1)) | 0b11)
     }
 
     #[cfg(feature = "test-device")]
