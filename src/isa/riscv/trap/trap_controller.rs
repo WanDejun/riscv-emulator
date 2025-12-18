@@ -135,18 +135,21 @@ impl TrapController {
     // ======================================
     //                 Common
     // ======================================
-
     pub fn try_send_trap_signal(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) -> bool {
-        if cpu.csr.privelege_level() == PrivilegeLevel::M
-            || Self::is_delegated_m_mode(cpu, cause) == false
-        {
+        let level = cpu.csr.privelege_level();
+
+        if level == PrivilegeLevel::M || Self::is_delegated_m_mode(cpu, cause) == false {
             match cause {
                 Trap::Exception(_) => {
                     Self::send_trap_signal_m_mode(cpu, cause, trap_value);
                     true
                 }
                 Trap::Interrupt(_) => {
-                    if cpu.csr.get_by_type_existing::<Mstatus>().get_mie() == 1 {
+                    // "Interrupts for higher-privilege modes, y>x, are always globally enabled
+                    // regardless of the setting of the global yIE bit for the higher-privilege mode."
+                    if level < PrivilegeLevel::M
+                        || cpu.csr.get_by_type_existing::<Mstatus>().get_mie() == 1
+                    {
                         Self::send_trap_signal_m_mode(cpu, cause, trap_value);
                         true
                     } else {
@@ -161,7 +164,10 @@ impl TrapController {
                     true
                 }
                 Trap::Interrupt(_) => {
-                    if cpu.csr.get_by_type_existing::<Mstatus>().get_sie() == 1 {
+                    // The same as M-Mode interrupt handling.
+                    if level < PrivilegeLevel::S
+                        || cpu.csr.get_by_type_existing::<Mstatus>().get_sie() == 1
+                    {
                         Self::send_trap_signal_s_mode(cpu, cause, trap_value);
                         true
                     } else {
@@ -172,14 +178,10 @@ impl TrapController {
         }
     }
 
-    pub fn check_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
-        let mstatus = cpu.csr.get_by_type::<Mstatus>().unwrap();
-        if mstatus.get_mie() == 0 {
-            return None;
-        }
-
-        let mip = cpu.csr.get_by_type::<Mip>().unwrap();
-        let mie = cpu.csr.get_by_type::<Mie>().unwrap();
+    /// Check if there is any pending interrupt that can be handled now, considering `mip` and `mie`.
+    pub fn has_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
+        let mip = cpu.csr.get_by_type_existing::<Mip>();
+        let mie = cpu.csr.get_by_type_existing::<Mie>();
 
         let pending_interrupts = mip.data() & mie.data();
 
