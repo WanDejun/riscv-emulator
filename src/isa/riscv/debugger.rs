@@ -278,10 +278,6 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
         self.target.read_instr(self.target.read_pc()).ok()
     }
 
-    pub fn read_instr_directly(&mut self, addr: Address) -> Option<I::RawInstr> {
-        self.target.read_instr_directly(addr).ok()
-    }
-
     pub fn unify_to_phys_addr(&self, addr: Address) -> Option<u64> {
         match addr {
             Address::Phys(paddr) => Some(paddr),

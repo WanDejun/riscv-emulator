@@ -62,11 +62,11 @@ impl ELFLoader {
         let mut func_table = BiMap::<String, u64>::new();
 
         for entry in entries {
-            if entry.get_type().unwrap() == xmas_elf::symbol_table::Type::Func {
-                let name = entry.get_name(&self.elf()).unwrap().to_string();
-                let addr = entry.value();
-                func_table.insert(name, addr);
-            }
+            // if entry.get_type().unwrap() == xmas_elf::symbol_table::Type::Func {
+            let name = entry.get_name(&self.elf()).unwrap().to_string();
+            let addr = entry.value();
+            func_table.insert(name, addr);
+            // }
         }
 
         SymTab { func_table }

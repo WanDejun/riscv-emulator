@@ -235,28 +235,38 @@ where
     T: UnsignedInteger + WordTrait,
     F: AMOTrait<T>,
 {
-    if let RVInstrInfo::A {
+    let RVInstrInfo::A {
         rs1,
         rs2,
         rd,
         aq,
         rl,
     } = info
-    {
-        let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-        let order = get_amo_order(aq, rl);
-        let res =
-            cpu.memory
-                .fetch_and_op_amo(val1, T::truncate_from(val2), &mut cpu.csr, |l, r| {
-                    F::exec(l, r, order)
-                })?;
+    else {
+        unreachable!()
+    };
 
-        let res = res.sign_extend_to_wordtype();
+    let (val1, val2) = cpu.reg_file.read(rs1, rs2);
+    let order = get_amo_order(aq, rl);
+    let res = cpu
+        .memory
+        .fetch_and_op_amo(val1, T::truncate_from(val2), &mut cpu.csr, |l, r| {
+            F::exec(l, r, order)
+        });
 
-        cpu.reg_file.write(rd, res);
-    } else {
-        panic!("Invalid RVInstrInfo for AMO instruction");
-    }
+    let res = match res {
+        Err(e) => {
+            // TODO: Use a wrapper function in every instruction
+            // that read/write memory to set pending_tval on MemError.
+            cpu.pending_tval = Some(val1);
+            return Err(e);
+        }
+        Ok(v) => v,
+    };
+
+    let res = res.sign_extend_to_wordtype();
+
+    cpu.reg_file.write(rd, res);
 
     cpu.pc = cpu.pc.wrapping_add(4);
     cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
@@ -265,18 +275,69 @@ where
 }
 
 pub(super) fn exec_lr<T, const EXTEND: bool>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
     T: UnsignedInteger + WordTrait,
 {
-    todo!()
+    let RVInstrInfo::A { rs1, rd, .. } = info else {
+        unreachable!()
+    };
+
+    let addr = cpu.reg_file[rs1 as usize];
+
+    let res = cpu
+        .memory
+        .load_reserved::<T>(addr, &mut cpu.csr)
+        .map_err(|e| Exception::from_memory_err(e));
+
+    let res = match res {
+        Err(e) => {
+            cpu.pending_tval = Some(addr);
+            return Err(e);
+        }
+        Ok(v) => v,
+    };
+
+    let res = if EXTEND {
+        res.sign_extend_to_wordtype()
+    } else {
+        res.into()
+    };
+
+    cpu.reg_file.write(rd, res);
+    cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+    Ok(())
 }
 
-pub(super) fn exec_sc<T>(_info: RVInstrInfo, _cpu: &mut RVCPU) -> Result<(), Exception>
+pub(super) fn exec_sc<T>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     T: UnsignedInteger + TruncateFrom<WordType>,
 {
-    todo!()
+    if let RVInstrInfo::A { rs1, rs2, rd, .. } = info {
+        let (addr, val) = cpu.reg_file.read(rs1, rs2);
+        let val_t = T::truncate_from(val);
+
+        let res = cpu
+            .memory
+            .store_conditional(addr, val_t, &mut cpu.csr)
+            .map_err(|e| Exception::from_memory_err(e));
+
+        let success = match res {
+            Ok(v) => v,
+            Err(e) => {
+                cpu.pending_tval = Some(addr);
+                return Err(e);
+            }
+        };
+
+        cpu.reg_file.write(rd, if success { 0 } else { 1 });
+        cpu.pc = cpu.pc.wrapping_add(4);
+        cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+        Ok(())
+    } else {
+        unreachable!()
+    }
 }

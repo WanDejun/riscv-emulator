@@ -89,6 +89,7 @@ impl VirtAddrManager {
         T: UnsignedInteger,
     {
         let view = MemAccessView::new(csr);
+        // TODO: Extract these masks and flags into a function to reduce code duplication.
         let (masks, flags) = match view {
             MemAccessView::MachineOnly => return self.mmio.read_by_type(addr.into()),
             MemAccessView::SupervisorAndUser => (PTEFlags::R, PTEFlags::R),
@@ -122,6 +123,53 @@ impl VirtAddrManager {
 
         if let Ok(paddr) = self.translate_vaddr::<true, true>(addr, masks, flags) {
             self.mmio.write_by_type(paddr, data)
+        } else {
+            Err(MemError::StorePageFault)
+        }
+    }
+
+    pub(crate) fn load_reserved<T>(
+        &mut self,
+        addr: WordType,
+        csr: &mut CsrRegFile,
+    ) -> Result<T, MemError>
+    where
+        T: UnsignedInteger,
+    {
+        let view = MemAccessView::new(csr);
+        let (masks, flags) = match view {
+            MemAccessView::MachineOnly => return self.mmio.load_reserved(addr.into()),
+            MemAccessView::SupervisorAndUser => (PTEFlags::R, PTEFlags::R),
+            MemAccessView::SupervisorOnly => (PTEFlags::R | PTEFlags::U, PTEFlags::R),
+            MemAccessView::UserOnly => (PTEFlags::R | PTEFlags::U, PTEFlags::R | PTEFlags::U),
+        };
+
+        if let Ok(paddr) = self.translate_vaddr::<false, true>(addr, masks, flags) {
+            self.mmio.load_reserved(paddr)
+        } else {
+            return Err(MemError::LoadPageFault);
+        }
+    }
+
+    pub(crate) fn store_conditional<T>(
+        &mut self,
+        addr: WordType,
+        data: T,
+        csr: &mut CsrRegFile,
+    ) -> Result<bool, MemError>
+    where
+        T: UnsignedInteger,
+    {
+        let view = MemAccessView::new(csr);
+        let (masks, flags) = match view {
+            MemAccessView::MachineOnly => return self.mmio.store_conditional(addr.into(), data),
+            MemAccessView::SupervisorAndUser => (PTEFlags::W, PTEFlags::W),
+            MemAccessView::SupervisorOnly => (PTEFlags::W | PTEFlags::U, PTEFlags::W),
+            MemAccessView::UserOnly => (PTEFlags::W | PTEFlags::U, PTEFlags::W | PTEFlags::U),
+        };
+
+        if let Ok(paddr) = self.translate_vaddr::<true, true>(addr, masks, flags) {
+            self.mmio.store_conditional(paddr, data)
         } else {
             Err(MemError::StorePageFault)
         }
@@ -244,13 +292,14 @@ impl VirtAddrManager {
         self.mmio.write_by_type(paddr.into(), data)
     }
 
+    #[cfg(test)]
     pub(crate) fn get_raw_ptr(&self) -> *mut u8 {
         unsafe { &mut *self.ram.get() }.get_raw_ptr()
     }
 
     /// Read operation without side-effect of page table, provided for debugger.
     ///
-    /// This function dones't respect the current privilege mode. See also `get_instr_code_pure`.
+    /// This function dones't respect the current privilege mode.
     pub(crate) fn debug_read<T>(&mut self, addr: Address) -> Result<T, MemError>
     where
         T: UnsignedInteger,

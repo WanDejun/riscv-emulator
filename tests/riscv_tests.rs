@@ -152,11 +152,11 @@ mod rv64_tests {
         run_test_group("rv64ud-v-");
     }
 
-    // #[test]
-    // fn run_rv64ua() {
-    //     run_test_group("rv64ua-p-");
-    //     run_test_group("rv64ua-v-");
-    // }
+    #[test]
+    fn run_rv64ua() {
+        run_test_group("rv64ua-p-");
+        run_test_group("rv64ua-v-");
+    }
 
     #[test]
     fn run_rv64um() {

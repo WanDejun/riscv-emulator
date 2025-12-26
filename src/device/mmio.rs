@@ -131,6 +131,36 @@ impl MemoryMapIO {
         }
     }
 
+    pub fn load_reserved<T>(&mut self, p_addr: WordType) -> Result<T, MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        if p_addr >= ram_config::BASE_ADDR {
+            return unsafe {
+                self.ram
+                    .as_mut_unchecked()
+                    .load_reserved(p_addr - ram_config::BASE_ADDR)
+            };
+        }
+        // Fallback for MMIO: treat as normal read, no reservation
+        self.read_by_type(p_addr)
+    }
+
+    pub fn store_conditional<T>(&mut self, p_addr: WordType, data: T) -> Result<bool, MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        if p_addr >= ram_config::BASE_ADDR {
+            return unsafe {
+                self.ram
+                    .as_mut_unchecked()
+                    .store_conditional(p_addr - ram_config::BASE_ADDR, data)
+            };
+        }
+        // Fallback for MMIO: always fail SC
+        Ok(false)
+    }
+
     pub fn from_mmio_items(ram: Rc<UnsafeCell<Ram>>, mut map: Vec<MemoryMapItem>) -> Self {
         map.sort();
         Self { map, ram }

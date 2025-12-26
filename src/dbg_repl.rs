@@ -374,11 +374,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
                 // TODO: This may not a valid instruction start for variable-length ISA.
                 // FIXME: Handle sub underflow.
-                let curr_addr = (self.dbg.read_pc() - LIST_INSTR * 2) as WordType;
-                let mut curr_addr = Address::Virt(curr_addr);
+                let mut curr_addr = (self.dbg.read_pc() - LIST_INSTR * 2) as WordType;
 
                 for _ in 0..LIST_INSTR {
-                    let is_curr_line = curr_addr == Address::Virt(self.dbg.read_pc());
+                    let is_curr_line = curr_addr == self.dbg.read_pc();
 
                     if is_curr_line {
                         print!("{} ", palette.arrow(">"));
@@ -387,8 +386,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                     }
 
                     println!("{}", self.instr_formatted_detailed(curr_addr));
-                    let raw = self.dbg.read_instr(curr_addr.value());
-
+                    let raw = self.dbg.read_instr(curr_addr);
                     match raw {
                         Some(raw) => {
                             curr_addr = curr_addr + raw.len();
@@ -405,7 +403,11 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 // TODO: Unnecessary copy to by pass borrow check.
                 let breakpoints: Vec<_> = self.dbg.breakpoints().clone();
                 for (idx, bp) in breakpoints.into_iter().enumerate() {
-                    println!("[{}] {}", format_idx(idx), self.instr_formatted(bp.addr),);
+                    println!(
+                        "[{}] {}",
+                        format_idx(idx),
+                        self.instr_formatted_address(bp.addr),
+                    );
                 }
             }
 
@@ -443,10 +445,13 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
                 if delete {
                     self.dbg.clear_breakpoint(addr).map_err(|e| e.to_string())?;
-                    println!("cleared breakpoint at {}", self.instr_formatted(addr));
+                    println!(
+                        "cleared breakpoint at {}",
+                        self.instr_formatted_address(addr)
+                    );
                 } else {
                     self.dbg.set_breakpoint(addr).map_err(|e| e.to_string())?;
-                    println!("set breakpoint at {}", self.instr_formatted(addr));
+                    println!("set breakpoint at {}", self.instr_formatted_address(addr));
                 }
             }
             Cli::Quit => return Ok(true),
@@ -549,7 +554,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
     }
 
     fn current_instr_formatted(&mut self) -> impl std::fmt::Display {
-        self.instr_formatted(Address::Phys(self.dbg.read_pc()))
+        self.instr_formatted(self.dbg.read_pc())
     }
 
     fn raw_and_asm_formatted(
@@ -562,36 +567,40 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         )
     }
 
-    fn instr_formatted(&mut self, addr: Address) -> impl std::fmt::Display {
-        let raw = self.dbg.read_instr_directly(addr);
+    fn instr_formatted(&mut self, addr: u64) -> impl std::fmt::Display {
+        let raw = self.dbg.read_instr(addr);
         let asm = self.raw_and_asm_formatted(raw).1;
 
-        if let Ok(name) = self.dbg.lookup_func_addr(addr.value()) {
+        if let Ok(name) = self.dbg.lookup_func_addr(addr) {
             format!(
                 "{}: {} <{}>",
-                format_address(addr),
+                format_addr(addr),
                 asm,
                 palette.identifier(name)
             )
         } else {
-            format!("{}: {}", format_address(addr), asm)
+            format!("{}: {}", format_addr(addr), asm)
         }
     }
 
-    fn instr_formatted_detailed(&mut self, addr: Address) -> impl std::fmt::Display {
-        let raw = self.dbg.read_instr_directly(addr);
+    fn instr_formatted_address(&mut self, addr: Address) -> impl std::fmt::Display {
+        self.instr_formatted(self.dbg.unify_to_phys_addr(addr).unwrap_or(0))
+    }
+
+    fn instr_formatted_detailed(&mut self, addr: u64) -> impl std::fmt::Display {
+        let raw = self.dbg.read_instr(addr);
         let (raw_formatted, asm) = self.raw_and_asm_formatted(raw);
 
-        if let Ok(name) = self.dbg.lookup_func_addr(addr.value()) {
+        if let Ok(name) = self.dbg.lookup_func_addr(addr) {
             format!(
                 "{}: {} {} <{}>",
-                format_address(addr),
+                addr,
                 raw_formatted,
                 asm,
                 palette.identifier(name)
             )
         } else {
-            format!("{}: {} {}", format_address(addr), raw_formatted, asm)
+            format!("{}: {} {}", addr, raw_formatted, asm)
         }
     }
 }

@@ -8,10 +8,26 @@ use crate::{
     utils::{read_raw_ptr, write_raw_ptr},
 };
 
+#[derive(Debug, Clone, Copy)]
+struct Reservation {
+    addr: WordType,
+}
+
+impl Reservation {
+    fn new(addr: WordType) -> Self {
+        Self { addr: addr & !0x7 }
+    }
+
+    fn is_match(&self, addr: WordType) -> bool {
+        self.addr == (addr & !0x7)
+    }
+}
+
 // TODO: align for inner box ptr, instead of struct Ram.
 #[repr(align(4096))]
 pub struct Ram {
     data: Box<[u8]>,
+    reserved: Option<Reservation>,
 }
 
 impl Index<usize> for Ram {
@@ -31,12 +47,14 @@ impl Ram {
     pub fn new() -> Self {
         Self {
             data: vec![0u8; ram_config::SIZE].into_boxed_slice(),
+            reserved: None,
         }
     }
 
     pub fn with_init(byte: u8) -> Self {
         Self {
             data: vec![byte; ram_config::SIZE].into_boxed_slice(),
+            reserved: None,
         }
     }
 
@@ -52,6 +70,7 @@ impl Ram {
         data.resize(ram_config::SIZE, 0);
         Self {
             data: data.into_boxed_slice(),
+            reserved: None,
         }
     }
 
@@ -83,9 +102,33 @@ impl Ram {
         }
     }
 
+    pub fn load_reserved<T>(&mut self, addr: WordType) -> Result<T, MemError> {
+        let data = self.read::<T>(addr)?;
+        self.reserved = Some(Reservation::new(addr));
+        Ok(data)
+    }
+
+    pub fn store_conditional<T>(&mut self, addr: WordType, data: T) -> Result<bool, MemError> {
+        if let Some(res) = self.reserved {
+            if res.is_match(addr) {
+                self.write(addr, data)?;
+                self.reserved = None;
+                return Ok(true);
+            }
+        }
+        self.reserved = None;
+        Ok(false)
+    }
+
     pub fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
         if addr.gt(&(ram_config::SIZE as WordType)) {
             return Err(MemError::StoreFault);
+        }
+
+        if let Some(res) = self.reserved {
+            if res.is_match(addr) {
+                self.reserved = None;
+            }
         }
 
         let ret = unsafe { write_raw_ptr(self.data.as_mut_ptr().add(addr as usize), data) };
@@ -96,6 +139,7 @@ impl Ram {
         }
     }
 
+    #[cfg(test)]
     pub fn get_raw_ptr(&mut self) -> *mut u8 {
         self.data.as_mut_ptr()
     }
