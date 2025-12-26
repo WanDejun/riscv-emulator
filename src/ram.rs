@@ -70,31 +70,6 @@ impl Ram {
         });
     }
 
-    // pub fn read_byte(&mut self, addr: WordType) -> u8 {
-    //     Self::read::<u8>(self, addr)
-    // }
-    // pub fn read_word(&mut self, addr: WordType) -> u16 {
-    //     Self::read::<u16>(self, addr)
-    // }
-    // pub fn read_dword(&mut self, addr: WordType) -> u32 {
-    //     Self::read::<u32>(self, addr)
-    // }
-    // pub fn read_qword(&mut self, addr: WordType) -> u64 {
-    //     Self::read::<u64>(self, addr)
-    // }
-
-    // pub fn write_byte(&mut self, data: u8, addr: WordType) {
-    //     Self::write::<u8>(self, addr, data)
-    // }
-    // pub fn write_word(&mut self, data: u16, addr: WordType) {
-    //     Self::write::<u16>(self, addr, data)
-    // }
-    // pub fn write_dword(&mut self, data: u32, addr: WordType) {
-    //     Self::write::<u32>(self, addr, data)
-    // }
-    // pub fn write_qword(&mut self, data: u64, addr: WordType) {
-    //     Self::write::<u64>(self, addr, data)
-    // }
     pub fn read<T>(&self, addr: WordType) -> Result<T, MemError> {
         if addr.gt(&(ram_config::SIZE as WordType)) {
             return Err(MemError::LoadFault);
@@ -119,6 +94,10 @@ impl Ram {
         } else {
             Err(MemError::StoreMisaligned)
         }
+    }
+
+    pub fn get_raw_ptr(&mut self) -> *mut u8 {
+        self.data.as_mut_ptr()
     }
 }
 

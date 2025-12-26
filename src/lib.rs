@@ -5,6 +5,7 @@
 #![feature(cold_path)]
 #![feature(likely_unlikely)]
 #![feature(unsafe_cell_access)]
+#![feature(specialization)]
 
 mod cpu;
 mod fpu;

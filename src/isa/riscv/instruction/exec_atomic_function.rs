@@ -1,10 +1,13 @@
-use std::sync::atomic;
+use std::cmp;
+use std::sync::atomic::{self, Ordering};
 
+use crate::utils::WordTrait;
 use crate::{
+    config::arch_config::WordType,
     isa::riscv::{
         csr_reg::csr_macro::Minstret, executor::RVCPU, instruction::RVInstrInfo, trap::Exception,
     },
-    utils::UnsignedInteger,
+    utils::{TruncateFrom, UnsignedInteger},
 };
 
 // ----------------------------------
@@ -14,186 +17,198 @@ pub(super) trait AMOTrait<T>
 where
     T: UnsignedInteger,
 {
-    fn exec(a: &T::AtomicType, b: &T::AtomicType, order: atomic::Ordering) -> Result<T, Exception>;
+    fn exec(a: &T::AtomicType, b: T, order: atomic::Ordering) -> Result<T, Exception>;
 }
 
 pub(super) struct ExecAmoAdd {}
 impl AMOTrait<u64> for ExecAmoAdd {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_add(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoAdd {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_add(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoAnd {}
 impl AMOTrait<u64> for ExecAmoAnd {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_and(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoAnd {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_and(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoOr {}
 impl AMOTrait<u64> for ExecAmoOr {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_or(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoOr {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_or(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoXor {}
 impl AMOTrait<u64> for ExecAmoXor {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_xor(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoXor {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_xor(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoMax {}
 impl AMOTrait<u64> for ExecAmoMax {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+            Some(cmp::max(v as i64, rhs as i64) as u64)
+        })
+        .map_err(|_| Exception::StoreFault)
     }
 }
 impl AMOTrait<u32> for ExecAmoMax {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+            Some(cmp::max(v as i32, rhs as i32) as u32)
+        })
+        .map_err(|_| Exception::StoreFault)
     }
 }
 
 pub(super) struct ExecAmoMin {}
 impl AMOTrait<u64> for ExecAmoMin {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+            Some(cmp::min(v as i64, rhs as i64) as u64)
+        })
+        .map_err(|_| Exception::StoreFault)
     }
 }
 impl AMOTrait<u32> for ExecAmoMin {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+            Some(cmp::min(v as i32, rhs as i32) as u32)
+        })
+        .map_err(|_| Exception::StoreFault)
     }
 }
 
 pub(super) struct ExecAmoMaxU {}
 impl AMOTrait<u64> for ExecAmoMaxU {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_max(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoMaxU {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_max(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoMinU {}
 impl AMOTrait<u64> for ExecAmoMinU {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.fetch_min(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoMinU {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.fetch_min(rhs, order))
     }
 }
 
 pub(super) struct ExecAmoSwap {}
 impl AMOTrait<u64> for ExecAmoSwap {
     fn exec(
-        _lhs: &<u64 as UnsignedInteger>::AtomicType,
-        _rhs: &<u64 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u64 as UnsignedInteger>::AtomicType,
+        rhs: u64,
+        order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        todo!()
+        Ok(lhs.swap(rhs, order))
     }
 }
 impl AMOTrait<u32> for ExecAmoSwap {
     fn exec(
-        _lhs: &<u32 as UnsignedInteger>::AtomicType,
-        _rhs: &<u32 as UnsignedInteger>::AtomicType,
-        _oreer: atomic::Ordering,
+        lhs: &<u32 as UnsignedInteger>::AtomicType,
+        rhs: u32,
+        order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        todo!()
+        Ok(lhs.swap(rhs, order))
     }
 }
 
@@ -209,16 +224,15 @@ fn get_amo_order(aq: bool, rl: bool) -> std::sync::atomic::Ordering {
     }
 }
 
-/// could ONLY used in single hart.  
-/// let t = mem[x[[rs1]]];  
-/// x[[rd]] = t;
-/// mem[x[[rs1]]] = t OP x[[rs2]];
+/// let t = mem[x[rs1]];  
+/// x[rd] = t;
+/// mem[x[rs1]] = t OP x[rs2];
 pub(crate) fn exec_atomic_memory_operation<F, T>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
 ) -> Result<(), Exception>
 where
-    T: UnsignedInteger,
+    T: UnsignedInteger + WordTrait,
     F: AMOTrait<T>,
 {
     if let RVInstrInfo::A {
@@ -229,12 +243,16 @@ where
         rl,
     } = info
     {
-        let (val1, _) = cpu.reg_file.read(rs1, rs2);
+        let (val1, val2) = cpu.reg_file.read(rs1, rs2);
         let order = get_amo_order(aq, rl);
-        let res = cpu
-            .memory
-            .modify_mem_by(val1, 0, |l, r| F::exec(l, r, order))?
-            .into();
+        let res =
+            cpu.memory
+                .fetch_and_op_amo(val1, T::truncate_from(val2), &mut cpu.csr, |l, r| {
+                    F::exec(l, r, order)
+                })?;
+
+        let res = res.sign_extend_to_wordtype();
+
         cpu.reg_file.write(rd, res);
     } else {
         panic!("Invalid RVInstrInfo for AMO instruction");
@@ -244,4 +262,21 @@ where
     cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
 
     Ok(())
+}
+
+pub(super) fn exec_lr<T, const EXTEND: bool>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    T: UnsignedInteger + WordTrait,
+{
+    todo!()
+}
+
+pub(super) fn exec_sc<T>(_info: RVInstrInfo, _cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    T: UnsignedInteger + TruncateFrom<WordType>,
+{
+    todo!()
 }

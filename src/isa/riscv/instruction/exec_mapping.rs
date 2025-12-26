@@ -311,11 +311,11 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::AMOMINU_D => exec_atomic_memory_operation::<ExecAmoMinU, u64>,
 
         // load-reserved / store-conditional
-        RiscvInstr::LR_W => todo!(),
-        RiscvInstr::SC_W => todo!(),
+        RiscvInstr::LR_W => exec_lr::<u32, true>,
+        RiscvInstr::SC_W => exec_sc::<u32>,
 
-        RiscvInstr::LR_D => todo!(),
-        RiscvInstr::SC_D => todo!(),
+        RiscvInstr::LR_D => exec_lr::<u64, false>,
+        RiscvInstr::SC_D => exec_sc::<u64>,
 
         //---------------------------------------
         // RV_Custom

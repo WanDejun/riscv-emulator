@@ -20,6 +20,7 @@ use crate::{
         trap::Exception,
     },
     ram::Ram,
+    ram_config,
     utils::UnsignedInteger,
 };
 
@@ -39,7 +40,7 @@ impl MemAccessView {
                 if mstatus.get_mprv() == 0 {
                     Self::MachineOnly
                 } else {
-                    match (mstatus.get_mpp() as u8).try_into().unwrap() {
+                    match (mstatus.get_mpp() as u8).into() {
                         PrivilegeLevel::M => Self::MachineOnly,
                         PrivilegeLevel::S => {
                             if mstatus.get_sum() == 0 {
@@ -171,19 +172,62 @@ impl VirtAddrManager {
         self.ifetch_impl::<false, _>(addr, csr)
     }
 
-    /// do some binary operation on memory by callback function.
-    /// if rhs_addr is 0, unary operation instead.
-    pub(crate) fn modify_mem_by<F, T>(
+    /// Atomic Memory Operation.
+    pub(crate) fn fetch_and_op_amo<T, F>(
         &mut self,
-        _lhs_addr: WordType,
-        _rhs_addr: WordType,
-        _f: F,
+        addr: WordType,
+        rhs_val: T,
+        csr: &mut CsrRegFile,
+        f: F,
     ) -> Result<T, Exception>
     where
         T: UnsignedInteger,
-        F: Fn(&T::AtomicType, &T::AtomicType) -> Result<T, Exception>,
+        F: Fn(&T::AtomicType, T) -> Result<T, Exception>,
     {
-        todo!();
+        let view = MemAccessView::new(csr);
+        let (masks, flags) = match view {
+            MemAccessView::MachineOnly => (PTEFlags::empty(), PTEFlags::empty()),
+            MemAccessView::SupervisorAndUser => {
+                (PTEFlags::R | PTEFlags::W, PTEFlags::R | PTEFlags::W)
+            }
+            MemAccessView::SupervisorOnly => (
+                PTEFlags::R | PTEFlags::W | PTEFlags::U,
+                PTEFlags::R | PTEFlags::W,
+            ),
+            MemAccessView::UserOnly => (
+                PTEFlags::R | PTEFlags::W | PTEFlags::U,
+                PTEFlags::R | PTEFlags::W | PTEFlags::U,
+            ),
+        };
+
+        let mut paddr = if let MemAccessView::MachineOnly = view {
+            addr
+        } else {
+            match self.translate_vaddr::<true, true>(addr, masks, flags) {
+                Ok(p) => p,
+                Err(_) => return Err(Exception::StorePageFault),
+            }
+        };
+
+        if !crate::utils::check_align::<T>(paddr) {
+            // FIXME: AMO instructions will do both load/store, which exception to raise?
+            return Err(Exception::StoreMisaligned);
+        }
+
+        if !(ram_config::BASE_ADDR..ram_config::BASE_ADDR + ram_config::SIZE as WordType)
+            .contains(&paddr)
+        {
+            // FIXME: Check manual to see what should we do here.
+            return Err(Exception::StoreFault);
+        }
+
+        paddr -= ram_config::BASE_ADDR;
+
+        let ram = unsafe { &mut *self.ram.get() };
+        let ptr = &mut ram[paddr as usize] as *mut u8 as *mut T::AtomicType;
+        let lhs = unsafe { &*ptr };
+
+        f(lhs, rhs_val)
     }
 
     pub(crate) fn read_by_paddr<T>(&mut self, paddr: WordType) -> Result<T, MemError>
@@ -198,6 +242,10 @@ impl VirtAddrManager {
         T: UnsignedInteger,
     {
         self.mmio.write_by_type(paddr.into(), data)
+    }
+
+    pub(crate) fn get_raw_ptr(&self) -> *mut u8 {
+        unsafe { &mut *self.ram.get() }.get_raw_ptr()
     }
 
     /// Read operation without side-effect of page table, provided for debugger.

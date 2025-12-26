@@ -822,8 +822,34 @@ impl AsmFormattable<RiscvTypes> for RiscvTypes {
                 )
             }
 
-            RVInstrInfo::A { .. } => {
-                todo!();
+            RVInstrInfo::A {
+                rs1,
+                rs2,
+                rd,
+                rl,
+                aq,
+            } => {
+                if instr.name().starts_with("amo") {
+                    format!(
+                        "{} {},{},({}) rl={}, aq={} - type A",
+                        palette.instr(instr.name()),
+                        palette.reg(REG_NAME[rd as usize], 0),
+                        palette.reg(REG_NAME[rs2 as usize], 0),
+                        palette.reg(REG_NAME[rs1 as usize], 0),
+                        rl,
+                        aq,
+                    )
+                } else {
+                    // lr or sc
+                    format!(
+                        "{} {},({}) rl={}, aq={} - type A",
+                        palette.instr(instr.name()),
+                        palette.reg(REG_NAME[rd as usize], 0),
+                        palette.reg(REG_NAME[rs1 as usize], 0),
+                        rl,
+                        aq,
+                    )
+                }
             }
 
             RVInstrInfo::B { rs1, rs2, imm } => {

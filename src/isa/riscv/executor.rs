@@ -224,7 +224,7 @@ impl RiscvIRQHandler for RVCPU {
 
 #[cfg(test)]
 mod tests {
-    use std::f32;
+    use std::{f32, thread};
 
     use super::*;
     use crate::{
@@ -543,5 +543,43 @@ mod tests {
                 .extract_bits(32, 33),
             2
         );
+    }
+
+    #[test]
+    fn test_amo() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        const CNT: usize = 1000;
+        const TARGET_ADDR: WordType = ram_config::BASE_ADDR + 1024;
+        let mut cpu = TestCPUBuilder::new()
+            .reg(12, TARGET_ADDR)
+            .reg(11, 1)
+            .program(&[0x00b6302f, 0xffdff06f]) // label: amoadd.d x0, a1, (a2); j label
+            .build();
+
+        let ptr = cpu.memory.get_raw_ptr();
+        let atomic_ptr_addr =
+            unsafe { ptr.add((TARGET_ADDR - ram_config::BASE_ADDR) as usize) as *const AtomicU64 }
+                as usize;
+
+        thread::scope(|scope| {
+            scope.spawn(move || {
+                let ptr = atomic_ptr_addr as *const AtomicU64;
+                for _ in 0..CNT {
+                    unsafe {
+                        (*ptr).fetch_add(1, Ordering::Relaxed);
+                        print!("A");
+                    }
+                }
+            });
+
+            for _ in 0..CNT * 2 {
+                cpu.step().unwrap();
+                print!("B");
+            }
+        });
+
+        let val: u64 = cpu.memory.read_by_paddr(TARGET_ADDR).unwrap();
+        assert_eq!(val, (CNT * 2) as u64);
     }
 }
