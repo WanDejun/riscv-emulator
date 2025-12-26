@@ -594,13 +594,13 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         if let Ok(name) = self.dbg.lookup_func_addr(addr) {
             format!(
                 "{}: {} {} <{}>",
-                addr,
+                format_addr(addr),
                 raw_formatted,
                 asm,
                 palette.identifier(name)
             )
         } else {
-            format!("{}: {} {}", addr, raw_formatted, asm)
+            format!("{}: {} {}", format_addr(addr), raw_formatted, asm)
         }
     }
 }

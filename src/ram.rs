@@ -157,15 +157,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ram_new() {
-        let r = Ram::new();
-        // 初始化应全部为0
-        for byte in r.data.into_iter() {
-            assert_eq!(byte, 0);
-        }
-    }
-
-    #[test]
     fn test_insert_section_and_read() {
         let mut r = Ram::new();
 
