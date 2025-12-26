@@ -10,6 +10,7 @@ use crate::{
             trap::Exception,
         },
     },
+    load::SymTab,
     utils::UnsignedInteger,
 };
 
@@ -29,6 +30,12 @@ pub enum DebugError<I: ISATypes> {
 
     #[error("CSR {0:?} not exist")]
     CSRNotExist(WordType),
+
+    #[error("symbol {0} not found in symbol table")]
+    SymbolNotFound(String),
+
+    #[error("symbol table not available")]
+    NoSymbolTable,
 }
 
 impl<I: ISATypes> From<MemError> for DebugError<I> {
@@ -137,6 +144,7 @@ impl Add<u64> for Address {
 pub struct Breakpoint {
     pub id: usize,
     pub addr: Address,
+    // TODO: add symbol_name: Option<String> for better user experience
 }
 
 const SAVE_PC_CNT: usize = 128;
@@ -145,14 +153,16 @@ pub struct Debugger<'a, I: ISATypes> {
     breakpoints: Vec<Breakpoint>,
     target: &'a mut I::CPU,
     history: VecDeque<(WordType, Option<I::RawInstr>)>,
+    symtab: Option<SymTab>,
 }
 
 impl<'a, I: ISATypes> Debugger<'a, I> {
-    pub fn new(target: &'a mut I::CPU) -> Self {
+    pub fn new(target: &'a mut I::CPU, symtab: Option<SymTab>) -> Self {
         Self {
             breakpoints: Vec::new(),
             target: target,
             history: VecDeque::with_capacity(SAVE_PC_CNT),
+            symtab: symtab,
         }
     }
 
@@ -170,6 +180,31 @@ impl<'a, I: ISATypes> Debugger<'a, I> {
 
     pub fn breakpoints(&self) -> &Vec<Breakpoint> {
         &self.breakpoints
+    }
+
+    pub fn func_symbol_table(&self) -> Option<&SymTab> {
+        self.symtab.as_ref()
+    }
+
+    pub fn lookup_func_addr(&self, addr: u64) -> Result<&String, DebugError<I>> {
+        let Some(symtab) = &self.symtab else {
+            return Err(DebugError::NoSymbolTable);
+        };
+        symtab
+            .func_name_by_addr(addr)
+            .ok_or(DebugError::SymbolNotFound(format!(
+                "Function at address 0x{:08x} not found",
+                addr
+            )))
+    }
+
+    pub fn lookup_func_name(&self, func_name: &str) -> Result<u64, DebugError<I>> {
+        let Some(symtab) = &self.symtab else {
+            return Err(DebugError::NoSymbolTable);
+        };
+        symtab
+            .func_addr_by_name(func_name)
+            .ok_or(DebugError::SymbolNotFound(func_name.to_string()))
     }
 
     pub fn set_breakpoint(&mut self, addr: Address) -> Result<(), DebugError<I>> {
@@ -339,7 +374,7 @@ mod test {
             ])
             .build();
 
-        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu, None);
         debugger
             .set_breakpoint(Address::Phys(BASE_ADDR + 4))
             .unwrap();
@@ -379,7 +414,7 @@ mod test {
             ])
             .build();
 
-        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu);
+        let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu, None);
         debugger.set_breakpoint(Address::Phys(BASE_ADDR)).unwrap();
 
         debugger.step().unwrap();

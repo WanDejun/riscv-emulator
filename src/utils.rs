@@ -9,6 +9,37 @@ use crate::{
     fpu::soft_float::APFloatOf,
 };
 
+pub struct BiMap<K, V> {
+    forward: std::collections::BTreeMap<K, V>,
+    backward: std::collections::BTreeMap<V, K>,
+}
+
+impl<K: Clone + Ord, V: Clone + Ord> BiMap<K, V> {
+    pub fn new() -> BiMap<K, V> {
+        BiMap {
+            forward: std::collections::BTreeMap::new(),
+            backward: std::collections::BTreeMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        self.forward.insert(key.clone(), value.clone());
+        self.backward.insert(value, key);
+    }
+
+    pub fn get_by_left(&self, key: &K) -> Option<&V> {
+        self.forward.get(key)
+    }
+
+    pub fn get_by_right(&self, value: &V) -> Option<&K> {
+        self.backward.get(value)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.forward.iter()
+    }
+}
+
 fn rand_unique<T, F>(rd: F, cnt: usize) -> Vec<T>
 where
     T: Copy + Eq + std::hash::Hash + std::fmt::Debug,

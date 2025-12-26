@@ -15,4 +15,6 @@ pub trait Board {
     fn status(&self) -> BoardStatus;
 
     fn cpu_mut(&mut self) -> &mut <Self::ISA as ISATypes>::CPU;
+
+    fn loader(&self) -> Option<&crate::load::ELFLoader>;
 }

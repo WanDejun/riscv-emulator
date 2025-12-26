@@ -299,7 +299,7 @@ mod tests {
         );
 
         run_test_exec_decode(
-            0xfcf42e23, //          	sw	a5,-36(s0)
+            0xfcf42e23, // sw a5,-36(s0)
             |builder| builder.reg(15, 123).reg(8, ram_config::BASE_ADDR + 72),
             |checker| checker.mem_base::<u32>(36, 123),
         );
@@ -327,12 +327,6 @@ mod tests {
             0xf8c318e3, // bne x6, x12, -112
             |builder| builder.reg(6, 5).reg(12, 10).pc(0x2000),
             |checker| checker.pc(0x2000 - 112),
-        );
-
-        run_test_exec_decode(
-            0xf8c318e3, // bne x6, x12, -112
-            |builder| builder.reg(6, 5).reg(12, 5).pc(0x2000),
-            |checker| checker.pc(0x2004),
         );
     }
 

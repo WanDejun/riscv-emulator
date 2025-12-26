@@ -14,7 +14,6 @@ use riscv_emulator::board::{Board, BoardStatus};
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
-use riscv_emulator::load::get_section_addr;
 
 fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -47,9 +46,8 @@ fn run_test(elf_path: &Path) -> bool {
     let result = std::panic::catch_unwind(|| {
         let mut timeout = false;
         let mut run_result = false;
-        let elf = std::fs::read(elf_path).unwrap();
-        let mut board = VirtBoard::from_elf(&elf);
-        let tohost: WordType = get_section_addr(&elf, ".tohost").unwrap();
+        let mut board = VirtBoard::from_elf(std::fs::read(elf_path).unwrap());
+        let tohost: WordType = board.loader().unwrap().get_section_addr(".tohost").unwrap();
 
         while board.status() != BoardStatus::Halt {
             board.step().unwrap();

@@ -105,7 +105,7 @@ fn main() {
                 println!("ELF file detected\r");
             }
             let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
-            VirtBoard::from_elf(&bytes)
+            VirtBoard::from_elf(bytes)
         }
 
         (TargetFormat::Bin, _) | (TargetFormat::Auto, "bin") => {

@@ -68,9 +68,11 @@ enum Cli {
     Breakpoint {
         #[arg(short = 'd', long = "delete")]
         delete: bool,
-        /// Address to set/delete the breakpoint; decimal by default, or hex if prefixed with `0x`.
-        addr: String,
+        /// Address or function symbol name to set/delete a breakpoint.
+        /// Address should be decimal by default, or hex if prefixed with `0x`.
+        symbol: String,
 
+        /// Whether the address is virtual or physical.
         #[arg(short, long, default_value_t = false)]
         virt: bool,
     },
@@ -123,6 +125,8 @@ enum PrintCmd {
 enum InfoCmd {
     #[command(aliases = ["b", "bp", "break"])]
     Breakpoints,
+    #[command(aliases = ["sym", "symbol"])]
+    Symbols,
 }
 
 const PROMPT: &str = "(rvdb) ";
@@ -155,9 +159,10 @@ pub struct DebugREPL<'a, I: ISATypes> {
 impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
     pub fn new<B: Board<ISA = I>>(board: &'a mut B) -> Self {
         CliCoordinator::global().pause_uart();
+        let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
 
         DebugREPL {
-            dbg: Debugger::<I>::new(board.cpu_mut()),
+            dbg: Debugger::<I>::new(board.cpu_mut(), symtab),
             watch_list: Vec::new(),
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
         }
@@ -233,18 +238,10 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
         match rst {
             Ok(DebugEvent::StepCompleted) => {
-                println!(
-                    "{}: {}",
-                    format_addr(self.dbg.read_pc()),
-                    self.current_asm_formatted(),
-                );
+                println!("{}", self.current_instr_formatted(),);
             }
             Ok(DebugEvent::BreakpointHit) => {
-                println!(
-                    "breakpoint hit at pc = {}: {}",
-                    format_addr(self.dbg.read_pc()),
-                    self.current_asm_formatted()
-                );
+                println!("breakpoint hit at {}", self.current_instr_formatted());
             }
             Err(e) => return Err(format!("step failed: {}", e)),
         }
@@ -364,7 +361,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 let skip_len = history.len().saturating_sub(count);
                 for (idx, (addr, instr)) in history.into_iter().skip(skip_len).enumerate() {
                     println!(
-                        "{}: pc = {}, {}",
+                        "  [{:2}] pc = {}, {}",
                         format_idx(idx),
                         format_addr(addr),
                         self.asm_formatted(instr)
@@ -389,10 +386,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                         print!("  ");
                     }
 
+                    println!("{}", self.instr_formatted_detailed(curr_addr));
                     let raw = self.dbg.read_instr(curr_addr.value());
-                    let (raw_formatted, asm) = self.raw_and_asm_formatted(raw);
-
-                    println!("{}: {} {}", format_address(curr_addr), raw_formatted, asm);
 
                     match raw {
                         Some(raw) => {
@@ -410,12 +405,18 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 // TODO: Unnecessary copy to by pass borrow check.
                 let breakpoints: Vec<_> = self.dbg.breakpoints().clone();
                 for (idx, bp) in breakpoints.into_iter().enumerate() {
-                    println!(
-                        "{}: {}, {}",
-                        format_idx(idx),
-                        format_address(bp.addr),
-                        self.asm_formatted_at(bp.addr),
-                    );
+                    println!("[{}] {}", format_idx(idx), self.instr_formatted(bp.addr),);
+                }
+            }
+
+            Cli::Info(InfoCmd::Symbols) => {
+                if let Some(symtab) = self.dbg.func_symbol_table() {
+                    println!("Function symbols:");
+                    for (name, addr) in symtab.func_table.iter() {
+                        println!("  {}: {}", name, format_addr(*addr));
+                    }
+                } else {
+                    println!("No symbol table available.");
                 }
             }
 
@@ -427,22 +428,25 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
                 self.handle_continue(steps)?;
             }
 
-            Cli::Breakpoint { delete, addr, virt } => {
-                let addr = make_address(parse_word(&addr)?, virt);
+            Cli::Breakpoint {
+                delete,
+                symbol,
+                virt,
+            } => {
+                let addr = parse_word(&symbol).or_else(|_| {
+                    self.dbg
+                        .lookup_func_name(&symbol)
+                        .map_err(|e| e.to_string())
+                })?;
+
+                let addr = make_address(addr, virt);
+
                 if delete {
                     self.dbg.clear_breakpoint(addr).map_err(|e| e.to_string())?;
-                    println!(
-                        "cleared breakpoint at {}: {}",
-                        format_address(addr),
-                        self.asm_formatted_at(addr)
-                    );
+                    println!("cleared breakpoint at {}", self.instr_formatted(addr));
                 } else {
                     self.dbg.set_breakpoint(addr).map_err(|e| e.to_string())?;
-                    println!(
-                        "set breakpoint at {}: {}",
-                        format_address(addr),
-                        self.asm_formatted_at(addr)
-                    );
+                    println!("set breakpoint at {}", self.instr_formatted(addr));
                 }
             }
             Cli::Quit => return Ok(true),
@@ -544,14 +548,8 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
         self.raw_and_asm_formatted(raw).1
     }
 
-    fn asm_formatted_at(&mut self, addr: Address) -> impl std::fmt::Display {
-        let raw = self.dbg.read_instr_directly(addr);
-        self.asm_formatted(raw)
-    }
-
-    fn current_asm_formatted(&mut self) -> impl std::fmt::Display {
-        let raw = self.dbg.current_instr();
-        self.asm_formatted(raw)
+    fn current_instr_formatted(&mut self) -> impl std::fmt::Display {
+        self.instr_formatted(Address::Phys(self.dbg.read_pc()))
     }
 
     fn raw_and_asm_formatted(
@@ -562,6 +560,39 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             <I as AsmFormattable<I>>::format_raw(raw),
             <I as AsmFormattable<I>>::format_asm(raw.and_then(|raw| self.dbg.decoded_info(raw))),
         )
+    }
+
+    fn instr_formatted(&mut self, addr: Address) -> impl std::fmt::Display {
+        let raw = self.dbg.read_instr_directly(addr);
+        let asm = self.raw_and_asm_formatted(raw).1;
+
+        if let Ok(name) = self.dbg.lookup_func_addr(addr.value()) {
+            format!(
+                "{}: {} <{}>",
+                format_address(addr),
+                asm,
+                palette.identifier(name)
+            )
+        } else {
+            format!("{}: {}", format_address(addr), asm)
+        }
+    }
+
+    fn instr_formatted_detailed(&mut self, addr: Address) -> impl std::fmt::Display {
+        let raw = self.dbg.read_instr_directly(addr);
+        let (raw_formatted, asm) = self.raw_and_asm_formatted(raw);
+
+        if let Ok(name) = self.dbg.lookup_func_addr(addr.value()) {
+            format!(
+                "{}: {} {} <{}>",
+                format_address(addr),
+                raw_formatted,
+                asm,
+                palette.identifier(name)
+            )
+        } else {
+            format!("{}: {} {}", format_address(addr), raw_formatted, asm)
+        }
     }
 }
 
@@ -597,6 +628,10 @@ impl OutputPalette {
     }
 
     fn data(&self, value: &str) -> impl std::fmt::Display {
+        value.yellow()
+    }
+
+    fn identifier(&self, value: &str) -> impl std::fmt::Display {
         value.yellow()
     }
 

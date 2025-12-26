@@ -37,7 +37,7 @@ use crate::{
         mmu::VirtAddrManager,
         trap::{Exception, Interrupt},
     },
-    load::{load_bin, load_elf},
+    load::{ELFLoader, load_bin},
     ram::Ram,
     vclock::{Timer, VirtualClockRef},
 };
@@ -210,6 +210,7 @@ impl RVBoardBuilder {
         plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
 
         VirtBoard {
+            loader: None,
             cpu,
             clock,
             timer,
@@ -225,6 +226,8 @@ impl RVBoardBuilder {
 }
 
 pub struct VirtBoard {
+    loader: Option<ELFLoader>,
+
     pub cpu: Box<RVCPU>,
     pub clock: VirtualClockRef,
     pub timer: Rc<UnsafeCell<Timer>>,
@@ -245,10 +248,13 @@ impl VirtBoard {
         Self::from_ram(ram)
     }
 
-    pub fn from_elf(bytes: &[u8]) -> Self {
+    pub fn from_elf(bytes: Vec<u8>) -> Self {
         let mut ram = Ram::new();
-        load_elf(&mut ram, bytes);
-        Self::from_ram(ram)
+        let loader = ELFLoader::new(bytes);
+        loader.load_to_ram(&mut ram);
+        let mut board = Self::from_ram(ram);
+        board.loader = Some(loader);
+        board
     }
 
     pub fn from_ram(ram: Ram) -> Self {
@@ -305,6 +311,10 @@ impl Board for VirtBoard {
 
     fn cpu_mut(&mut self) -> &mut RVCPU {
         &mut self.cpu
+    }
+
+    fn loader(&self) -> Option<&crate::load::ELFLoader> {
+        self.loader.as_ref()
     }
 }
 

@@ -105,9 +105,8 @@ impl Emulator {
     }
 
     pub fn from_elf(path: &Path) -> Self {
-        let bytes = std::fs::read(path).unwrap();
         Self {
-            board: VirtBoard::from_elf(&bytes),
+            board: VirtBoard::from_elf(std::fs::read(path).unwrap()),
         }
     }
 
