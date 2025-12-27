@@ -18,10 +18,12 @@ pub struct RiscvTypes;
 impl ISATypes for RiscvTypes {
     const EBREAK: u32 = 0x00100073;
 
-    type RawInstr = u32;
+    type RawInstr = RawInstrType;
     type ISADesc = RVInstrDesc;
     type DecodeRst = DecodeInstr;
     type StepException = trap::Exception;
     type Decoder = decoder::Decoder;
     type CPU = RVCPU;
 }
+
+pub type RawInstrType = u32;

@@ -1,5 +1,7 @@
 use std::{hint::unlikely, marker::PhantomData};
 
+use log::warn;
+
 pub(super) use super::exec_float_function::*;
 use super::normal_exec;
 
@@ -102,6 +104,7 @@ where
                 }
                 Err(err) => {
                     cpu.pending_tval = Some(addr);
+                    warn!("Load memory error at address {:#x}: {:?}", addr, err);
                     return Err(Exception::from_memory_err(err));
                 }
             }
@@ -150,7 +153,7 @@ pub(super) fn exec_csrw<const UIMM: bool>(
         };
 
         if rd != 0 {
-            let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
+            let value = cpu.read_csr(imm)?;
             cpu.reg_file.write(rd, value);
         }
 
@@ -182,7 +185,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
 
     if rhs == 0 {
         // Only read CSR, no write permission check needed.
-        let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
+        let value = cpu.read_csr(imm)?;
         cpu.reg_file.write(rd, value);
     } else {
         // Check write permission before read CSR.
@@ -190,7 +193,7 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
             return Err(Exception::IllegalInstruction);
         }
 
-        let value = cpu.csr.read(imm).ok_or(Exception::IllegalInstruction)?;
+        let value = cpu.read_csr(imm)?;
         cpu.reg_file.write(rd, value);
 
         let data = if SET { value | rhs } else { value & !rhs };

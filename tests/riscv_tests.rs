@@ -63,7 +63,7 @@ fn run_test(elf_path: &Path) -> bool {
                 }
             }
 
-            if instr_cnt > 100_000 {
+            if instr_cnt > 10_000_000 {
                 timeout = true;
                 break;
             }

@@ -9,9 +9,9 @@ use riscv_emulator::{
     cli_coordinator::CliCoordinator,
     config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, WordType},
     isa::{
-        ISATypes, InstrLen,
+        InstrLen,
         riscv::{
-            RiscvTypes,
+            RawInstrType,
             csr_reg::{
                 PrivilegeLevel,
                 csr_macro::{CSR_ADDRESS, CSR_NAME},
@@ -150,19 +150,17 @@ fn make_address(addr: u64, virt: bool) -> Address {
     }
 }
 
-pub struct DebugREPL<'a, I: ISATypes> {
-    dbg: Debugger<'a, I>,
+pub struct DebugREPL<'a, B: Board> {
+    dbg: Debugger<'a, B>,
     watch_list: Vec<PrintObject>,
     editor: rustyline::DefaultEditor,
 }
 
-impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
-    pub fn new<B: Board<ISA = I>>(board: &'a mut B) -> Self {
+impl<'a, B: Board> DebugREPL<'a, B> {
+    pub fn new(board: &'a mut B) -> Self {
         CliCoordinator::global().pause_uart();
-        let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
-
         DebugREPL {
-            dbg: Debugger::<I>::new(board.cpu_mut(), symtab),
+            dbg: Debugger::new(board),
             watch_list: Vec::new(),
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
         }
@@ -549,7 +547,7 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
             .unwrap_or("<invalid>".into())
     }
 
-    fn asm_formatted(&mut self, raw: Option<I::RawInstr>) -> impl std::fmt::Display {
+    fn asm_formatted(&mut self, raw: Option<RawInstrType>) -> impl std::fmt::Display {
         self.raw_and_asm_formatted(raw).1
     }
 
@@ -559,11 +557,11 @@ impl<'a, I: ISATypes + AsmFormattable<I>> DebugREPL<'a, I> {
 
     fn raw_and_asm_formatted(
         &self,
-        raw: Option<I::RawInstr>,
+        raw: Option<RawInstrType>,
     ) -> (impl std::fmt::Display, impl std::fmt::Display) {
         (
-            <I as AsmFormattable<I>>::format_raw(raw),
-            <I as AsmFormattable<I>>::format_asm(raw.and_then(|raw| self.dbg.decoded_info(raw))),
+            format_raw(raw),
+            format_asm(raw.and_then(|raw| self.dbg.decoded_info(raw))),
         )
     }
 
@@ -733,174 +731,167 @@ fn format_data_64(data: WordType) -> impl std::fmt::Display {
     palette.data(&format!("0x{:016x}", data)).to_string()
 }
 
-pub trait AsmFormattable<I: ISATypes> {
-    fn format_raw(raw: Option<I::RawInstr>) -> impl std::fmt::Display;
-    fn format_asm(decode_instr: Option<I::DecodeRst>) -> impl std::fmt::Display;
+fn format_raw(raw: Option<RawInstrType>) -> impl std::fmt::Display {
+    match raw {
+        Some(raw) => palette.data(&format!("0x{:08x}", raw)).to_string(),
+        None => palette.invalid("<invalid>").to_string(),
+    }
 }
 
-impl AsmFormattable<RiscvTypes> for RiscvTypes {
-    fn format_raw(raw: Option<u32>) -> impl std::fmt::Display {
-        match raw {
-            Some(raw) => palette.data(&format!("0x{:08x}", raw)).to_string(),
-            None => palette.invalid("<invalid>").to_string(),
-        }
+fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
+    if decode_instr.is_none() {
+        return format!("{}", palette.invalid("<invalid instruction>"));
     }
+    let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
+    match info {
+        // TODO: Cannot tell float register and common register.
+        // Implement a disassembler for this.
+        RVInstrInfo::I { rd, rs1, imm } => match instr {
+            RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
+                format!(
+                    "{} {},{},{} - type I",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.csr(
+                        CSR_NAME
+                            .get(&imm)
+                            .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                    ),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                )
+            }
+            RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
+                format!(
+                    "{} {},{},{} - type I",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.csr(
+                        CSR_NAME
+                            .get(&imm)
+                            .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                    ),
+                    palette.data(rs1.to_string().as_str()),
+                )
+            }
+            _ => {
+                format!(
+                    "{} {},{},{} - type I",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    palette.data(imm.to_string().as_str()),
+                )
+            }
+        },
 
-    fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
-        if decode_instr.is_none() {
-            return format!("{}", palette.invalid("<invalid instruction>"));
+        RVInstrInfo::R { rs1, rs2, rd } => {
+            format!(
+                "{} {},{},{} - type R",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0)
+            )
         }
-        let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
-        match info {
-            // TODO: Cannot tell float register and common register.
-            // Implement a disassembler for this.
-            RVInstrInfo::I { rd, rs1, imm } => match instr {
-                RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
-                    format!(
-                        "{} {},{},{} - type I",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize], 0),
-                        palette.csr(
-                            CSR_NAME
-                                .get(&imm)
-                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                        ),
-                        palette.reg(REG_NAME[rs1 as usize], 0),
-                    )
-                }
-                RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
-                    format!(
-                        "{} {},{},{} - type I",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize], 0),
-                        palette.csr(
-                            CSR_NAME
-                                .get(&imm)
-                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                        ),
-                        palette.data(rs1.to_string().as_str()),
-                    )
-                }
-                _ => {
-                    format!(
-                        "{} {},{},{} - type I",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize], 0),
-                        palette.reg(REG_NAME[rs1 as usize], 0),
-                        palette.data(imm.to_string().as_str()),
-                    )
-                }
-            },
 
-            RVInstrInfo::R { rs1, rs2, rd } => {
-                format!(
-                    "{} {},{},{} - type R",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0)
-                )
-            }
-
-            RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
-                format!(
-                    "{} {},{},{} rm={} - type R",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0),
-                    rm,
-                )
-            }
-
-            RVInstrInfo::R4_rm {
-                rs1,
-                rs2,
-                rs3,
-                rd,
+        RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
+            format!(
+                "{} {},{},{} rm={} - type R",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
                 rm,
-            } => {
+            )
+        }
+
+        RVInstrInfo::R4_rm {
+            rs1,
+            rs2,
+            rs3,
+            rd,
+            rm,
+        } => {
+            format!(
+                "{} {},{},{},{} rm={} - type R4",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+                palette.reg(REG_NAME[rs3 as usize], 0),
+                rm
+            )
+        }
+
+        RVInstrInfo::A {
+            rs1,
+            rs2,
+            rd,
+            rl,
+            aq,
+        } => {
+            if instr.name().starts_with("amo") {
                 format!(
-                    "{} {},{},{},{} rm={} - type R4",
+                    "{} {},{},({}) rl={}, aq={} - type A",
+                    palette.instr(instr.name()),
+                    palette.reg(REG_NAME[rd as usize], 0),
+                    palette.reg(REG_NAME[rs2 as usize], 0),
+                    palette.reg(REG_NAME[rs1 as usize], 0),
+                    rl,
+                    aq,
+                )
+            } else {
+                // lr or sc
+                format!(
+                    "{} {},({}) rl={}, aq={} - type A",
                     palette.instr(instr.name()),
                     palette.reg(REG_NAME[rd as usize], 0),
                     palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0),
-                    palette.reg(REG_NAME[rs3 as usize], 0),
-                    rm
+                    rl,
+                    aq,
                 )
             }
+        }
 
-            RVInstrInfo::A {
-                rs1,
-                rs2,
-                rd,
-                rl,
-                aq,
-            } => {
-                if instr.name().starts_with("amo") {
-                    format!(
-                        "{} {},{},({}) rl={}, aq={} - type A",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize], 0),
-                        palette.reg(REG_NAME[rs2 as usize], 0),
-                        palette.reg(REG_NAME[rs1 as usize], 0),
-                        rl,
-                        aq,
-                    )
-                } else {
-                    // lr or sc
-                    format!(
-                        "{} {},({}) rl={}, aq={} - type A",
-                        palette.instr(instr.name()),
-                        palette.reg(REG_NAME[rd as usize], 0),
-                        palette.reg(REG_NAME[rs1 as usize], 0),
-                        rl,
-                        aq,
-                    )
-                }
-            }
+        RVInstrInfo::B { rs1, rs2, imm } => {
+            format!(
+                "{} {},{},{} - type B",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+                palette.data((imm >> 1).to_string().as_str())
+            )
+        }
 
-            RVInstrInfo::B { rs1, rs2, imm } => {
-                format!(
-                    "{} {},{},{} - type B",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0),
-                    palette.data((imm >> 1).to_string().as_str())
-                )
-            }
+        RVInstrInfo::J { rd, imm } => {
+            format!(
+                "{} {},{} - type J",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.data((imm >> 12).to_string().as_str())
+            )
+        }
 
-            RVInstrInfo::J { rd, imm } => {
-                format!(
-                    "{} {},{} - type J",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.data((imm >> 12).to_string().as_str())
-                )
-            }
+        RVInstrInfo::S { rs1, rs2, imm } => {
+            format!(
+                "{} {},{},{} - type S",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+                palette.data((imm).to_string().as_str())
+            )
+        }
+        RVInstrInfo::U { rd, imm } => {
+            format!(
+                "{} {},{} - type U",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.data((imm >> 12).to_string().as_str())
+            )
+        }
 
-            RVInstrInfo::S { rs1, rs2, imm } => {
-                format!(
-                    "{} {},{},{} - type S",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0),
-                    palette.data((imm).to_string().as_str())
-                )
-            }
-            RVInstrInfo::U { rd, imm } => {
-                format!(
-                    "{} {},{} - type U",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.data((imm >> 12).to_string().as_str())
-                )
-            }
-
-            RVInstrInfo::None => {
-                format!("{}", palette.instr(instr.name()))
-            }
+        RVInstrInfo::None => {
+            format!("{}", palette.instr(instr.name()))
         }
     }
 }

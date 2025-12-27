@@ -13,7 +13,7 @@ use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::{
     DeviceConfig, Emulator, EmulatorConfigurator, board::virt::VirtBoard,
-    device::fast_uart::virtual_io::SerialDestination, isa::riscv::RiscvTypes,
+    device::fast_uart::virtual_io::SerialDestination,
 };
 
 use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
@@ -123,7 +123,7 @@ fn main() {
     };
 
     if cli_args.debug {
-        let mut repl = DebugREPL::<RiscvTypes>::new(&mut board);
+        let mut repl = DebugREPL::new(&mut board);
         if let Some(script) = &cli_args.script {
             let script_content = std::fs::read_to_string(script).unwrap();
             let lines: Vec<String> = script_content.lines().map(|s| s.to_string()).collect();

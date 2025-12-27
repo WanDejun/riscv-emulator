@@ -295,6 +295,8 @@ pub trait UnsignedInteger:
     + From<u8>
     + Into<u64>
     + Default
+    + std::fmt::LowerHex
+    + std::fmt::Display
     // 算术运算符
     + Add<Output = Self>
     + AddAssign

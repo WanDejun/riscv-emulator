@@ -1,4 +1,4 @@
-use crate::isa::{ISATypes, riscv::trap::Exception};
+use crate::isa::riscv::{executor::RVCPU, trap::Exception};
 
 pub mod virt;
 
@@ -9,12 +9,11 @@ pub enum BoardStatus {
 }
 
 pub trait Board {
-    type ISA: ISATypes;
-
     fn step(&mut self) -> Result<(), Exception>;
     fn status(&self) -> BoardStatus;
 
-    fn cpu_mut(&mut self) -> &mut <Self::ISA as ISATypes>::CPU;
+    fn cpu(&self) -> &RVCPU;
+    fn cpu_mut(&mut self) -> &mut RVCPU;
 
     fn loader(&self) -> Option<&crate::load::ELFLoader>;
 }

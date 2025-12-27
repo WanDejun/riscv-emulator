@@ -32,7 +32,6 @@ use crate::{
     device_poller::DevicePoller,
     emulator_panic,
     isa::riscv::{
-        RiscvTypes,
         executor::RVCPU,
         mmu::VirtAddrManager,
         trap::{Exception, Interrupt},
@@ -127,12 +126,15 @@ impl RVBoardBuilder {
         let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
         self = self.add_plic_device(uart1);
 
+        const MTIME_OFFSET: u64 = 0xbff8;
+        const MTIMECMP_OFFSET: u64 = 0x4000;
+
         let power_manager = Rc::new(RefCell::new(PowerManager::new()));
         let clint = Rc::new(RefCell::new(Clint::new(
             1,
             0,
-            0x7ff8,
-            0x4000,
+            MTIME_OFFSET,
+            MTIMECMP_OFFSET,
             clock.clone(),
             timer.clone(),
         )));
@@ -196,6 +198,8 @@ impl RVBoardBuilder {
             ),
             1,
         );
+
+        cpu.time_addr = Some(CLINT_BASE + MTIME_OFFSET);
 
         // register irq line for plic.
         let plic_mathine_irq_line = IRQLine::new(
@@ -272,8 +276,6 @@ impl VirtBoard {
 }
 
 impl Board for VirtBoard {
-    type ISA = RiscvTypes;
-
     fn step(&mut self) -> Result<(), Exception> {
         self.plic_freq_counter += 1;
         if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
@@ -286,7 +288,7 @@ impl Board for VirtBoard {
             self.plic.borrow_mut().try_get_interrupt(1);
         }
         self.cpu.step()?;
-        self.clock.advance(1);
+        self.clock.advance(10);
 
         if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
             cold_path();
@@ -308,6 +310,10 @@ impl Board for VirtBoard {
 
     fn status(&self) -> BoardStatus {
         self.status
+    }
+
+    fn cpu(&self) -> &RVCPU {
+        &self.cpu
     }
 
     fn cpu_mut(&mut self) -> &mut RVCPU {
@@ -346,11 +352,11 @@ mod tests {
         // 直接测试 CLINT 设备
         let mut clint = board.clint.borrow_mut();
         // 测试 mtime 读取
-        let _ = clint.read_u64(0x7ff8).unwrap();
+        let _ = clint.read_u64(0xbff8).unwrap();
 
         // 测试 mtime 写入
         let test_time = 0x123456789abcdef0u64;
-        let write_result = clint.write_u64(0x7ff8, test_time);
+        let write_result = clint.write_u64(0xbff8, test_time);
         assert!(
             write_result.is_ok(),
             "Failed to write to mtime: {:?}",
@@ -358,7 +364,7 @@ mod tests {
         );
 
         // 验证写入后的读取
-        let read_time: u64 = clint.read_u64(0x7ff8).unwrap();
+        let read_time: u64 = clint.read_u64(0xbff8).unwrap();
         assert_eq!(read_time, test_time, "mtime write/read mismatch");
 
         // 测试 mtimecmp 访问

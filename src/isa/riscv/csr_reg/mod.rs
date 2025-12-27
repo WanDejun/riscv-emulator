@@ -442,7 +442,6 @@ impl CsrRegFile {
     }
 
     pub fn set_current_privileged(&mut self, new_level: PrivilegeLevel) {
-        log::debug!("Privilege level change: {:?} -> {:?}", self.cpl, new_level);
         self.cpl = new_level
     }
 }

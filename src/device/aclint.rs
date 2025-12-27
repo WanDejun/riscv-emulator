@@ -108,7 +108,7 @@ impl Clint {
     where
         T: crate::utils::UnsignedInteger,
     {
-        log::trace!("Clint::write: addr = {:#x}", addr);
+        log::debug!("Clint::write: addr = {:#x}, data = {:#}", addr, data);
 
         if self.msip_base <= addr && addr < self.msip_base + ((self.hart_num as u64) << 2) {
             let hartid = ((addr - self.msip_base) >> 2) as usize;

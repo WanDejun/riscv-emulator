@@ -31,6 +31,9 @@ pub struct RVCPU {
     pub(super) fpu: SoftFPU,
     pub icache_cnt: usize,
 
+    /// The address of the memory-mapped `mtime` CSR.
+    pub(crate) time_addr: Option<WordType>,
+
     /// The trap value pending to be written to `mtval`/`stval`.
     pub(super) pending_tval: Option<WordType>,
 }
@@ -77,6 +80,7 @@ impl RVCPU {
             icache: SetICache::new(),
             fpu,
             icache_cnt: 0,
+            time_addr: None,
             pending_tval: None,
         }
     }
@@ -95,9 +99,34 @@ impl RVCPU {
                 instr,
                 info
             );
+        } else if let Err(ex) = rst {
+            log::debug!(
+                "Execution resulted in exception {:?} for instr: {:#?}, info: {:?} with xtval = {:#x}",
+                ex,
+                instr,
+                info,
+                self.pending_tval.unwrap_or(0),
+            );
         }
 
         rst
+    }
+
+    pub fn read_csr(&mut self, addr: WordType) -> Result<WordType, Exception> {
+        if addr == 0xc01 {
+            // time CSR
+            if let Some(time_addr) = self.time_addr {
+                if let Ok(time) = self.memory.read_by_paddr::<u64>(time_addr) {
+                    return Ok(time as WordType);
+                }
+            }
+        } else if let Some(data) = self.csr.read(addr) {
+            // Normal CSR read
+            return Ok(data);
+        }
+
+        log::warn!("Failed to read CSR {:#x}", addr);
+        Err(Exception::IllegalInstruction)
     }
 
     /// Write CSR and update context correctly.
@@ -105,7 +134,7 @@ impl RVCPU {
     /// XXX: Use this function instead of `self.csr.write`, unless you are sure about what you are doing.
     ///
     /// You may need [`CsrRegFile::write_directly`] in some cases.
-    pub(crate) fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), Exception> {
+    pub fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), Exception> {
         if let None = self.csr.write(addr, data) {
             log::warn!("Failed to write CSR {:#x} with data {:#x}", addr, data);
             return Err(Exception::IllegalInstruction);
@@ -357,17 +386,6 @@ mod tests {
 
     #[test]
     fn test_csr() {
-        // TODO: This test is disabled because some bits in mstatus are `WPRI`,
-        // and these bits should always be 0.
-        // Choose another CSR or number.
-
-        // 1) CSRRW x11, mstatus(0x300), x5
-        // run_test_exec_decode(
-        //     0x300295f3,
-        //     |builder| builder.reg(5, 0xAAAA).csr(0x300, 0x1234).pc(0x1000),
-        //     |checker| checker.reg(11, 0x1234).csr(0x300, 0xAAAA).pc(0x1004),
-        // );
-
         // 2) CSRRS x12, mtvec(0x305), x6
         run_test_exec_decode(
             0x30532673,
