@@ -1,3 +1,5 @@
+use std::hint::cold_path;
+
 #[cfg(not(test))]
 use crossterm::terminal::disable_raw_mode;
 
@@ -93,20 +95,29 @@ impl RVCPU {
         let rst = get_exec_func(instr)(info, self);
         self.reg_file[0] = 0;
 
-        if rst == Err(Exception::IllegalInstruction) {
-            log::warn!(
-                "Execution resulted in IllegalInstruction for instr: {:#?}, info: {:?}",
-                instr,
-                info
-            );
-        } else if let Err(ex) = rst {
-            log::debug!(
-                "Execution resulted in exception {:?} for instr: {:#?}, info: {:?} with xtval = {:#x}",
-                ex,
-                instr,
-                info,
-                self.pending_tval.unwrap_or(0),
-            );
+        if let Err(ex) = rst {
+            cold_path();
+            if ex != Exception::UserEnvCall
+                && ex != Exception::SupervisorEnvCall
+                && ex != Exception::MachineEnvCall
+            {
+                if ex == Exception::IllegalInstruction {
+                    log::warn!(
+                        "Execution resulted in IllegalInstruction for instr: {:#?}, info: {:?}",
+                        instr,
+                        info
+                    );
+                } else {
+                    // Avoid logging environment call exceptions because they are common when running Linux over OpenSBI.
+                    log::debug!(
+                        "Execution resulted in exception {:?} for instr: {:#?}, info: {:?} with xtval = {:#x}",
+                        ex,
+                        instr,
+                        info,
+                        self.pending_tval.unwrap_or(0),
+                    );
+                }
+            }
         }
 
         rst
@@ -236,6 +247,7 @@ impl RVCPU {
 
 impl RiscvIRQHandler for RVCPU {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool) {
+        log::trace!("Handling IRQ: {:?}, level: {}", interrupt, level);
         let mip = self.csr.get_by_type_existing::<Mip>();
         let level = level as WordType;
 

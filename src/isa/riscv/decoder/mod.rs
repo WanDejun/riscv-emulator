@@ -104,7 +104,10 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
             let mut imm = ((raw_instr >> 20) & 0xFFF) as WordType;
 
             match instr {
-                RiscvInstr::SRAI | RiscvInstr::SRAIW => {
+                RiscvInstr::SRLI | RiscvInstr::SRAI => {
+                    imm &= 0x3F;
+                }
+                RiscvInstr::SRLIW | RiscvInstr::SRAIW => {
                     imm &= 0x1F;
                 }
                 _ => {}

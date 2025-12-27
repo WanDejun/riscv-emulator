@@ -88,6 +88,10 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
+        if !crate::utils::check_align::<T>(addr) {
+            return Err(MemError::LoadMisaligned);
+        }
+
         let view = MemAccessView::new(csr);
         // TODO: Extract these masks and flags into a function to reduce code duplication.
         let (masks, flags) = match view {
@@ -113,6 +117,10 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
+        if !crate::utils::check_align::<T>(addr) {
+            return Err(MemError::StoreMisaligned);
+        }
+
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
             MemAccessView::MachineOnly => return self.mmio.write_by_type(addr.into(), data),
@@ -136,6 +144,10 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
+        if !crate::utils::check_align::<T>(addr) {
+            return Err(MemError::LoadMisaligned);
+        }
+
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
             MemAccessView::MachineOnly => return self.mmio.load_reserved(addr.into()),
@@ -160,6 +172,10 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
+        if !crate::utils::check_align::<T>(addr) {
+            return Err(MemError::StoreMisaligned);
+        }
+
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
             MemAccessView::MachineOnly => return self.mmio.store_conditional(addr.into(), data),
