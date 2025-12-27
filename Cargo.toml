@@ -38,6 +38,19 @@ serde_json = "1.0.142"
 [lib]
 doctest = false
 
+[profile.fast-debug]
+inherits = "dev"
+
+opt-level = 2
+debug = true
+debug-assertions = true
+overflow-checks = false
+
+lto = "off"
+codegen-units = 16
+incremental = true
+
+
 [profile.release]
 debug = true
 

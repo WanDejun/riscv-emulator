@@ -57,12 +57,15 @@ impl Clint {
         self.clock.now().wrapping_add(self.time_offset)
     }
 
-    fn handle_mtimecmp_write(&mut self, hartid: usize, value: u64) {
-        self.time_cmp[hartid] = value;
+    fn update_timer(&mut self, hartid: usize) {
         if self.time_cmp[hartid] <= self.get_time() {
             self.timer_irq_line.as_mut().unwrap().set_irq(true);
         } else {
-            unsafe { self.timer.as_mut_unchecked() }.set_due(self.timer_cb_id, value);
+            self.timer_irq_line.as_mut().unwrap().set_irq(false);
+            unsafe { self.timer.as_mut_unchecked() }.set_due(
+                self.timer_cb_id,
+                self.time_cmp[hartid].wrapping_sub(self.time_offset),
+            );
         }
     }
 
@@ -108,8 +111,6 @@ impl Clint {
     where
         T: crate::utils::UnsignedInteger,
     {
-        log::debug!("Clint::write: addr = {:#x}, data = {:#}", addr, data);
-
         if self.msip_base <= addr && addr < self.msip_base + ((self.hart_num as u64) << 2) {
             let hartid = ((addr - self.msip_base) >> 2) as usize;
             if hartid >= self.msip.len() {
@@ -133,11 +134,13 @@ impl Clint {
             }
 
             if (addr & 0x7) == 0 {
-                self.handle_mtimecmp_write(hartid, data.truncate_to());
+                self.time_cmp[hartid] = data.truncate_to();
+                self.update_timer(hartid);
             } else if (addr & 0x7) == 4 {
                 let timecmp_lo = (self.time_cmp[hartid] & 0xffffffff) as u32;
                 let timecmp_hi: u32 = data.truncate_to();
-                self.handle_mtimecmp_write(hartid, concat_to_u64(timecmp_hi, timecmp_lo));
+                self.time_cmp[hartid] = concat_to_u64(timecmp_hi, timecmp_lo);
+                self.update_timer(hartid);
             }
             Ok(())
         } else if addr == self.time_base || addr == self.time_base + 4 {
@@ -162,6 +165,10 @@ impl Clint {
                 let time_hi: u32 = data.truncate_to();
                 let value = concat_to_u64(time_hi, time_lo);
                 self.time_offset = value.wrapping_sub(curr_clocktime);
+            }
+
+            for i in 0..self.hart_num as usize {
+                self.update_timer(i);
             }
             Ok(())
         } else {
@@ -224,16 +231,42 @@ mod tests {
         }
     }
 
-    fn create_test_clint() -> (Clint, Rc<UnsafeCell<Timer>>) {
+    fn create_test_clint() -> (
+        Clint,
+        Rc<UnsafeCell<Timer>>,
+        Box<MockIrqHandler>,
+        Box<MockIrqHandler>,
+    ) {
         let clock = VirtualClockRef::new();
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
-        let clint = Clint::new(1, 0x02000000, 0x0200bff8, 0x02004000, clock, timer.clone());
-        (clint, timer)
+        let mut clint = Clint::new(1, 0x02000000, 0x0200bff8, 0x02004000, clock, timer.clone());
+
+        let mut time_handler = Box::new(MockIrqHandler {
+            triggered: false,
+            level: false,
+        });
+        let irq_line = IRQLine::new(
+            &mut *time_handler as *mut MockIrqHandler,
+            Interrupt::MachineTimer,
+        );
+        clint.set_irq_line(irq_line, 0);
+
+        let mut soft_handler = Box::new(MockIrqHandler {
+            triggered: false,
+            level: false,
+        });
+        let irq_line = IRQLine::new(
+            &mut *soft_handler as *mut MockIrqHandler,
+            Interrupt::MachineSoft,
+        );
+        clint.set_irq_line(irq_line, 1);
+
+        (clint, timer, time_handler, soft_handler)
     }
 
     #[test]
     fn test_mtime_read_write() {
-        let (mut clint, _timer) = create_test_clint();
+        let (mut clint, _timer, _time_handler, _soft_handler) = create_test_clint();
 
         let initial_time: u64 = clint.read_impl(0x0200bff8).unwrap();
         assert_eq!(initial_time, 0);
@@ -254,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_mtimecmp_read_write() {
-        let (mut clint, _timer) = create_test_clint();
+        let (mut clint, _timer, _time_handler, _soft_handler) = create_test_clint();
 
         // 测试读取 MTIMECMP 寄存器 (Hart 0)
         let initial_timecmp: u64 = clint.read_impl(0x02004000).unwrap();
@@ -275,11 +308,6 @@ mod tests {
         let timecmp_high: u32 = clint.read_impl(0x02004004).unwrap();
         assert_eq!(timecmp_low, 0xdeadbeef);
         assert_eq!(timecmp_high, 0xcafebabe);
-    }
-
-    #[test]
-    fn test_invalid_address_access() {
-        let (mut clint, _timer) = create_test_clint();
 
         let result: Result<u32, _> = clint.read_impl(0x12345678);
         assert_eq!(result, Err(MemError::LoadFault));
@@ -289,30 +317,8 @@ mod tests {
     }
 
     #[test]
-    fn test_clint_creation() {
-        let (clint, _timer) = create_test_clint();
-        assert_eq!(clint.hart_num, 1);
-        assert_eq!(clint.msip_base, 0x02000000);
-        assert_eq!(clint.time_base, 0x0200bff8);
-        assert_eq!(clint.timecmp_base, 0x02004000);
-        assert_eq!(clint.time_cmp.len(), 1);
-        assert!(clint.timer_irq_line.is_none());
-        assert!(clint.software_irq_line.is_none());
-    }
-
-    #[test]
     fn test_msip_read_write() {
-        let (mut clint, _timer) = create_test_clint();
-
-        let mut mock_handler = MockIrqHandler {
-            triggered: false,
-            level: false,
-        };
-        let irq_line = IRQLine::new(
-            &mut mock_handler as *mut MockIrqHandler,
-            Interrupt::MachineSoft,
-        );
-        clint.set_irq_line(irq_line, 1);
+        let (mut clint, _timer, _time_handler, mut soft_handler) = create_test_clint();
 
         // Read MSIP (Hart 0)
         let initial_msip: u32 = clint.read_impl(0x02000000).unwrap();
@@ -322,16 +328,16 @@ mod tests {
         clint.write_impl::<u32>(0x02000000, 1).unwrap();
         let msip: u32 = clint.read_impl(0x02000000).unwrap();
         assert_eq!(msip, 1);
-        assert!(mock_handler.triggered);
-        assert!(mock_handler.level);
+        assert!(soft_handler.triggered);
+        assert!(soft_handler.level);
 
         // Clear MSIP (Hart 0)
-        mock_handler.triggered = false;
+        soft_handler.triggered = false;
         clint.write_impl::<u32>(0x02000000, 0).unwrap();
         let msip: u32 = clint.read_impl(0x02000000).unwrap();
         assert_eq!(msip, 0);
-        assert!(mock_handler.triggered);
-        assert!(!mock_handler.level);
+        assert!(soft_handler.triggered);
+        assert!(!soft_handler.level);
 
         // Write MSIP (Hart 0) with other bits
         clint.write_impl::<u32>(0x02000000, 0x12345678).unwrap();

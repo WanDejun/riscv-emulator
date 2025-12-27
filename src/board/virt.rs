@@ -288,7 +288,7 @@ impl Board for VirtBoard {
             self.plic.borrow_mut().try_get_interrupt(1);
         }
         self.cpu.step()?;
-        self.clock.advance(10);
+        self.clock.advance(1);
 
         if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
             cold_path();
