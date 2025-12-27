@@ -154,6 +154,7 @@ impl RVBoardBuilder {
         for virtio_device_cfg in self.virtio_devices.iter() {
             let virtio_device = match virtio_device_cfg.dev_type {
                 VirtIODeviceID::Block => {
+                    // TODO: Use raw pointer instead of Ram::write will break atomicity of `RVCPU`.
                     let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
                     VirtIOBlkDeviceBuilder::new(
                         ram_raw_base,

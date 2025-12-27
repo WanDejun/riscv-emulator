@@ -94,5 +94,5 @@ impl ELFLoader {
 }
 
 pub fn load_bin(ram: &mut Ram, raw_data: &[u8]) {
-    ram.insert_section(raw_data, BASE_ADDR);
+    ram.insert_section(raw_data, 0);
 }

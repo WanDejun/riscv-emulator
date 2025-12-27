@@ -40,7 +40,7 @@ impl RVCPU {
         let mut csr = CsrRegFile::new();
 
         // TODO: Record extensions in Decoder.
-        let ext = "FIMSU"
+        let ext = "ADFIMSU"
             .chars()
             .into_iter()
             .map(|c| c as WordType - 'A' as WordType)
@@ -88,6 +88,14 @@ impl RVCPU {
     ) -> Result<(), Exception> {
         let rst = get_exec_func(instr)(info, self);
         self.reg_file[0] = 0;
+
+        if rst == Err(Exception::IllegalInstruction) {
+            log::warn!(
+                "Execution resulted in IllegalInstruction for instr: {:#?}, info: {:?}",
+                instr,
+                info
+            );
+        }
 
         rst
     }
@@ -172,7 +180,9 @@ impl RVCPU {
         // EX && MEM && WB
         let excute_result = self.execute(instr, info);
         match excute_result {
-            Err(Exception::Breakpoint) => return excute_result,
+            // XXX: OpenSBI have semihosting test, and we don't implement breakpoint exception handling yet,
+            // so we can't throw and panic here.
+            // Err(Exception::Breakpoint) => return excute_result,
             Err(nr) => {
                 TrapController::try_send_trap_signal(self, Trap::Exception(nr), 0);
                 return Ok(());

@@ -509,4 +509,21 @@ mod tests {
             },
         );
     }
+
+    #[test]
+    fn test_decoder_rva() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            0xef537af, // amoswap.d a5, a5, (a0)
+            RiscvInstr::AMOSWAP_D,
+            RVInstrInfo::A {
+                rd: 15,
+                rs1: 10,
+                rs2: 15,
+                aq: true,
+                rl: true,
+            },
+        );
+    }
 }
