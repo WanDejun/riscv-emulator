@@ -3,8 +3,8 @@
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
-mod dbg_repl;
 mod logging;
+mod rvdb;
 mod welcome;
 
 use std::time::Instant;
@@ -16,7 +16,7 @@ use riscv_emulator::{
     device::fast_uart::virtual_io::SerialDestination,
 };
 
-use crate::{dbg_repl::DebugREPL, logging::LogLevel, welcome::display_welcome_message};
+use crate::{logging::LogLevel, rvdb::DebugREPL, welcome::display_welcome_message};
 
 lazy_static! {
     static ref cli_args: Args = Args::parse();

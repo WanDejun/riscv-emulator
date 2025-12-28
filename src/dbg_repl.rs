@@ -895,20 +895,3 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    #[cfg(feature = "riscv64")]
-    fn test_parse_reg_riscv64() {
-        assert_eq!(parse_common_reg("x0"), Ok(0));
-        assert_eq!(parse_common_reg("a5"), Ok(15));
-        assert_eq!(parse_common_reg("x31"), Ok(31));
-        assert!(matches!(parse_common_reg("x32"), Err(_)));
-
-        assert!(REG_NAME[parse_common_reg("s0").unwrap() as usize] == "s0/fp");
-        assert!(REG_NAME[parse_common_reg("fp").unwrap() as usize] == "s0/fp");
-    }
-}

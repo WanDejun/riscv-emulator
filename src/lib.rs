@@ -9,7 +9,6 @@
 
 mod cpu;
 mod fpu;
-mod ram;
 mod utils;
 mod vclock;
 
@@ -20,6 +19,7 @@ pub mod device;
 pub mod device_poller;
 pub mod isa;
 pub mod load;
+pub mod ram;
 
 pub use config::ram_config;
 use lazy_static::lazy_static;

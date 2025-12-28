@@ -15,7 +15,7 @@ use crate::{
     utils::UnsignedInteger,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DebugEvent {
     StepCompleted,
     BreakpointHit,
@@ -210,9 +210,10 @@ impl<'a, B: Board> Debugger<'a, B> {
             .ok_or(DebugError::SymbolNotFound(func_name.to_string()))
     }
 
-    pub fn set_breakpoint(&mut self, addr: Address) -> Result<(), DebugError> {
+    /// Returns true if a new breakpoint is added, otherwise the breakpoint already exists.
+    pub fn set_breakpoint(&mut self, addr: Address) -> Result<bool, DebugError> {
         if let Some(_) = self.breakpoints.iter().find(|bp| bp.addr == addr) {
-            return Ok(());
+            return Ok(false);
         }
         let breakpoint = Breakpoint {
             id: self.breakpoints.len(),
@@ -220,12 +221,14 @@ impl<'a, B: Board> Debugger<'a, B> {
         };
         self.breakpoints.push(breakpoint);
 
-        Ok(())
+        Ok(true)
     }
 
-    pub fn clear_breakpoint(&mut self, addr: Address) -> Result<(), DebugError> {
+    /// Returns true if any breakpoint is removed.
+    pub fn clear_breakpoint(&mut self, addr: Address) -> Result<bool, DebugError> {
+        let original_len = self.breakpoints.len();
         self.breakpoints.retain(|bp| bp.addr != addr);
-        Ok(())
+        Ok(self.breakpoints.len() != original_len)
     }
 
     pub fn on_breakpoint(&self) -> bool {
@@ -354,66 +357,105 @@ impl<'a, B: Board> Debugger<'a, B> {
 
 #[cfg(test)]
 mod test {
-    // TODO: Fix these tests
+    use crate::{isa::riscv::cpu_tester::TestCPUBuilder, ram_config::BASE_ADDR};
 
-    // #[test]
-    // fn test_breakpoint_riscv() {
-    //     // Test that a breakpoint can be hit
-    //     let mut cpu = TestCPUBuilder::new()
-    //         .program(&[
-    //             0x02520333, // mul x6, x4, x5
-    //             0x02520333, // mul x6, x4, x5
-    //             0x02520333, // mul x6, x4, x5
-    //             0x02520333, // mul x6, x4, x5
-    //             0x02520333, // mul x6, x4, x5
-    //         ])
-    //         .build();
+    use super::*;
 
-    //     let mut debugger = Debugger::new(&mut cpu);
-    //     debugger
-    //         .set_breakpoint(Address::Phys(BASE_ADDR + 4))
-    //         .unwrap();
-    //     debugger.continue_run().unwrap();
+    struct TestEmptyBoard {
+        cpu: RVCPU,
+    }
 
-    //     assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
-    //     assert_eq!(
-    //         debugger
-    //             .read_memory::<u32>(Address::Phys(BASE_ADDR + 4))
-    //             .unwrap(),
-    //         0x02520333
-    //     );
+    impl TestEmptyBoard {
+        fn new(cpu: RVCPU) -> Self {
+            Self { cpu }
+        }
+    }
 
-    //     debugger.step().unwrap();
-    //     assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+    impl Board for TestEmptyBoard {
+        fn step(&mut self) -> Result<(), Exception> {
+            self.cpu.step()
+        }
 
-    //     debugger
-    //         .set_breakpoint(Address::Phys(BASE_ADDR + 12))
-    //         .unwrap();
+        fn status(&self) -> crate::board::BoardStatus {
+            crate::board::BoardStatus::Running
+        }
 
-    //     debugger.continue_until_step(2).unwrap();
-    //     assert_eq!(debugger.read_pc(), BASE_ADDR + 12);
-    //     assert_eq!(
-    //         debugger
-    //             .read_memory::<u32>(Address::Phys(BASE_ADDR + 12))
-    //             .unwrap(),
-    //         0x02520333
-    //     );
-    // }
+        fn cpu(&self) -> &RVCPU {
+            &self.cpu
+        }
 
-    // #[test]
-    // fn test_breakpoint_riscv_on_current() {
-    //     let mut cpu = TestCPUBuilder::new()
-    //         .program(&[
-    //             0x02520333, // mul x6, x4, x5
-    //             0x02520333, // mul x6, x4, x5
-    //         ])
-    //         .build();
+        fn cpu_mut(&mut self) -> &mut RVCPU {
+            &mut self.cpu
+        }
 
-    //     let mut debugger = Debugger::<RiscvTypes>::new(&mut cpu, None);
-    //     debugger.set_breakpoint(Address::Phys(BASE_ADDR)).unwrap();
+        fn loader(&self) -> Option<&crate::load::ELFLoader> {
+            None
+        }
+    }
 
-    //     debugger.step().unwrap();
+    fn create_debugger(cpu: RVCPU) -> Debugger<'static, TestEmptyBoard> {
+        Debugger::new(Box::leak(Box::new(TestEmptyBoard::new(cpu))))
+    }
 
-    //     assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
-    // }
+    #[test]
+    fn test_breakpoint_riscv() {
+        // Test that a breakpoint can be hit
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+
+        debugger
+            .set_breakpoint(Address::Phys(BASE_ADDR + 4))
+            .unwrap();
+        debugger.continue_run().unwrap();
+
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+        assert_eq!(
+            debugger
+                .read_memory::<u32>(Address::Phys(BASE_ADDR + 4))
+                .unwrap(),
+            0x02520333
+        );
+
+        debugger.step().unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+
+        debugger
+            .set_breakpoint(Address::Phys(BASE_ADDR + 12))
+            .unwrap();
+
+        debugger.continue_until_step(2).unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 12);
+        assert_eq!(
+            debugger
+                .read_memory::<u32>(Address::Phys(BASE_ADDR + 12))
+                .unwrap(),
+            0x02520333
+        );
+    }
+
+    #[test]
+    fn test_breakpoint_riscv_on_current() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x02520333, // mul x6, x4, x5
+                0x02520333, // mul x6, x4, x5
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_breakpoint(Address::Phys(BASE_ADDR)).unwrap();
+
+        debugger.step().unwrap();
+
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+    }
 }

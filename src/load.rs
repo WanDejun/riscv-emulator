@@ -14,6 +14,10 @@ impl SymTab {
     pub fn func_name_by_addr(&self, addr: u64) -> Option<&String> {
         self.func_table.get_by_right(&addr)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &u64)> {
+        self.func_table.iter()
+    }
 }
 
 pub struct ELFLoader {
