@@ -29,7 +29,7 @@ pub struct RVCPU {
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
-    pub(super) icache: SetICache<RiscvTypes, 64, 8>,
+    pub(super) icache: SetICache<RiscvTypes, 256, 8>,
     pub(super) fpu: SoftFPU,
     pub icache_cnt: usize,
 
@@ -97,24 +97,34 @@ impl RVCPU {
 
         if let Err(ex) = rst {
             cold_path();
-            if ex != Exception::UserEnvCall
-                && ex != Exception::SupervisorEnvCall
-                && ex != Exception::MachineEnvCall
-            {
+
+            // Avoid logging common/normal exceptions.
+            const IGNORE_EXCEPTIONS: &[Exception] = &[
+                Exception::LoadMisaligned, // We need OpenSBI to support misaligned access
+                Exception::StoreMisaligned,
+                Exception::UserEnvCall,
+                Exception::SupervisorEnvCall,
+                Exception::MachineEnvCall,
+            ];
+
+            if IGNORE_EXCEPTIONS.contains(&ex) == false {
+                cold_path();
+
                 if ex == Exception::IllegalInstruction {
                     log::warn!(
-                        "Execution resulted in IllegalInstruction for instr: {:#?}, info: {:?}",
+                        "IllegalInstruction for instr: {:#?} at pc = {:#x}, info: {:?} ",
                         instr,
-                        info
+                        self.pc,
+                        info,
                     );
                 } else {
-                    // Avoid logging environment call exceptions because they are common when running Linux over OpenSBI.
-                    log::debug!(
-                        "Execution resulted in exception {:?} for instr: {:#?}, info: {:?} with xtval = {:#x}",
+                    log::info!(
+                        "Exception {:?} for instr: {:#?} at pc = {:#x}, xtval = {:#x}, info: {:?}",
                         ex,
                         instr,
-                        info,
+                        self.pc,
                         self.pending_tval.unwrap_or(0),
+                        info
                     );
                 }
             }
@@ -136,7 +146,6 @@ impl RVCPU {
             return Ok(data);
         }
 
-        log::warn!("Failed to read CSR {:#x}", addr);
         Err(Exception::IllegalInstruction)
     }
 
@@ -192,11 +201,6 @@ impl RVCPU {
                 return Ok(());
             }
             let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
-            log::trace!(
-                "I-Cache not hit, raw instruction: {:#x} at {:#x}",
-                instr_bytes,
-                self.pc
-            );
 
             // ID
             let decoder_result = self.decoder.decode(instr_bytes);
@@ -214,8 +218,6 @@ impl RVCPU {
             self.icache.put(self.pc, decode_instr.clone());
             decode_instr
         };
-
-        log::trace!("Decoded instruction: {:#?}, info: {:?}", instr, info);
 
         // EX && MEM && WB
         let excute_result = self.execute(instr, info);

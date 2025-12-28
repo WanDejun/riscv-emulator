@@ -108,7 +108,7 @@ impl DecoderTrait<RiscvTypes> for Decoder {
             }
         }
 
-        log::debug!("funct_decoder has {} instructions.", decode_table.len());
+        log::info!("funct_decoder has {} instructions.", decode_table.len());
 
         Decoder { decode_table }
     }

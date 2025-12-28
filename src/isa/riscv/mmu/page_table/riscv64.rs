@@ -15,6 +15,7 @@ use crate::{
 };
 
 bitflags! {
+    #[derive(Debug)]
     pub struct PTEFlags: u8 {
         const V = 1 << 0; // valid
         const R = 1 << 1; // read
@@ -26,6 +27,12 @@ bitflags! {
         const D = 1 << 7; // dirty
     }
 }
+
+// impl std::fmt::Debug for PTEFlags {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_tuple("PTEFlags").field(&self.0).finish()
+//     }
+// }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -172,6 +179,15 @@ impl PageTable {
 
         let target_pte = self.find_pte(mem, vaddr.floor())?;
         if (target_pte.0.flags().bits() & masks.bits()) != target_flags.bits() {
+            // When running Linux, many such logs are normal, like copy-on-write:
+            // it marks pages read-only initially, and when a write access occurs,
+            // the kernel will create a private copy.
+            log::info!(
+                "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), target flags: ({:?})",
+                vaddr.0,
+                masks.0,
+                target_pte.0.flags().0
+            );
             return Err(PageTableError::PrivilegeFault);
         }
         if DIRTY {

@@ -235,10 +235,6 @@ impl<'a, B: Board> Debugger<'a, B> {
                 .find(|bp| self.unify_to_phys_addr(bp.addr) == Some(pc_paddr))
                 .is_some()
         } else {
-            log::warn!(
-                "Cannot translate current PC 0x{:08x} to physical address.",
-                self.read_pc()
-            );
             false
         }
     }

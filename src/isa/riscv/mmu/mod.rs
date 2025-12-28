@@ -75,6 +75,7 @@ pub(crate) struct VirtAddrManager {
     ram: Rc<UnsafeCell<Ram>>,
 }
 
+// TODO: Many methods in this struct are redundant or useless.
 impl VirtAddrManager {
     pub(crate) fn from_ram_and_mmio(ram_ref: Rc<UnsafeCell<Ram>>, mmio: MemoryMapIO) -> Self {
         Self {

@@ -40,7 +40,7 @@ impl DecoderTrait<RiscvTypes> for MaskDecoder {
             }
         }
 
-        log::debug!("Mask decoder loads {} instructions", masks.len());
+        log::info!("Mask decoder loads {} instructions", masks.len());
 
         Self { masks }
     }

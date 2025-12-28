@@ -1,7 +1,9 @@
+use std::time;
+
 use clap::ValueEnum;
 use flexi_logger::{
     Cleanup, Criterion, Duplicate, FileSpec, LogSpecBuilder, Logger, LoggerHandle, Naming,
-    WriteMode, default_format,
+    WriteMode,
 };
 use log::LevelFilter;
 
@@ -36,6 +38,37 @@ impl LogLevel {
     }
 }
 
+fn duration_to_str_min(dur: time::Duration) -> String {
+    format!(
+        "{:02}:{:02}.{:03}",
+        (dur.as_secs() % 3600) / 60,
+        dur.as_secs() % 60,
+        dur.subsec_millis()
+    )
+}
+
+fn format_msg_elapsed_time(
+    w: &mut dyn std::io::Write,
+    _now: &mut flexi_logger::DeferredNow,
+    record: &log::Record,
+) -> Result<(), std::io::Error> {
+    static START_DATE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start_time = START_DATE.get_or_init(|| std::time::Instant::now());
+    let elapsed = start_time.elapsed();
+
+    write!(
+        w,
+        "[{}][{:5}] ",
+        duration_to_str_min(elapsed),
+        record.level(),
+        // record.module_path().unwrap_or("<unnamed>"),
+        // record.file().unwrap_or("<unnamed>"),
+        // record.line().unwrap_or(0),
+    )?;
+
+    write!(w, "{}", &record.args())
+}
+
 /// Initialize the logger.
 /// Must keep the [`LoggerHandle`] (returned value) alive up to the very end of your program
 /// to ensure that all buffered log lines are flushed out.
@@ -59,7 +92,7 @@ pub fn init(level: LogLevel) -> LoggerHandle {
         )
         .write_mode(WriteMode::BufferAndFlush)
         .duplicate_to_stderr(Duplicate::Error)
-        .format_for_files(default_format)
+        .format_for_files(format_msg_elapsed_time)
         .start()
         .unwrap()
 }

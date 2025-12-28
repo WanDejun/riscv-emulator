@@ -1,12 +1,11 @@
 use std::{hint::unlikely, marker::PhantomData};
 
-use log::warn;
-
 pub(super) use super::exec_float_function::*;
 use super::normal_exec;
 
 use crate::{
     config::arch_config::{SignedWordType, WordType},
+    device::MemError,
     isa::riscv::{
         csr_reg::{NamedCsrReg, csr_macro::Minstret},
         executor::RVCPU,
@@ -104,7 +103,12 @@ where
                 }
                 Err(err) => {
                     cpu.pending_tval = Some(addr);
-                    warn!("Load memory error at address {:#x}: {:?}", addr, err);
+
+                    // `LoadPageFault` and `LoadMisaligned` are common, so no need to log.
+                    if unlikely(err == MemError::LoadFault) {
+                        log::warn!("Load fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
+                    }
+
                     return Err(Exception::from_memory_err(err));
                 }
             }
@@ -127,6 +131,12 @@ where
             let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
             if let Err(err) = ret {
                 cpu.pending_tval = Some(addr);
+
+                // `SotrePageFault` and `SotreMisaligned` are common, so no need to log.
+                if unlikely(err == MemError::StoreFault) {
+                    log::warn!("Store fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
+                }
+
                 return Err(Exception::from_memory_err(err));
             }
         } else {

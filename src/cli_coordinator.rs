@@ -56,10 +56,7 @@ impl CliCoordinator {
             }
         }
 
-        log::trace!("Uart cli loop paused");
-
         disable_raw_mode().unwrap();
-        log::trace!("Raw mode disabled");
     }
 
     pub fn resume_uart(&self) {
@@ -69,8 +66,6 @@ impl CliCoordinator {
             *s = CliThreadState::Running;
         }
         cvar.notify_all();
-
-        log::trace!("Uart cli loop resumed");
     }
 
     pub fn confirm_pause_and_wait(&self) {
@@ -83,7 +78,6 @@ impl CliCoordinator {
             } else if *s == CliThreadState::Pausing {
                 *s = CliThreadState::Paused;
                 cvar.notify_all();
-                log::trace!("confirmed pause");
             }
 
             while *s == CliThreadState::Paused {
@@ -92,6 +86,5 @@ impl CliCoordinator {
         }
 
         enable_raw_mode().unwrap();
-        log::trace!("Raw mode enabled");
     }
 }
