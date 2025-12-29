@@ -161,6 +161,29 @@ impl Printer {
                 }
             }
 
+            CommandOutput::FTrace(traces) => {
+                for trace in traces {
+                    match trace {
+                        debugger::FuncTrace::Call { name, addr } => {
+                            let name = name.clone().unwrap_or("???".to_string());
+                            println!(
+                                "Call   -> [{}@{}]",
+                                palette.identifier(&name),
+                                format_addr(*addr)
+                            );
+                        }
+                        debugger::FuncTrace::Return { name, addr } => {
+                            let name = name.clone().unwrap_or("???".to_string());
+                            println!(
+                                "Return <- [{}@{}]",
+                                palette.identifier(&name),
+                                format_addr(*addr)
+                            );
+                        }
+                    }
+                }
+            }
+
             CommandOutput::ContinueDone {
                 instr,
                 watch_results,

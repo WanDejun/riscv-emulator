@@ -23,7 +23,39 @@ use crate::{
     ram_config::DEFAULT_PC_VALUE,
 };
 
+#[derive(Clone)]
+pub struct ExcuteInstrInfo {
+    pub instr: Option<DecodeInstr>,
+    pub trap: bool,
+}
+
+impl ExcuteInstrInfo {
+    pub fn new() -> Self {
+        Self {
+            instr: None,
+            trap: false,
+        }
+    }
+}
+
+pub(crate) struct DebugInfo {
+    pub(crate) last_instr: ExcuteInstrInfo,
+}
+
+impl DebugInfo {
+    pub fn new() -> Self {
+        Self {
+            last_instr: ExcuteInstrInfo::new(),
+        }
+    }
+}
+
 pub struct RVCPU {
+    pub(crate) debug: bool,
+    pub(crate) debug_info: DebugInfo,
+
+    pub(crate) icache_cnt: usize,
+
     pub(super) reg_file: RegFile,
     pub(super) memory: VirtAddrManager,
     pub(super) pc: WordType,
@@ -31,7 +63,6 @@ pub struct RVCPU {
     pub(super) csr: CsrRegFile,
     pub(super) icache: SetICache<RiscvTypes, 256, 8>,
     pub(super) fpu: SoftFPU,
-    pub icache_cnt: usize,
 
     /// The address of the memory-mapped `mtime` CSR.
     pub(crate) time_addr: Option<WordType>,
@@ -74,6 +105,9 @@ impl RVCPU {
         let fpu = SoftFPU::from(true);
 
         Self {
+            debug: false,
+            debug_info: DebugInfo::new(),
+            icache_cnt: 0,
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
@@ -81,7 +115,6 @@ impl RVCPU {
             csr: csr,
             icache: SetICache::new(),
             fpu,
-            icache_cnt: 0,
             time_addr: None,
             pending_tval: None,
         }
@@ -170,7 +203,12 @@ impl RVCPU {
     }
 
     pub fn step(&mut self) -> Result<(), Exception> {
+        if self.debug {
+            self.debug_info.last_instr.trap = false;
+        }
+
         let rst = self.step_impl();
+
         let mcycle = self.csr.get_by_type_existing::<Mcycle>();
         mcycle.set_mcycle_directly(mcycle.data().wrapping_add(1));
 
@@ -218,6 +256,13 @@ impl RVCPU {
             self.icache.put(self.pc, decode_instr.clone());
             decode_instr
         };
+
+        if self.debug {
+            self.debug_info.last_instr = ExcuteInstrInfo {
+                instr: Some(DecodeInstr(instr, info.clone())),
+                trap: false,
+            };
+        }
 
         // EX && MEM && WB
         let excute_result = self.execute(instr, info);

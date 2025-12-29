@@ -10,8 +10,8 @@ use crate::{
 };
 
 pub struct BiMap<K, V> {
-    forward: std::collections::BTreeMap<K, V>,
-    backward: std::collections::BTreeMap<V, K>,
+    pub forward: std::collections::BTreeMap<K, V>,
+    pub backward: std::collections::BTreeMap<V, K>,
 }
 
 impl<K: Clone + Ord, V: Clone + Ord> BiMap<K, V> {

@@ -47,6 +47,10 @@ impl TrapController {
     }
 
     fn send_trap_signal_m_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
+        if cpu.debug {
+            cpu.debug_info.last_instr.trap = true;
+        }
+
         cpu.csr
             .get_by_type::<Mstatus>()
             .unwrap()
@@ -91,6 +95,10 @@ impl TrapController {
     //                S-Mode
     // ======================================
     fn send_trap_signal_s_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
+        if cpu.debug {
+            cpu.debug_info.last_instr.trap = true;
+        }
+
         cpu.csr
             .get_by_type_existing::<Sstatus>()
             .set_spp(cpu.csr.privelege_level() as u8 as WordType);

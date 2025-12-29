@@ -7,8 +7,12 @@ use crate::{
     isa::{
         DebugTarget, DecoderTrait, ISATypes,
         riscv::{
-            RawInstrType, RiscvTypes, csr_reg::PrivilegeLevel, decoder::DecodeInstr,
-            executor::RVCPU, trap::Exception,
+            RawInstrType, RiscvTypes,
+            csr_reg::PrivilegeLevel,
+            decoder::DecodeInstr,
+            executor::{ExcuteInstrInfo, RVCPU},
+            instruction::{RVInstrInfo, instr_table::RiscvInstr},
+            trap::Exception,
         },
     },
     load::SymTab,
@@ -148,48 +152,109 @@ pub struct Breakpoint {
     // TODO: add symbol_name: Option<String> for better user experience
 }
 
-const SAVE_PC_CNT: usize = 128;
+#[derive(Debug, Clone, PartialEq)]
+pub enum FuncTrace {
+    Call { name: Option<String>, addr: u64 },
+    Return { name: Option<String>, addr: u64 },
+}
+
+const MAX_HISTORY: usize = 128;
+const MAX_FTRACE: usize = MAX_HISTORY;
 
 pub struct Debugger<'a, B: Board> {
     breakpoints: Vec<Breakpoint>,
     board: &'a mut B,
     history: VecDeque<(WordType, Option<RawInstrType>)>,
+    ftrace: VecDeque<FuncTrace>,
     symtab: Option<SymTab>,
 }
 
 impl<'a, B: Board> Debugger<'a, B> {
     pub fn new(board: &'a mut B) -> Self {
+        board.cpu_mut().debug = true;
         let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
 
         Self {
             breakpoints: Vec::new(),
             board,
-            history: VecDeque::with_capacity(SAVE_PC_CNT),
+            history: VecDeque::with_capacity(MAX_HISTORY),
+            ftrace: VecDeque::with_capacity(MAX_FTRACE),
             symtab: symtab,
         }
     }
 
+    /// TODO: Use `last_instr_info` for performance.
+    /// FIXME: History may be incorrect if we have interrupts, use `last_instr_info`.
     fn push_history(&mut self) {
-        if self.history.len() == SAVE_PC_CNT {
+        if self.history.len() == MAX_HISTORY {
             self.history.pop_front();
         }
         let instr = self.read_instr(self.read_pc());
         self.history.push_back((self.read_pc(), instr));
     }
 
-    pub fn pc_history(&self) -> impl Iterator<Item = (WordType, Option<RawInstrType>)> {
+    pub fn pc_history(&self) -> impl DoubleEndedIterator<Item = (WordType, Option<RawInstrType>)> {
         self.history.iter().copied()
+    }
+
+    pub fn curr_ftrace(&self) -> Option<FuncTrace> {
+        let Some(DecodeInstr(instr_kind, info)) = self.last_instr_info().instr else {
+            return None;
+        };
+
+        let pc = self.read_pc();
+        let symbol = self.symbol_in_addr_range(pc).ok().cloned();
+
+        if instr_kind == RiscvInstr::JALR
+            && let RVInstrInfo::I { rs1, rd, imm } = info
+        {
+            if rd == 0 && rs1 == 1 && imm == 0 {
+                // `jalr zero, 0(ra)` -> `ret`
+                return Some(FuncTrace::Return {
+                    name: symbol,
+                    addr: pc,
+                });
+            } else if rd == 1 && rs1 == 1 {
+                // jalr ra, imm(ra) -> `call`
+                return Some(FuncTrace::Call {
+                    name: symbol,
+                    addr: pc,
+                });
+            } else if rd == 0 && rs1 == 6 {
+                // jalr zero, imm(x6) -> `tail`
+                return Some(FuncTrace::Call {
+                    name: symbol,
+                    addr: pc,
+                });
+            }
+        } else if instr_kind == RiscvInstr::JAL
+            && let RVInstrInfo::J { imm: _, rd } = info
+        {
+            if rd == 1 {
+                // jal ra, imm -> `call`
+                return Some(FuncTrace::Call {
+                    name: symbol,
+                    addr: pc,
+                });
+            }
+        }
+
+        None
+    }
+
+    pub fn ftrace(&self) -> impl Iterator<Item = FuncTrace> {
+        self.ftrace.iter().cloned()
     }
 
     pub fn breakpoints(&self) -> &Vec<Breakpoint> {
         &self.breakpoints
     }
 
-    pub fn func_symbol_table(&self) -> Option<&SymTab> {
+    pub fn symbol_table(&self) -> Option<&SymTab> {
         self.symtab.as_ref()
     }
 
-    pub fn lookup_func_addr(&self, addr: u64) -> Result<&String, DebugError> {
+    pub fn symbol_by_addr(&self, addr: u64) -> Result<&String, DebugError> {
         let Some(symtab) = &self.symtab else {
             return Err(DebugError::NoSymbolTable);
         };
@@ -201,7 +266,19 @@ impl<'a, B: Board> Debugger<'a, B> {
             )))
     }
 
-    pub fn lookup_func_name(&self, func_name: &str) -> Result<u64, DebugError> {
+    pub fn symbol_in_addr_range(&self, addr: u64) -> Result<&String, DebugError> {
+        let Some(symtab) = &self.symtab else {
+            return Err(DebugError::NoSymbolTable);
+        };
+        symtab
+            .func_name_in_addr_range(addr)
+            .ok_or(DebugError::SymbolNotFound(format!(
+                "Function at address 0x{:08x} not found",
+                addr
+            )))
+    }
+
+    pub fn addr_by_symbol(&self, func_name: &str) -> Result<u64, DebugError> {
         let Some(symtab) = &self.symtab else {
             return Err(DebugError::NoSymbolTable);
         };
@@ -246,11 +323,25 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.continue_until_step(1)
     }
 
-    pub fn continue_until_step(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError> {
-        if max_steps == 0 {
-            return Ok(DebugEvent::StepCompleted);
+    fn cpu_step_internal(&mut self) -> Result<(), DebugError> {
+        self.push_history();
+
+        let rst = self
+            .board
+            .step()
+            .map_err(|e| DebugError::TargetException(e));
+
+        if let Some(ftrace) = self.curr_ftrace() {
+            self.ftrace.push_back(ftrace);
+            if self.ftrace.len() > MAX_FTRACE {
+                self.ftrace.pop_front();
+            }
         }
 
+        rst
+    }
+
+    pub fn continue_until_step(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError> {
         let mut remain = max_steps;
 
         loop {
@@ -258,10 +349,8 @@ impl<'a, B: Board> Debugger<'a, B> {
                 return Ok(DebugEvent::StepCompleted);
             }
 
-            self.push_history();
-            if let Err(e) = self.board.step() {
-                return Err(DebugError::TargetException(e));
-            }
+            self.cpu_step_internal()?;
+
             remain -= 1;
 
             if self.on_breakpoint() {
@@ -274,9 +363,11 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.continue_until_step(u64::MAX)
     }
 
-    // helper functions that don't need support from `DebugTarget`
+    pub fn last_instr_info(&self) -> ExcuteInstrInfo {
+        self.board.cpu().debug_info.last_instr.clone()
+    }
 
-    pub fn current_instr(&mut self) -> Option<RawInstrType> {
+    pub fn next_instr(&mut self) -> Option<RawInstrType> {
         let pc = self.board.cpu().read_pc();
         self.board.cpu_mut().read_instr(pc).ok()
     }

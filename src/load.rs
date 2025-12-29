@@ -3,20 +3,38 @@ use xmas_elf::symbol_table::Entry;
 use crate::{config::arch_config::WordType, ram::Ram, ram_config::BASE_ADDR, utils::BiMap};
 
 pub struct SymTab {
-    pub func_table: BiMap<String, u64>,
+    pub symbols: BiMap<String, u64>,
 }
 
 impl SymTab {
+    pub fn from(symbols: &[(String, u64)]) -> Self {
+        let mut symbol_table = BiMap::<String, u64>::new();
+        for (name, addr) in symbols.iter().cloned() {
+            symbol_table.insert(name, addr);
+        }
+        SymTab {
+            symbols: symbol_table,
+        }
+    }
+
     pub fn func_addr_by_name(&self, name: &str) -> Option<u64> {
-        self.func_table.get_by_left(&name.to_string()).cloned()
+        self.symbols.get_by_left(&name.to_string()).cloned()
     }
 
     pub fn func_name_by_addr(&self, addr: u64) -> Option<&String> {
-        self.func_table.get_by_right(&addr)
+        self.symbols.get_by_right(&addr)
+    }
+
+    pub fn func_name_in_addr_range(&self, addr: u64) -> Option<&String> {
+        self.symbols
+            .backward
+            .range(..=addr)
+            .next_back()
+            .map(|(_, name)| name)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &u64)> {
-        self.func_table.iter()
+        self.symbols.iter()
     }
 }
 
@@ -73,7 +91,9 @@ impl ELFLoader {
             // }
         }
 
-        SymTab { func_table }
+        SymTab {
+            symbols: func_table,
+        }
     }
 
     pub fn get_symbol_table(&self) -> Option<SymTab> {

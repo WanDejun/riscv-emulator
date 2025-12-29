@@ -37,6 +37,13 @@ pub enum Cli {
         count: usize,
     },
 
+    /// Show function call trace.
+    #[command(aliases = ["ft", "ftrace"])]
+    FTrace {
+        #[arg(default_value_t = 20)]
+        count: usize,
+    },
+
     /// Step a single instruction.
     #[command(aliases = ["s", "step"])]
     Si,
@@ -164,6 +171,7 @@ pub enum CommandOutput {
     CodeList(Vec<DbgInstrLine>),
     Breakpoints(Vec<debugger::Breakpoint>),
     Symbols(Vec<(String, WordType)>),
+    FTrace(Vec<debugger::FuncTrace>),
 
     ContinueDone {
         instr: DbgInstrLine,

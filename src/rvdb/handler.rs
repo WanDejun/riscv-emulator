@@ -32,6 +32,7 @@ impl<'a, B: Board> Handler<'a, B> {
             Cli::Undisplay(cmd) => self.handle_undisplay(cmd),
             Cli::List => self.handle_list(),
             Cli::History { count } => self.handle_history(count),
+            Cli::FTrace { count } => self.handle_ftrace(count),
             Cli::Si => self.handle_step(),
             Cli::Continue { steps } => self.handle_continue(steps),
             Cli::Breakpoint {
@@ -42,6 +43,12 @@ impl<'a, B: Board> Handler<'a, B> {
             Cli::Info(cmd) => self.handle_info(cmd),
             Cli::Quit => Ok(CommandOutput::Exit),
         }
+    }
+
+    fn handle_ftrace(&mut self, count: usize) -> Result<CommandOutput, String> {
+        Ok(CommandOutput::FTrace(
+            self.dbg.ftrace().take(count).collect(),
+        ))
     }
 
     fn handle_print(&mut self, cmd: PrintCmd) -> Result<CommandOutput, String> {
@@ -156,7 +163,7 @@ impl<'a, B: Board> Handler<'a, B> {
                 addr,
                 raw,
                 decoded: raw.and_then(|r| self.dbg.decoded_info(r)),
-                symbol: self.dbg.lookup_func_addr(addr).ok().cloned(),
+                symbol: self.dbg.symbol_by_addr(addr).ok().cloned(),
                 is_current_pc: addr == self.dbg.read_pc(),
             })
             .collect();
@@ -236,7 +243,7 @@ impl<'a, B: Board> Handler<'a, B> {
     ) -> Result<CommandOutput, String> {
         let (addr_val, symbol_name) = if let Ok(addr) = parse_u64(&symbol) {
             (addr, None)
-        } else if let Ok(addr) = self.dbg.lookup_func_name(&symbol) {
+        } else if let Ok(addr) = self.dbg.addr_by_symbol(&symbol) {
             (addr, Some(symbol))
         } else {
             return Err(format!("Symbol not found: {}", symbol));
@@ -273,7 +280,7 @@ impl<'a, B: Board> Handler<'a, B> {
         match cmd {
             InfoCmd::Breakpoints => Ok(CommandOutput::Breakpoints(self.dbg.breakpoints().clone())),
             InfoCmd::Symbols => {
-                let Some(symbol_table) = self.dbg.func_symbol_table() else {
+                let Some(symbol_table) = self.dbg.symbol_table() else {
                     return Err("No symbol table available".to_string());
                 };
 
@@ -287,7 +294,7 @@ impl<'a, B: Board> Handler<'a, B> {
     fn instr_from_addr(&mut self, addr: WordType) -> DbgInstrLine {
         let raw = self.dbg.read_instr(addr);
         let decoded = raw.and_then(|r| self.dbg.decoded_info(r));
-        let symbol = self.dbg.lookup_func_addr(addr).ok().cloned();
+        let symbol = self.dbg.symbol_by_addr(addr).ok().cloned();
 
         DbgInstrLine {
             addr,
