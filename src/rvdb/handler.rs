@@ -1,3 +1,5 @@
+use std::fs;
+
 use super::*;
 
 #[cfg(not(test))]
@@ -10,6 +12,7 @@ use riscv_emulator::{
         csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
         debugger::{Address, Debugger},
     },
+    load::ELFLoader,
 };
 
 pub struct Handler<'a, B: Board> {
@@ -42,6 +45,18 @@ impl<'a, B: Board> Handler<'a, B> {
             } => self.handle_breakpoint(delete, symbol, virt),
             Cli::Info(cmd) => self.handle_info(cmd),
             Cli::Quit => Ok(CommandOutput::Exit),
+            Cli::SymbolFile { path } => self.handle_symbol_file(path),
+        }
+    }
+
+    fn handle_symbol_file(&mut self, path: String) -> Result<CommandOutput, String> {
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        let loader = ELFLoader::try_new(bytes).ok_or("Failed to parse ELF file")?;
+        if let Some(symtab) = loader.get_symbol_table() {
+            self.dbg.set_symbol_table(symtab);
+            Ok(CommandOutput::None)
+        } else {
+            return Err("No symbol table found in ELF file".to_string());
         }
     }
 

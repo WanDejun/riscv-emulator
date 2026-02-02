@@ -183,6 +183,10 @@ impl<'a, B: Board> Debugger<'a, B> {
         }
     }
 
+    pub fn set_symbol_table(&mut self, symtab: SymTab) {
+        self.symtab = Some(symtab);
+    }
+
     /// TODO: Use `last_instr_info` for performance.
     /// FIXME: History may be incorrect if we have interrupts, use `last_instr_info`.
     fn push_history(&mut self) {

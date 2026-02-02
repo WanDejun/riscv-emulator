@@ -255,7 +255,7 @@ impl VirtBoard {
 
     pub fn from_elf(bytes: Vec<u8>) -> Self {
         let mut ram = Ram::new();
-        let loader = ELFLoader::new(bytes);
+        let loader = ELFLoader::try_new(bytes).unwrap();
         loader.load_to_ram(&mut ram);
         let mut board = Self::from_ram(ram);
         board.loader = Some(loader);

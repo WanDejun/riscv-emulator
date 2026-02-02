@@ -43,8 +43,11 @@ pub struct ELFLoader {
 }
 
 impl ELFLoader {
-    pub fn new(elf_data: Vec<u8>) -> ELFLoader {
-        ELFLoader { elf_data }
+    pub fn try_new(elf_data: Vec<u8>) -> Option<ELFLoader> {
+        if xmas_elf::ElfFile::new(&elf_data).is_err() {
+            return None;
+        }
+        Some(ELFLoader { elf_data })
     }
 
     fn elf(&'_ self) -> xmas_elf::ElfFile<'_> {
@@ -80,35 +83,35 @@ impl ELFLoader {
         None
     }
 
-    fn parse_symtab(&self, entries: &[xmas_elf::symbol_table::Entry64]) -> SymTab {
+    fn parse_symtab(&self, entries: &[xmas_elf::symbol_table::Entry64]) -> Option<SymTab> {
         let mut func_table = BiMap::<String, u64>::new();
 
         for entry in entries {
             // if entry.get_type().unwrap() == xmas_elf::symbol_table::Type::Func {
-            let name = entry.get_name(&self.elf()).unwrap().to_string();
+            let name = entry.get_name(&self.elf()).ok()?.to_string();
             let addr = entry.value();
             func_table.insert(name, addr);
             // }
         }
 
-        SymTab {
+        Some(SymTab {
             symbols: func_table,
-        }
+        })
     }
 
     pub fn get_symbol_table(&self) -> Option<SymTab> {
         let elf = self.elf();
         for sh in elf.section_iter() {
-            if let Ok(name) = sh.get_name(&elf) {
-                if name == ".symtab" {
-                    // TODO: Handle 32 bit ELF files
-                    if let xmas_elf::sections::SectionData::SymbolTable64(symtab) =
-                        sh.get_data(&elf).unwrap()
-                    {
-                        return Some(self.parse_symtab(&symtab));
-                    } else {
-                        unreachable!();
-                    }
+            if let Ok(name) = sh.get_name(&elf)
+                && name == ".symtab"
+            {
+                // TODO: Handle 32 bit ELF files
+                if let xmas_elf::sections::SectionData::SymbolTable64(symtab) =
+                    sh.get_data(&elf).ok()?
+                {
+                    return Some(self.parse_symtab(&symtab)?);
+                } else {
+                    return None;
                 }
             }
         }

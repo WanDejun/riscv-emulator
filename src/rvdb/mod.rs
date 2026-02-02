@@ -44,6 +44,10 @@ pub enum Cli {
         count: usize,
     },
 
+    /// Load an ELF symbol file.
+    #[command(aliases = ["symbol-file", "file"])]
+    SymbolFile { path: String },
+
     /// Step a single instruction.
     #[command(aliases = ["s", "step"])]
     Si,
