@@ -653,7 +653,7 @@ mod tests {
             cpu.csr
                 .read_uncheck_privilege(csr_index::mstatus)
                 .unwrap()
-                .extract_bits(32, 33),
+                .extract_range(32, 33),
             2
         );
     }

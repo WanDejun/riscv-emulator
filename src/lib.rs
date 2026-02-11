@@ -2,10 +2,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
-#![feature(cold_path)]
 #![feature(likely_unlikely)]
 #![feature(unsafe_cell_access)]
-#![feature(specialization)]
+#![feature(uint_gather_scatter_bits)]
 
 mod cpu;
 mod fpu;

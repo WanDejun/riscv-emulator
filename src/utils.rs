@@ -343,12 +343,12 @@ pub trait UnsignedInteger:
 
     type AtomicType;
 
-    fn mask_bits(self, l: u32, r: u32) -> Self {
+    fn mask_range(self, l: u32, r: u32) -> Self {
         debug_assert!(l <= r && (r as usize) < Self::BITS);
         self & make_mask(l as usize, r as usize).truncate_to()
     }
 
-    fn extract_bits(self, l: u32, r: u32) -> Self {
+    fn extract_range(self, l: u32, r: u32) -> Self {
         debug_assert!(l <= r && (r as usize) < Self::BITS);
         (self >> l) & (BIT_ONES_ARRAY[(r - l + 1) as usize]).truncate_to()
     }

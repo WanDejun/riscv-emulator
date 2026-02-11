@@ -45,7 +45,7 @@ fn validate_with_cond<const L: usize, const R: usize, C: ValidateCond>(
     ctx: &CsrContext,
 ) -> CsrWriteOp {
     let mask = make_mask(L, R);
-    let extracted = value.extract_bits(L as u32, R as u32);
+    let extracted = value.extract_range(L as u32, R as u32);
     if C::check(extracted, ctx) {
         CsrWriteOp { mask }
     } else {

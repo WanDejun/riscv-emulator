@@ -151,8 +151,6 @@ impl Ram {
 
 #[cfg(test)]
 mod tests {
-    use std::ptr::addr_of;
-
     use super::*;
 
     #[test]
