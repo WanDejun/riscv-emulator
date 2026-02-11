@@ -23,6 +23,7 @@ use crate::{
 pub enum DebugEvent {
     StepCompleted,
     BreakpointHit,
+    BoardHalted,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -324,7 +325,7 @@ impl<'a, B: Board> Debugger<'a, B> {
     }
 
     pub fn step(&mut self) -> Result<DebugEvent, DebugError> {
-        self.continue_until_step(1)
+        self.continue_until_step(1).map(|(event, _steps)| event)
     }
 
     fn cpu_step_internal(&mut self) -> Result<(), DebugError> {
@@ -345,12 +346,18 @@ impl<'a, B: Board> Debugger<'a, B> {
         rst
     }
 
-    pub fn continue_until_step(&mut self, max_steps: u64) -> Result<DebugEvent, DebugError> {
+    /// Continue running until a breakpoint is hit, `max_steps` steps are executed or the board is halted.
+    /// Returns the event that caused the stop and the actual steps executed.
+    pub fn continue_until_step(&mut self, max_steps: u64) -> Result<(DebugEvent, u64), DebugError> {
         let mut remain = max_steps;
 
         loop {
             if remain == 0 {
-                return Ok(DebugEvent::StepCompleted);
+                return Ok((DebugEvent::StepCompleted, max_steps));
+            }
+
+            if self.board.status() == crate::board::BoardStatus::Halt {
+                return Ok((DebugEvent::BoardHalted, max_steps - remain));
             }
 
             self.cpu_step_internal()?;
@@ -358,12 +365,13 @@ impl<'a, B: Board> Debugger<'a, B> {
             remain -= 1;
 
             if self.on_breakpoint() {
-                return Ok(DebugEvent::BreakpointHit);
+                return Ok((DebugEvent::BreakpointHit, max_steps - remain));
             }
         }
     }
 
-    pub fn continue_run(&mut self) -> Result<DebugEvent, DebugError> {
+    /// See [`Self::continue_until_step`].
+    pub fn continue_run(&mut self) -> Result<(DebugEvent, u64), DebugError> {
         self.continue_until_step(u64::MAX)
     }
 

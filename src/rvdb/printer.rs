@@ -188,6 +188,7 @@ impl Printer {
                 instr,
                 watch_results,
                 event,
+                actual_steps,
             } => {
                 match event {
                     debugger::DebugEvent::StepCompleted => {
@@ -195,6 +196,18 @@ impl Printer {
                     }
                     debugger::DebugEvent::BreakpointHit => {
                         println!("Breakpoint hit: {}", format_instr(instr));
+                    }
+                    debugger::DebugEvent::BoardHalted => {
+                        if *actual_steps == 0 {
+                            println!("Board already halted");
+                            return;
+                        } else {
+                            println!(
+                                "Board halted after {} steps: {}",
+                                actual_steps,
+                                format_instr(instr)
+                            );
+                        }
                     }
                 }
                 for res in watch_results {

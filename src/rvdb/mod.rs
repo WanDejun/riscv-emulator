@@ -181,6 +181,7 @@ pub enum CommandOutput {
         instr: DbgInstrLine,
         watch_results: Vec<CommandOutput>,
         event: debugger::DebugEvent,
+        actual_steps: u64,
     },
 
     BreakpointSet {

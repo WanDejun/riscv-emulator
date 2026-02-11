@@ -198,8 +198,8 @@ impl<'a, B: Board> Handler<'a, B> {
         #[cfg(not(test))]
         CliCoordinator::global().pause_uart();
 
-        let event = match rst {
-            Ok(e) => e,
+        let (event, actual_steps) = match rst {
+            Ok(rst) => rst,
             Err(e) => return Err(format!("step failed: {}", e)),
         };
 
@@ -210,6 +210,7 @@ impl<'a, B: Board> Handler<'a, B> {
             instr: self.instr_from_addr(pc),
             watch_results,
             event,
+            actual_steps,
         })
     }
 
