@@ -21,6 +21,7 @@ use crate::{
         },
     },
     ram_config::DEFAULT_PC_VALUE,
+    utils::make_mask,
 };
 
 #[derive(Clone)]
@@ -229,18 +230,43 @@ impl RVCPU {
             decode_instr
         } else {
             // IF
-            let instr_bytes = self.memory.ifetch::<u32>(self.pc, &mut self.csr);
-            if let Err(err) = instr_bytes {
-                TrapController::try_send_trap_signal(
-                    self,
-                    Trap::Exception(Exception::from_instr_fetch_err(err)),
-                    self.pc,
-                );
-                return Ok(());
-            }
-            let instr_bytes = unsafe { instr_bytes.unwrap_unchecked() };
+            let mut instr_bytes: u32 = match self.memory.ifetch::<u16>(self.pc, &mut self.csr) {
+                Ok(bytes) => bytes as u32,
+                Err(err) => {
+                    TrapController::try_send_trap_signal(
+                        self,
+                        Trap::Exception(Exception::from_instr_fetch_err(err)),
+                        self.pc,
+                    );
+                    return Ok(());
+                }
+            };
+
+            if (instr_bytes & 0b11) == 0b11 {
+                // 32-bit instr
+                match self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr) {
+                    Ok(bytes) => instr_bytes |= (bytes as u32) << 16,
+                    Err(err) => {
+                        TrapController::try_send_trap_signal(
+                            self,
+                            Trap::Exception(Exception::from_instr_fetch_err(err)),
+                            self.pc,
+                        );
+                        return Ok(());
+                    }
+                };
+            };
 
             // ID
+
+            // TODO: We have to support C.nop for riscv-arch-test,
+            // while currently we don't support the C extension.
+            // So a temparary workaround is added here.
+            if (instr_bytes & (make_mask(13, 15) | make_mask(7, 11) | 0b11) as u32) == 0x0001 {
+                self.pc = self.pc.wrapping_add(2);
+                return Ok(());
+            }
+
             let decoder_result = self.decoder.decode(instr_bytes);
             if let None = decoder_result {
                 log::warn!("Illegal instruction: {:#x} at {:#x}", instr_bytes, self.pc);

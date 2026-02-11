@@ -23,9 +23,8 @@ impl Reservation {
     }
 }
 
-// TODO: align for inner box ptr, instead of struct Ram.
-#[repr(align(4096))]
 pub struct Ram {
+    // TODO: 4KB align the inner box ptr for better performance.
     data: Box<[u8]>,
     reserved: Option<Reservation>,
 }
@@ -226,12 +225,5 @@ mod tests {
         assert_eq!(ram.data[5], 0x33);
         assert_eq!(ram.data[6], 0x22);
         assert_eq!(ram.data[7], 0x11);
-    }
-
-    #[test]
-    fn test_ram_align() {
-        let ram = Ram::new();
-        let addr = addr_of!(ram);
-        assert_eq!(addr as usize & 0xfff, 0);
     }
 }

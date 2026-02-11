@@ -30,9 +30,14 @@
 !benches/**/
 !benches/**/*.rs
 
+!external/
+!external/**/
+!external/**/*
+
 !tests/
 !tests/**/
 !tests/**/*.rs
+!tests/**/*
 
 # track `test_resources` directory
 !test_resources/
@@ -58,3 +63,5 @@
 !.gitmodules
 !riscv-tests/
 !riscv-tests/**
+
+**/__pycache__/*
