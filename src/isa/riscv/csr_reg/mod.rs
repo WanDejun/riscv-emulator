@@ -264,7 +264,10 @@ impl CsrRegFile {
     }
 
     pub fn is_read_priv_legal(&mut self, csr_addr: WordType) -> bool {
-        if csr_addr == Satp::get_index() && self.get_by_type_existing::<Mstatus>().get_tvm() == 1 {
+        if csr_addr == Satp::get_index()
+            && self.privelege_level() == PrivilegeLevel::S
+            && self.get_by_type_existing::<Mstatus>().get_tvm() == 1
+        {
             return false;
         }
 
