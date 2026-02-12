@@ -89,9 +89,8 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
-        if !crate::utils::check_align::<T>(addr) {
-            return Err(MemError::LoadMisaligned);
-        }
+        // Don't check alignment here since some devices may allow unaligned access.
+        // Only check alignment in device's implementations.
 
         let view = MemAccessView::new(csr);
         // TODO: Extract these masks and flags into a function to reduce code duplication.
@@ -118,10 +117,6 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
-        if !crate::utils::check_align::<T>(addr) {
-            return Err(MemError::StoreMisaligned);
-        }
-
         let view = MemAccessView::new(csr);
         let (masks, flags) = match view {
             MemAccessView::MachineOnly => return self.mmio.write_by_type(addr.into(), data),
@@ -145,6 +140,7 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
+        // TODO: Do we need to check alignment for lr/sc?
         if !crate::utils::check_align::<T>(addr) {
             return Err(MemError::LoadMisaligned);
         }

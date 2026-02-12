@@ -50,7 +50,7 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 
     fn handle_symbol_file(&mut self, path: String) -> Result<CommandOutput, String> {
-        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = fs::read(&path).map_err(|e| e.to_string() + ", when reading " + &path)?;
         let loader = ELFLoader::try_new(bytes).ok_or("Failed to parse ELF file")?;
         if let Some(symtab) = loader.get_symbol_table() {
             self.dbg.set_symbol_table(symtab);
@@ -378,7 +378,7 @@ fn parse_csr(s: &str) -> Result<WordType, String> {
         return Ok(n);
     }
 
-    Err(format!("invaild csr: {}", s))
+    Err(format!("invalid csr: {}", s))
 }
 
 #[cfg(test)]

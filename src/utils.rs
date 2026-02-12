@@ -67,6 +67,10 @@ pub fn sign_extend_u32(value: u32) -> u64 {
     sign_extend(value as WordType, 32)
 }
 
+pub fn is_sign_extended(value: WordType, bits: u32) -> bool {
+    value == sign_extend(value, bits)
+}
+
 pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
     lhs.cast_signed()
         .wrapping_add(rhs.cast_signed())

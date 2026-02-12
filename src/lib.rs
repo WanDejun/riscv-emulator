@@ -49,7 +49,7 @@ impl FromStr for DeviceConfig {
             Some("virtio-block") => VirtIODeviceID::Block,
             Some("virtio-network") => VirtIODeviceID::Network,
             Some(other) => return Err(format!("Unknown device type: {}", other)),
-            None => return Err("Invaild device arguments.".into()),
+            None => return Err("Invalid device arguments.".into()),
         };
         let path = PathBuf::from(parts.next().ok_or("Need input a device path.")?);
         Ok(DeviceConfig { dev_type, path })

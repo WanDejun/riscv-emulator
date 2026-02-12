@@ -3,7 +3,7 @@ use std::slice;
 use crate::{
     config::arch_config::WordType,
     isa::riscv::mmu::{
-        config::{PAGE_SIZE, PAGE_SIZE_XLEN, PHYSICAL_ADDR_WIDTH, SUB_VPN_MASK, VPN_OFFSET},
+        config::{PAGE_SIZE, PAGE_SIZE_XLEN, PHYSICAL_ADDR_WIDTH},
         page_table::PageTableEntry,
     },
     ram::Ram,
@@ -26,68 +26,13 @@ pub(super) struct VirtualPageNum {
     pub(super) address: WordType,
 }
 
-#[repr(u8)]
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum PageSize {
-    Small4K = 0,
-    Medium2M,
-    Large1G,
-}
-
-impl From<u8> for PageSize {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => PageSize::Small4K,
-            1 => PageSize::Medium2M,
-            2 => PageSize::Large1G,
-            _ => panic!("Invalid page size value: {}", value),
-        }
-    }
-}
-
-impl PhysicalAddr {
-    #[rustfmt::skip]
-    pub(super) fn get_offset(self, page_size: PageSize) -> WordType {
-        match page_size {
-            PageSize::Small4K  => self.0 & ((1 << (1 * PAGE_SIZE_XLEN)) - 1),
-            PageSize::Medium2M => self.0 & ((1 << (2 * PAGE_SIZE_XLEN)) - 1),
-            PageSize::Large1G  => self.0 & ((1 << (3 * PAGE_SIZE_XLEN)) - 1),
-        }
-    }
-    pub(super) fn ceil(self) -> PhysicalPageNum {
-        PhysicalPageNum::from_paddr(self.0)
-    }
-    pub(super) fn floor(self) -> PhysicalPageNum {
-        PhysicalPageNum::from_paddr((self.0 + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1))
-    }
-    pub(super) fn is_aligned(self) -> bool {
-        self.get_offset(PageSize::Small4K) == 0
-    }
-}
 impl VirtualAddr {
-    pub(super) fn get_offset(self, page_size: PageSize) -> WordType {
-        match page_size {
-            PageSize::Small4K => self.0 & ((1 << (1 * PAGE_SIZE_XLEN)) - 1),
-            PageSize::Medium2M => self.0 & ((1 << (2 * PAGE_SIZE_XLEN)) - 1),
-            PageSize::Large1G => self.0 & ((1 << (3 * PAGE_SIZE_XLEN)) - 1),
-        }
-    }
-    pub(super) fn ceil(self) -> VirtualPageNum {
-        VirtualPageNum::from_vaddr((self.0 + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1))
-    }
-    pub(super) fn floor(self) -> VirtualPageNum {
+    pub(super) fn vpn(self) -> VirtualPageNum {
         VirtualPageNum::from_vaddr(self.0 & !(PAGE_SIZE - 1))
-    }
-    pub(super) fn is_aligned(self) -> bool {
-        self.get_offset(PageSize::Small4K) == 0
     }
 }
 
 impl PhysicalPageNum {
-    pub(super) fn get_byte_array(&self, mem: &mut Ram) -> &'static mut [u8] {
-        let ptr = &mut mem[(self.address - ram_config::BASE_ADDR) as usize] as *mut u8;
-        unsafe { slice::from_raw_parts_mut(ptr, PAGE_SIZE as usize) }
-    }
     pub(super) fn get_pte_array(&self, mem: &mut Ram) -> &'static mut [PageTableEntry] {
         let ptr = &mut mem[(self.address - ram_config::BASE_ADDR) as usize] as *mut u8 as usize;
         #[cfg(feature = "riscv64")]
@@ -131,7 +76,6 @@ impl From<PhysicalPageNum> for PhysicalAddr {
 }
 impl From<PhysicalAddr> for PhysicalPageNum {
     fn from(addr: PhysicalAddr) -> Self {
-        // debug_assert_eq!(addr.get_offset(), 0);
         PhysicalPageNum::from_paddr(addr.0)
     }
 }
@@ -139,7 +83,7 @@ impl From<PhysicalAddr> for PhysicalPageNum {
 // VirtualAddr
 impl From<WordType> for VirtualAddr {
     fn from(value: WordType) -> Self {
-        VirtualAddr(value & ((1 << PHYSICAL_ADDR_WIDTH) - 1))
+        VirtualAddr(value)
     }
 }
 impl From<VirtualAddr> for WordType {
@@ -156,36 +100,14 @@ impl From<VirtualPageNum> for VirtualAddr {
 }
 impl From<VirtualAddr> for VirtualPageNum {
     fn from(addr: VirtualAddr) -> Self {
-        // debug_assert_eq!(addr.get_offset(), 0);
-        addr.floor()
+        addr.vpn()
     }
 }
 
-// get sub_vpn.
 impl VirtualPageNum {
-    pub(super) fn from_vpn(vpn: WordType) -> Self {
-        VirtualPageNum {
-            address: vpn << PAGE_SIZE_XLEN,
-        }
-    }
     pub(super) fn from_vaddr(vaddr: WordType) -> Self {
         VirtualPageNum {
             address: vaddr & !(PAGE_SIZE - 1),
         }
-    }
-
-    pub(super) fn get_sub_vpn(&self) -> [WordType; 5] {
-        [
-            self.get_vpn::<0>(),
-            self.get_vpn::<1>(),
-            self.get_vpn::<2>(),
-            self.get_vpn::<3>(),
-            self.get_vpn::<4>(),
-        ]
-    }
-
-    #[inline]
-    fn get_vpn<const INDEX: usize>(&self) -> WordType {
-        (self.address >> VPN_OFFSET[INDEX]) & SUB_VPN_MASK
     }
 }
