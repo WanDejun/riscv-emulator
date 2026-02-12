@@ -7,6 +7,7 @@ use crate::{
     board::virt::RiscvIRQHandler,
     config::arch_config::WordType,
     cpu::RegFile,
+    device::MemError,
     fpu::soft_float::SoftFPU,
     isa::{
         DecoderTrait,
@@ -218,6 +219,18 @@ impl RVCPU {
         rst
     }
 
+    fn ifetch(&mut self) -> Result<u32, MemError> {
+        let mut instr_bytes: u32 = self.memory.ifetch::<u16>(self.pc, &mut self.csr)? as u32;
+
+        if (instr_bytes & 0b11) == 0b11 {
+            // 32-bit instr
+            let next_half = self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr)? as u32;
+            instr_bytes |= next_half << 16;
+        };
+
+        Ok(instr_bytes)
+    }
+
     fn step_impl(&mut self) -> Result<(), Exception> {
         if let Some(interrupt) = TrapController::has_interrupt(self) {
             if TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0) {
@@ -229,9 +242,8 @@ impl RVCPU {
             self.icache_cnt += 1;
             decode_instr
         } else {
-            // IF
-            let mut instr_bytes: u32 = match self.memory.ifetch::<u16>(self.pc, &mut self.csr) {
-                Ok(bytes) => bytes as u32,
+            let instr_bytes = match self.ifetch() {
+                Ok(bytes) => bytes,
                 Err(err) => {
                     TrapController::try_send_trap_signal(
                         self,
@@ -240,21 +252,6 @@ impl RVCPU {
                     );
                     return Ok(());
                 }
-            };
-
-            if (instr_bytes & 0b11) == 0b11 {
-                // 32-bit instr
-                match self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr) {
-                    Ok(bytes) => instr_bytes |= (bytes as u32) << 16,
-                    Err(err) => {
-                        TrapController::try_send_trap_signal(
-                            self,
-                            Trap::Exception(Exception::from_instr_fetch_err(err)),
-                            self.pc,
-                        );
-                        return Ok(());
-                    }
-                };
             };
 
             // ID
@@ -296,9 +293,18 @@ impl RVCPU {
             // XXX: OpenSBI have semihosting test, and we don't implement breakpoint exception handling yet,
             // so we can't throw and panic here.
             // Err(Exception::Breakpoint) => return excute_result,
+            Err(Exception::IllegalInstruction) => {
+                // TODO: Consider reuse the fetched instr_bytes
+                // (do we have to put raw instruction in i-cache to avoid another ifetch here?)
+                let instr_bytes = self.ifetch().expect("ifetch should not fail here");
+                TrapController::try_send_trap_signal(
+                    self,
+                    Trap::Exception(Exception::IllegalInstruction),
+                    instr_bytes as WordType,
+                );
+            }
             Err(nr) => {
                 TrapController::try_send_trap_signal(self, Trap::Exception(nr), 0);
-                return Ok(());
             }
             Ok(()) => {} // there is nothing to do.
         }

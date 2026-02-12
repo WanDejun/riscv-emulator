@@ -159,7 +159,7 @@ impl<'a> CPUChecker<'a> {
         assert_eq!(
             self.cpu.csr.read_uncheck_privilege(addr).unwrap(),
             value,
-            "Csr value incorrect at addr {}",
+            "Csr value incorrect at addr 0x{:0x}",
             addr
         );
         self
@@ -190,6 +190,7 @@ where
 {
     let mut cpu = build(TestCPUBuilder::new()).build();
     let DecodeInstr(instr, info) = cpu.decoder.decode(raw_instr).unwrap();
+    // FIXME: [`RVCPU::execute`] don't handle the raised exception
     cpu.execute(instr, info).unwrap();
     check(CPUChecker::new(&mut cpu));
 }

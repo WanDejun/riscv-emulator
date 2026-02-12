@@ -234,7 +234,7 @@ mod test {
     use super::*;
     use crate::{
         isa::riscv::{cpu_tester::run_test_cpu_step, trap::Exception},
-        ram_config,
+        ram_config::{self, BASE_ADDR},
     };
 
     const IRQ_HANDLER_ADDR: WordType = 0x80002000;
@@ -420,6 +420,23 @@ mod test {
         assert_eq!(
             TrapController::next_pc_by_tvec(Trap::Interrupt(Interrupt::MachineTimer), 1, base),
             (base << 2) + 0x1c
+        );
+    }
+
+    #[test]
+    fn test_exception() {
+        // UNIMP: csrrw x0, cycle, x0 -> illegal instruction,
+        // because cycle is readonly CSR.
+        run_test_cpu_step(
+            &[0xc00c1073],
+            |builder| builder.csr(Mtvec::get_index(), IRQ_HANDLER_ADDR),
+            |checker| {
+                checker
+                    .csr(Mcause::get_index(), 2) // illegal instruction
+                    .csr(Mtval::get_index(), 0xc00c1073) // instruction itself
+                    .csr(Mepc::get_index(), BASE_ADDR) // address of the instruction
+                    .pc(IRQ_HANDLER_ADDR)
+            },
         );
     }
 }
