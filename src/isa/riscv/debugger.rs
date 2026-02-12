@@ -111,6 +111,7 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         self.memory.debug_translate_vaddr(vaddr).ok()
     }
 
+    // TODO: Respect the CSR settings like SUM, MXR, etc.
     fn translate(&self, vaddr: WordType) -> Option<u64> {
         if self.get_current_privilege() == PrivilegeLevel::M {
             Some(vaddr as u64)

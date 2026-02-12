@@ -25,6 +25,19 @@ pub enum VirtualMemoryMode {
     None = 0x3f,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AdUpdatePolicy {
+    AutoSet,
+    FaultOnClear,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AccessEffect {
+    None,
+    Accessed,
+    AccessedDirty,
+}
+
 pub trait SvMode {
     const LEVELS: usize;
     const VA_BITS: usize;

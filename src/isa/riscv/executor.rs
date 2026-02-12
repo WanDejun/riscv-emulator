@@ -668,7 +668,7 @@ mod tests {
     fn test_amo() {
         use std::sync::atomic::{AtomicU64, Ordering};
 
-        const CNT: usize = 1000;
+        const CNT: usize = 4096;
         const TARGET_ADDR: WordType = ram_config::BASE_ADDR + 1024;
         let mut cpu = TestCPUBuilder::new()
             .reg(12, TARGET_ADDR)
@@ -692,7 +692,9 @@ mod tests {
                 }
             });
 
-            for _ in 0..CNT * 2 {
+            // The target address increases every 2 steps.
+            for _ in 0..CNT {
+                cpu.step().unwrap();
                 cpu.step().unwrap();
                 print!("B");
             }

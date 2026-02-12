@@ -9,6 +9,7 @@ use crate::{
         config::*,
     },
     ram::Ram,
+    ram_config,
 };
 
 bitflags! {
@@ -135,14 +136,31 @@ pub enum PageTableError {
     PrivilegeFault,
 }
 
+#[derive(Copy, Clone)]
+struct WalkInfo {
+    leaf_level: usize,
+    leaf_flags: PTEFlags,
+    leaf_pte_addr: u64,
+    leaf_ppn: PhysicalPageNum,
+}
+
 pub struct PageTable {
     root_address: WordType,
     mode: VirtualMemoryMode,
+    ad_update_policy: AdUpdatePolicy,
 }
 
 impl PageTable {
     pub fn new(root_address: WordType, mode: VirtualMemoryMode) -> Self {
-        Self { root_address, mode }
+        Self {
+            root_address,
+            mode,
+            ad_update_policy: AdUpdatePolicy::AutoSet,
+        }
+    }
+
+    pub fn set_ad_update_policy(&mut self, ad_update_policy: AdUpdatePolicy) {
+        self.ad_update_policy = ad_update_policy;
     }
 
     pub fn set_mode(&mut self, mode: u8) {
@@ -165,12 +183,13 @@ impl PageTable {
         self.root_address = root_address;
     }
 
-    pub fn translate_vaddr<const DIRTY: bool, const ACCESS: bool>(
+    pub fn translate_vaddr(
         &self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
         masks: PTEFlags,
         target_flags: PTEFlags,
+        effect: AccessEffect,
     ) -> Result<PhysicalAddr, PageTableError> {
         if self.mode == VirtualMemoryMode::None {
             return Ok(vaddr.0.into());
@@ -179,8 +198,8 @@ impl PageTable {
             return Err(PageTableError::PageFault);
         }
 
-        let (target_pte, leaf_level) = self.find_pte(mem, vaddr.vpn())?;
-        if (target_pte.flags().bits() & masks.bits()) != target_flags.bits() {
+        let walk_info = self.walk_pte(mem, vaddr.vpn())?;
+        if (walk_info.leaf_flags.bits() & masks.bits()) != target_flags.bits() {
             // privilege fault
 
             // When running Linux, many such logs are normal, like copy-on-write:
@@ -190,24 +209,57 @@ impl PageTable {
                 "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), target flags: ({:?})",
                 vaddr.0,
                 masks.0,
-                target_pte.flags().0
+                walk_info.leaf_flags.0
             );
             return Err(PageTableError::PrivilegeFault);
         }
 
-        if ACCESS {
-            target_pte.set_accessed();
-        }
+        self.apply_ad_policy(mem, &walk_info, effect)?;
 
-        if DIRTY {
-            target_pte.set_dirty();
-        }
-
-        let ppn = target_pte.ppn();
-        let page_shift = PAGE_SIZE_XLEN + leaf_level * VPN_BITS_PER_LEVEL;
+        let page_shift = PAGE_SIZE_XLEN + walk_info.leaf_level * VPN_BITS_PER_LEVEL;
         let page_offset_mask = (1 << page_shift) - 1;
-        let paddr = ppn.address | (vaddr.0 & page_offset_mask);
+        let paddr = walk_info.leaf_ppn.address | (vaddr.0 & page_offset_mask);
         Ok(paddr.into())
+    }
+
+    fn apply_ad_policy(
+        &self,
+        mem: &mut Ram,
+        walk_info: &WalkInfo,
+        effect: AccessEffect,
+    ) -> Result<(), PageTableError> {
+        let (need_accessed, need_dirty) = match effect {
+            AccessEffect::None => (false, false),
+            AccessEffect::Accessed => (!walk_info.leaf_flags.contains(PTEFlags::A), false),
+            AccessEffect::AccessedDirty => (
+                !walk_info.leaf_flags.contains(PTEFlags::A),
+                !walk_info.leaf_flags.contains(PTEFlags::D),
+            ),
+        };
+
+        if !need_accessed && !need_dirty {
+            return Ok(());
+        }
+
+        match self.ad_update_policy {
+            AdUpdatePolicy::AutoSet => {
+                let pte = Self::pte_at(mem, walk_info.leaf_pte_addr);
+                if need_accessed {
+                    pte.set_accessed();
+                }
+                if need_dirty {
+                    pte.set_dirty();
+                }
+                Ok(())
+            }
+            AdUpdatePolicy::FaultOnClear => Err(PageTableError::PageFault),
+        }
+    }
+
+    fn pte_at(mem: &mut Ram, pte_addr: u64) -> &mut PageTableEntry {
+        let offset = (pte_addr - ram_config::BASE_ADDR) as usize;
+        let ptr = &mut mem[offset] as *mut u8 as *mut PageTableEntry;
+        unsafe { &mut *ptr }
     }
 
     fn is_canonical_vaddr(&self, vaddr: VirtualAddr) -> bool {
@@ -222,28 +274,38 @@ impl PageTable {
     /// Walk page tables and return the matched leaf PTE.
     /// Return `(leaf_pte, leaf_level)` where level counts down from top to bottom.
     /// For example, in Sv39, the root level is 2, and the leaf level is 0.
-    fn find_pte(
+    fn find_pte<'a>(
         &self,
-        mem: &mut Ram,
+        mem: &'a mut Ram,
         vpn: VirtualPageNum,
-    ) -> Result<(&mut PageTableEntry, usize), PageTableError> {
+    ) -> Result<(&'a mut PageTableEntry, usize), PageTableError> {
+        let walk_info = self.walk_pte(mem, vpn)?;
+        Ok((
+            Self::pte_at(mem, walk_info.leaf_pte_addr),
+            walk_info.leaf_level,
+        ))
+    }
+
+    fn walk_pte(&self, mem: &mut Ram, vpn: VirtualPageNum) -> Result<WalkInfo, PageTableError> {
         match self.mode {
-            VirtualMemoryMode::Page39bit => self.find_pte_with_mode::<Sv39>(mem, vpn),
-            VirtualMemoryMode::Page48bit => self.find_pte_with_mode::<Sv48>(mem, vpn),
-            VirtualMemoryMode::Page57bit => self.find_pte_with_mode::<Sv57>(mem, vpn),
+            VirtualMemoryMode::Page39bit => self.walk_pte_with_mode::<Sv39>(mem, vpn),
+            VirtualMemoryMode::Page48bit => self.walk_pte_with_mode::<Sv48>(mem, vpn),
+            VirtualMemoryMode::Page57bit => self.walk_pte_with_mode::<Sv57>(mem, vpn),
             _ => panic!("Unsupported virtual memory mode in page walker"),
         }
     }
 
-    fn find_pte_with_mode<M: SvMode>(
+    fn walk_pte_with_mode<M: SvMode>(
         &self,
         mem: &mut Ram,
         vpn: VirtualPageNum,
-    ) -> Result<(&mut PageTableEntry, usize), PageTableError> {
+    ) -> Result<WalkInfo, PageTableError> {
         let mut entry = PhysicalPageNum::from_paddr(self.root_address);
 
         for i in (0..M::LEVELS).rev() {
             let sub_vpn = M::vpn_index(vpn.address, i);
+            let pte_addr =
+                entry.address + (sub_vpn as u64) * (core::mem::size_of::<PageTableEntry>() as u64);
             let pte = &mut entry.get_pte_array(mem)[sub_vpn];
             if !pte.is_valid() {
                 return Err(PageTableError::PageFault);
@@ -259,7 +321,12 @@ impl PageTable {
                 if pte.bits & mask != 0 {
                     return Err(PageTableError::AlignFault);
                 } else {
-                    return Ok((pte, i));
+                    return Ok(WalkInfo {
+                        leaf_level: i,
+                        leaf_flags: pte.flags(),
+                        leaf_pte_addr: pte_addr,
+                        leaf_ppn: pte.ppn(),
+                    });
                 }
             }
 
@@ -275,16 +342,27 @@ impl PageTable {
 }
 
 #[cfg(test)]
-mod test {
+mod test_sv39 {
     use crate::ram_config;
 
     use super::*;
+
+    const PT0: u64 = 0x8000_1000;
+    const PT1: u64 = 0x8000_2000;
+    const PT2: u64 = 0x8000_3000;
+    const DATA_PAGE: u64 = 0x8000_4000;
 
     fn setup_pte(ram: &mut Ram, entry_addr: u64, target_addr: u64, flags: PTEFlags) {
         let mut pte = PageTableEntry::new(flags.bits() as WordType);
         pte.set_ppn(PhysicalPageNum::from_paddr(target_addr));
         ram.write(entry_addr - ram_config::BASE_ADDR, pte.bits)
             .unwrap();
+    }
+
+    fn setup_3level_leaf(ram: &mut Ram, leaf_target_addr: u64, leaf_flags: PTEFlags) {
+        setup_pte(ram, PT0, PT1, PTEFlags::V);
+        setup_pte(ram, PT1, PT2, PTEFlags::V);
+        setup_pte(ram, PT2, leaf_target_addr, leaf_flags);
     }
 
     #[test]
@@ -298,22 +376,21 @@ mod test {
     #[test]
     fn page_table_test() {
         let mut ram: Ram = Ram::new();
-        let pt0 = 0x8000_1000u64;
-        let pt1 = 0x8000_2000u64;
-        let pt2 = 0x8000_3000u64;
-        let data_page = 0x8000_4000u64;
 
         let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        setup_pte(&mut ram, pt0, pt1, PTEFlags::V);
-        setup_pte(&mut ram, pt1, pt2, PTEFlags::V);
-        setup_pte(&mut ram, pt2, data_page, leaf_flags);
-
-        let page_table = PageTable::new(pt0.into(), VirtualMemoryMode::Page39bit);
+        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
         let paddr = page_table
-            .translate_vaddr::<false, true>(&mut ram, 0x0000_0123.into(), PTEFlags::R, PTEFlags::R)
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::R,
+                PTEFlags::R,
+                AccessEffect::Accessed,
+            )
             .unwrap();
-        assert_eq!(paddr.0, data_page | 0x123);
+        assert_eq!(paddr.0, DATA_PAGE | 0x123);
 
         let (leaf_pte, level) = page_table
             .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
@@ -342,7 +419,13 @@ mod test {
         assert_eq!(leaf_pte.flags(), leaf_flags);
 
         let paddr = page_table
-            .translate_vaddr::<false, true>(&mut ram, 0x0011_4514.into(), PTEFlags::W, PTEFlags::W)
+            .translate_vaddr(
+                &mut ram,
+                0x0011_4514.into(),
+                PTEFlags::W,
+                PTEFlags::W,
+                AccessEffect::Accessed,
+            )
             .unwrap();
         assert_eq!(paddr.0, 0x8111_4514);
     }
@@ -350,21 +433,21 @@ mod test {
     #[test]
     fn rwx_authority_test() {
         let mut ram: Ram = Ram::new();
-        let pt0 = 0x8000_1000u64;
-        let pt1 = 0x8000_2000u64;
-        let pt2 = 0x8000_3000u64;
-        let data_page = 0x8000_4000u64;
         let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
 
-        setup_pte(&mut ram, pt0, pt1, PTEFlags::V);
-        setup_pte(&mut ram, pt1, pt2, PTEFlags::V);
-        setup_pte(&mut ram, pt2, data_page, leaf_flags);
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let page_table = PageTable::new(pt0.into(), VirtualMemoryMode::Page39bit);
+        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
 
         // try get instr, without X authority.
         let err = page_table
-            .translate_vaddr::<false, true>(&mut ram, 0x0000_0010.into(), PTEFlags::X, PTEFlags::X)
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0010.into(),
+                PTEFlags::X,
+                PTEFlags::X,
+                AccessEffect::Accessed,
+            )
             .unwrap_err();
         assert_eq!(err, PageTableError::PrivilegeFault);
     }
@@ -372,20 +455,117 @@ mod test {
     #[test]
     fn level0_non_leaf_should_fault() {
         let mut ram: Ram = Ram::new();
-        let pt0 = 0x8000_1000u64;
-        let pt1 = 0x8000_2000u64;
-        let pt2 = 0x8000_3000u64;
         let next_pt = 0x8000_4000u64;
 
-        setup_pte(&mut ram, pt0, pt1, PTEFlags::V);
-        setup_pte(&mut ram, pt1, pt2, PTEFlags::V);
-        setup_pte(&mut ram, pt2, next_pt, PTEFlags::V);
+        setup_pte(&mut ram, PT0, PT1, PTEFlags::V);
+        setup_pte(&mut ram, PT1, PT2, PTEFlags::V);
+        setup_pte(&mut ram, PT2, next_pt, PTEFlags::V);
 
-        let page_table = PageTable::new(pt0.into(), VirtualMemoryMode::Page39bit);
+        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
         let err = page_table
-            .translate_vaddr::<false, true>(&mut ram, 0x0000_0123.into(), PTEFlags::R, PTEFlags::R)
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::R,
+                PTEFlags::R,
+                AccessEffect::Accessed,
+            )
             .unwrap_err();
 
         assert_eq!(err, PageTableError::PageFault);
+    }
+
+    #[test]
+    fn access_effect_none_should_not_set_ad_bits() {
+        let mut ram: Ram = Ram::new();
+        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
+
+        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let paddr = page_table
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::R,
+                PTEFlags::R,
+                AccessEffect::None,
+            )
+            .unwrap();
+        assert_eq!(paddr.0, DATA_PAGE | 0x123);
+
+        let (leaf_pte, _) = page_table
+            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
+            .unwrap();
+        assert_eq!(leaf_pte.flags(), leaf_flags);
+    }
+
+    #[test]
+    fn fault_on_clear_test() {
+        let mut ram: Ram = Ram::new();
+        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
+
+        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
+
+        let err = page_table
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::R,
+                PTEFlags::R,
+                AccessEffect::Accessed,
+            )
+            .unwrap_err();
+
+        assert_eq!(err, PageTableError::PageFault);
+    }
+
+    #[test]
+    fn fault_on_clear_with_none_effect_should_not_fault() {
+        let mut ram: Ram = Ram::new();
+        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
+
+        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
+
+        let paddr = page_table
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::R,
+                PTEFlags::R,
+                AccessEffect::None,
+            )
+            .unwrap();
+
+        assert_eq!(paddr.0, DATA_PAGE | 0x123);
+    }
+
+    #[test]
+    fn fault_on_clear_with_preset_ad_should_pass() {
+        let mut ram: Ram = Ram::new();
+        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W | PTEFlags::A | PTEFlags::D;
+
+        setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
+
+        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
+
+        let paddr = page_table
+            .translate_vaddr(
+                &mut ram,
+                0x0000_0123.into(),
+                PTEFlags::W,
+                PTEFlags::W,
+                AccessEffect::AccessedDirty,
+            )
+            .unwrap();
+
+        assert_eq!(paddr.0, DATA_PAGE | 0x123);
     }
 }
