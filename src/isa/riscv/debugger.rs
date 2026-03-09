@@ -51,6 +51,9 @@ impl From<MemError> for DebugError {
     }
 }
 
+// TODO: `DebugTarget` is not needed to be a trait,
+// we can directly implement these methods on `RVCPU` and call them in `Debugger`,
+// because no more targets will be added in the future (even if one day we will, extract `DebugTarget` trait at that time is easy)
 impl DebugTarget<RiscvTypes> for RVCPU {
     fn read_pc(&self) -> WordType {
         self.pc
@@ -161,7 +164,7 @@ pub enum FuncTrace {
     Return { name: Option<String>, addr: u64 },
 }
 
-const MAX_HISTORY: usize = 128;
+const MAX_HISTORY: usize = 1024;
 const MAX_FTRACE: usize = MAX_HISTORY;
 
 pub struct Debugger<'a, B: Board> {

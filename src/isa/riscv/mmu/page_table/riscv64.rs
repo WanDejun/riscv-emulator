@@ -51,7 +51,7 @@ impl PageTableEntry {
     }
 
     fn ppn(&self) -> PhysicalPageNum {
-        PhysicalPageNum::from_ppn((self.bits & PTE_PPN_MASK) >> 10)
+        PhysicalPageNum::from_ppn((self.bits & PTE_PPN_MASK) >> PTE_FLAG_XLEN)
     }
 
     fn set_ppn(&mut self, ppn: PhysicalPageNum) {
@@ -211,7 +211,7 @@ impl PageTable {
 
         self.apply_ad_policy(mem, &walk_info, effect)?;
 
-        let page_shift = PAGE_SIZE_XLEN + walk_info.leaf_level * VPN_BITS_PER_LEVEL;
+        let page_shift = PAGE_SIZE_XLEN + walk_info.leaf_level * SUB_VPN_XLEN;
         let page_offset_mask = (1 << page_shift) - 1;
         let paddr = walk_info.leaf_ppn.address | (vaddr.0 & page_offset_mask);
         Ok(paddr.into())
@@ -299,9 +299,13 @@ impl PageTable {
 
         for i in (0..M::LEVELS).rev() {
             let sub_vpn = M::vpn_index(vpn.address, i);
-            let pte_addr =
-                entry.address + (sub_vpn as u64) * (core::mem::size_of::<PageTableEntry>() as u64);
-            let pte = &mut entry.get_pte_array(mem)[sub_vpn];
+            let pte_addr = entry.address + (sub_vpn as u64) * (M::PTE_SIZE as u64);
+            let pte = PageTableEntry::new(
+                mem.read::<WordType>(pte_addr - ram_config::BASE_ADDR)
+                    .or(Err(PageTableError::PageFault))?,
+                // TODO: let outer code know it's RAM access fault while translating
+                // instead of a common page fault, for better debugging.
+            );
             if !pte.is_valid() {
                 return Err(PageTableError::PageFault);
             }
@@ -312,7 +316,7 @@ impl PageTable {
             if pte.is_leaf() {
                 // A leaf PTE has been reached. If i>0 and pte.ppn[i-1:0] ≠ 0  this is a misaligned superpage;
                 // stop and raise a page-fault exception corresponding to the original access type.
-                let mask = ((1 << (i * 9)) - 1) << PTE_WIDTH_SIZE;
+                let mask = ((1 << (i * SUB_VPN_XLEN)) - 1) << PTE_FLAG_XLEN;
                 if pte.bits & mask != 0 {
                     return Err(PageTableError::AlignFault);
                 } else {

@@ -2,7 +2,6 @@ use std::fs;
 
 use super::*;
 
-#[cfg(not(test))]
 use riscv_emulator::cli_coordinator::CliCoordinator;
 
 use riscv_emulator::{
@@ -54,12 +53,12 @@ impl<'a, B: Board> Handler<'a, B> {
     fn handle_translate(
         &mut self,
         addr: String,
-        kind: AccessType,
+        access: AccessType,
     ) -> Result<CommandOutput, String> {
         let virt_addr = parse_u64(&addr)?;
         let phys_addr = self
             .dbg
-            .translate(virt_addr, kind)
+            .translate(virt_addr, access)
             .map_err(|e| format!("{:?}", e))?;
         Ok(CommandOutput::Translate {
             phys_addr,

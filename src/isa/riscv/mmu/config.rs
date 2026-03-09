@@ -5,14 +5,14 @@ pub const PAGE_SIZE: WordType = 1 << PAGE_SIZE_XLEN;
 
 pub const PHYSICAL_ADDR_WIDTH: usize = 56; // physical address width.
 pub const PPN_WIDTH: usize = PHYSICAL_ADDR_WIDTH - PAGE_SIZE_XLEN; // PPN width size.
-pub const SUB_VPN_MASK: WordType = (1 << 9) - 1;
-pub const VPN_BITS_PER_LEVEL: usize = 9;
+pub const SUB_VPN_XLEN: usize = 9;
+pub const SUB_VPN_MASK: WordType = (1 << SUB_VPN_XLEN) - 1;
 
 // ============================================
 // ======= PTE flags in page table entry ======
 // ============================================
-pub const PTE_WIDTH_SIZE: usize = 10;
-pub const PTE_FLAG_MASK: WordType = (1 << PTE_WIDTH_SIZE) - 1;
+pub const PTE_FLAG_XLEN: usize = 10;
+pub const PTE_FLAG_MASK: WordType = (1 << PTE_FLAG_XLEN) - 1;
 pub const PTE_PPN_MASK: WordType = ((1 << 44) - 1) << 10; // bits 10-53
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -41,10 +41,11 @@ pub enum AccessEffect {
 pub trait SvMode {
     const LEVELS: usize;
     const VA_BITS: usize;
+    const PTE_SIZE: usize;
 
     #[inline]
     fn vpn_index(vpn: WordType, level: usize) -> usize {
-        ((vpn >> (PAGE_SIZE_XLEN + level * VPN_BITS_PER_LEVEL)) & SUB_VPN_MASK) as usize
+        ((vpn >> (PAGE_SIZE_XLEN + level * SUB_VPN_XLEN)) & SUB_VPN_MASK) as usize
     }
 
     #[inline]
@@ -62,16 +63,19 @@ pub struct Sv39;
 impl SvMode for Sv39 {
     const LEVELS: usize = 3;
     const VA_BITS: usize = 39;
+    const PTE_SIZE: usize = 8;
 }
 
 pub struct Sv48;
 impl SvMode for Sv48 {
     const LEVELS: usize = 4;
     const VA_BITS: usize = 48;
+    const PTE_SIZE: usize = 8;
 }
 
 pub struct Sv57;
 impl SvMode for Sv57 {
     const LEVELS: usize = 5;
     const VA_BITS: usize = 57;
+    const PTE_SIZE: usize = 8;
 }

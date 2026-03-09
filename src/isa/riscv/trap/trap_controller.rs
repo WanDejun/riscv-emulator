@@ -243,14 +243,14 @@ mod test {
     fn test_load_fault() {
         run_test_cpu_step(
             &[0x00003503], // ld a0, 0(zero)
-            |builder| builder.csr(csr_index::mtvec, IRQ_HANDLER_ADDR),
+            |builder| builder.csr(Mtvec::get_index(), IRQ_HANDLER_ADDR),
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
-                    // .csr(csr_index::mtval, 0)
+                    .csr(Mepc::get_index(), ram_config::BASE_ADDR)
+                    .csr(Mtval::get_index(), 0)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::LoadFault.into());
                         checker
@@ -266,16 +266,17 @@ mod test {
             &[0x0017B503], // ld a0, 1(a5)
             |builder| {
                 builder
-                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR)
+                    .csr(Mtvec::get_index(), IRQ_HANDLER_ADDR)
                     .reg(15, BASE_LOAD_MEM)
             },
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
-                    // .csr(csr_index::mtval, BASE_LOAD_MEM)
+                    .csr(Mcause::get_index(), Exception::LoadMisaligned.into())
+                    .csr(Mepc::get_index(), ram_config::BASE_ADDR)
+                    .csr(Mtval::get_index(), BASE_LOAD_MEM + 1)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::LoadMisaligned.into());
                         checker
@@ -288,13 +289,13 @@ mod test {
     fn test_store_fault() {
         run_test_cpu_step(
             &[0x00a7b023], // sd a0, 0(a5)
-            |builder| builder.csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00),
+            |builder| builder.csr(Mtvec::get_index(), IRQ_HANDLER_ADDR | 0b00),
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
+                    .csr(Mepc::get_index(), ram_config::BASE_ADDR)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::StoreFault.into());
                         checker
@@ -316,10 +317,10 @@ mod test {
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, ram_config::BASE_ADDR)
-                    // .csr(csr_index::mtval, BASE_LOAD_MEM)
+                    .csr(Mepc::get_index(), ram_config::BASE_ADDR)
+                    .csr(Mtval::get_index(), BASE_STORE_MEM + 1)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::StoreMisaligned.into());
                         checker
@@ -335,15 +336,15 @@ mod test {
             &[0x00a7b023], // Any Instr. Because `PC` do not start as 0x80000000.
             |builder| {
                 builder
-                    .csr(csr_index::mtvec, IRQ_HANDLER_ADDR | 0b00)
+                    .csr(Mtvec::get_index(), IRQ_HANDLER_ADDR | 0b00)
                     .pc(PC_START)
             },
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, PC_START)
+                    .csr(Mepc::get_index(), PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::IllegalInstruction.into());
                         checker
@@ -365,9 +366,9 @@ mod test {
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, PC_START)
+                    .csr(Mepc::get_index(), PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::InstructionFault.into());
                         checker
@@ -389,9 +390,9 @@ mod test {
             |checker| {
                 checker
                     .pc(IRQ_HANDLER_ADDR)
-                    .csr(csr_index::mepc, PC_START)
+                    .csr(Mepc::get_index(), PC_START)
                     .customized(|checker| {
-                        let mcause = checker.cpu.csr.get_by_type::<Mcause>().unwrap();
+                        let mcause = checker.cpu.csr.get_by_type_existing::<Mcause>();
                         assert_eq!(mcause.get_interrupt_flag(), 0);
                         assert_eq!(mcause.get_cause(), Exception::InstructionMisaligned.into());
                         checker
@@ -404,8 +405,8 @@ mod test {
     fn test_swap() {
         run_test_cpu_step(
             &[0x34011173], // csrrw sp, mscratch, sp
-            |builder| builder.csr(csr_index::mscratch, 0x114514).reg(2, 0x0721),
-            |checker| checker.csr(csr_index::mscratch, 0x0721).reg(2, 0x114514),
+            |builder| builder.csr(Mscratch::get_index(), 0x114514).reg(2, 0x0721),
+            |checker| checker.csr(Mscratch::get_index(), 0x0721).reg(2, 0x114514),
         );
     }
 
