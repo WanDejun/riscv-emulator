@@ -124,7 +124,12 @@ impl Printer {
                     if i % BYTE_PER_LINE == 0 {
                         print!("{}: ", format_address(curr_addr));
                     }
-                    print!("{} ", format!("{:02x}", data[i as usize]));
+
+                    if let Some(byte) = data[i as usize] {
+                        print!("{} ", format!("{:02x}", byte));
+                    } else {
+                        print!("?? ");
+                    }
 
                     curr_addr = curr_addr + 1;
                     i += 1;

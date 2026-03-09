@@ -110,7 +110,7 @@ impl<'a, B: Board> Handler<'a, B> {
                 let mut data = Vec::new();
                 let mut curr = start_addr;
                 for _ in 0..len {
-                    let byte = self.dbg.read_memory::<u8>(curr).unwrap_or(0);
+                    let byte = self.dbg.read_memory::<u8>(curr).ok();
                     data.push(byte);
                     curr = curr + 1;
                 }

@@ -201,7 +201,7 @@ pub enum CommandOutput {
     },
     Mem {
         addr: Address,
-        data: Vec<u8>,
+        data: Vec<Option<u8>>,
     },
 
     Translate {
