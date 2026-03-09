@@ -12,6 +12,7 @@ use crate::{
             decoder::DecodeInstr,
             executor::{ExcuteInstrInfo, RVCPU},
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
+            mmu::{AccessType, PageTableError},
             trap::Exception,
         },
     },
@@ -107,17 +108,17 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         self.decoder.decode(instr)
     }
 
-    fn vaddr_to_paddr(&self, vaddr: WordType) -> Option<u64> {
-        self.memory.debug_translate_vaddr(vaddr).ok()
+    fn debug_vaddr_to_paddr(&mut self, vaddr: WordType) -> Result<u64, PageTableError> {
+        self.memory.debug_vaddr_to_paddr(vaddr)
     }
 
     // TODO: Respect the CSR settings like SUM, MXR, etc.
-    fn translate(&self, vaddr: WordType) -> Option<u64> {
-        if self.get_current_privilege() == PrivilegeLevel::M {
-            Some(vaddr as u64)
-        } else {
-            self.memory.debug_translate_vaddr(vaddr).ok()
-        }
+    fn debug_translate(
+        &mut self,
+        vaddr: WordType,
+        access: AccessType,
+    ) -> Result<u64, PageTableError> {
+        self.memory.debug_translate(vaddr, access, &mut self.csr)
     }
 }
 
@@ -314,9 +315,12 @@ impl<'a, B: Board> Debugger<'a, B> {
         Ok(self.breakpoints.len() != original_len)
     }
 
-    pub fn on_breakpoint(&self) -> bool {
-        if let Some(pc_paddr) = self.board.cpu().translate(self.read_pc()) {
+    pub fn on_breakpoint(&mut self) -> bool {
+        let pc = self.read_pc();
+        if let Ok(pc_paddr) = self.board.cpu_mut().debug_vaddr_to_paddr(pc) {
+            // TOOD: Totally useless clone to bypass the borrow checker, because `unify_to_phys_addr` needs a mutable reference now
             self.breakpoints
+                .clone()
                 .iter()
                 .find(|bp| self.unify_to_phys_addr(bp.addr) == Some(pc_paddr))
                 .is_some()
@@ -385,10 +389,10 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu_mut().read_instr(pc).ok()
     }
 
-    pub fn unify_to_phys_addr(&self, addr: Address) -> Option<u64> {
+    pub fn unify_to_phys_addr(&mut self, addr: Address) -> Option<u64> {
         match addr {
             Address::Phys(paddr) => Some(paddr),
-            Address::Virt(vaddr) => self.vaddr_to_paddr(vaddr),
+            Address::Virt(vaddr) => self.vaddr_to_paddr(vaddr).ok(),
         }
     }
 
@@ -450,12 +454,12 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu().decoded_instr(raw)
     }
 
-    pub fn vaddr_to_paddr(&self, vaddr: WordType) -> Option<u64> {
-        self.board.cpu().vaddr_to_paddr(vaddr)
+    pub fn vaddr_to_paddr(&mut self, vaddr: WordType) -> Result<u64, PageTableError> {
+        self.board.cpu_mut().debug_vaddr_to_paddr(vaddr)
     }
 
-    pub fn translate(&self, addr: WordType) -> Option<u64> {
-        self.board.cpu().translate(addr)
+    pub fn translate(&mut self, addr: u64, access: AccessType) -> Result<u64, PageTableError> {
+        self.board.cpu_mut().debug_translate(addr, access)
     }
 }
 

@@ -3,7 +3,11 @@ use std::fmt::Debug;
 use crate::{
     config::arch_config::WordType,
     device::MemError,
-    isa::riscv::{csr_reg::PrivilegeLevel, debugger::Address},
+    isa::riscv::{
+        csr_reg::PrivilegeLevel,
+        debugger::Address,
+        mmu::{AccessType, PageTableError},
+    },
     utils::UnsignedInteger,
 };
 
@@ -26,9 +30,8 @@ pub trait DebugTarget<I: ISATypes> {
     fn read_memory<T: UnsignedInteger>(&mut self, addr: Address) -> Result<T, MemError>;
     fn write_memory<T: UnsignedInteger>(&mut self, addr: Address, data: T) -> Result<(), MemError>;
 
-    fn vaddr_to_paddr(&self, vaddr: WordType) -> Option<u64>;
-    /// This function respect the privilege level.
-    fn translate(&self, addr: WordType) -> Option<u64>;
+    fn debug_vaddr_to_paddr(&mut self, vaddr: WordType) -> Result<u64, PageTableError>;
+    fn debug_translate(&mut self, addr: u64, access: AccessType) -> Result<u64, PageTableError>;
 
     fn get_current_privilege(&self) -> PrivilegeLevel;
 

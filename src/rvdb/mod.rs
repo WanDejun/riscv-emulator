@@ -7,13 +7,38 @@ use riscv_emulator::config::arch_config::REGFILE_CNT;
 use riscv_emulator::config::arch_config::WordType;
 use riscv_emulator::isa::riscv::csr_reg::PrivilegeLevel;
 use riscv_emulator::isa::riscv::debugger;
+use riscv_emulator::isa::riscv::mmu::AccessType;
 use riscv_emulator::isa::riscv::{debugger::Address, decoder::DecodeInstr};
 
 pub use repl::DebugREPL;
 
+#[derive(clap::ValueEnum, Debug, Clone)]
+enum ClapAccessType {
+    Read,
+    Write,
+}
+
+impl ToString for ClapAccessType {
+    fn to_string(&self) -> String {
+        match self {
+            ClapAccessType::Read => "read".to_string(),
+            ClapAccessType::Write => "write".to_string(),
+        }
+    }
+}
+
+impl From<ClapAccessType> for AccessType {
+    fn from(value: ClapAccessType) -> Self {
+        match value {
+            ClapAccessType::Read => AccessType::Read,
+            ClapAccessType::Write => AccessType::Write,
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(multicall = true)]
-pub enum Cli {
+enum Cli {
     /// Print items such as registers, the PC, or memory.
     #[command(alias = "p", subcommand)]
     Print(PrintCmd),
@@ -21,6 +46,15 @@ pub enum Cli {
     /// Display a given item each time the program stops.
     #[command(alias = "d", subcommand)]
     Display(PrintCmd),
+    /// Translate a given address as a real instruction would.
+    /// This respects the current CPU state (e.g., privilege level and CSR settings)
+    /// and page table flags, based on the given access type.
+    #[command(aliases = ["t", "trans"])]
+    Translate {
+        addr: String,
+        #[arg(default_value_t = ClapAccessType::Read)]
+        access: ClapAccessType,
+    },
 
     /// Cancel a display request.
     #[command(subcommand)]
@@ -169,6 +203,12 @@ pub enum CommandOutput {
         addr: Address,
         data: Vec<u8>,
     },
+
+    Translate {
+        virt_addr: WordType,
+        phys_addr: u64,
+    },
+
     Privilege(PrivilegeLevel),
 
     History(Vec<DbgInstrLine>),

@@ -2,6 +2,8 @@ pub mod address;
 pub mod config;
 mod page_table;
 
+pub use page_table::PageTableError;
+
 use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
@@ -15,7 +17,7 @@ use crate::{
         debugger::Address,
         mmu::{
             config::{AccessEffect, AdUpdatePolicy, PAGE_SIZE_XLEN},
-            page_table::{PTEFlags, PageTable, PageTableError},
+            page_table::{PTEFlags, PageTable},
         },
         trap::Exception,
     },
@@ -24,12 +26,13 @@ use crate::{
     utils::UnsignedInteger,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-enum AccessType {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum AccessType {
     Read,
     Write,
-    /// TODO: Consider Remove this. We don't have to handle AMO in this way.
+    // TODO: Consider Remove this. We don't have to handle AMO in this way.
     ReadWrite,
+    // TODO: Currently we handle ifetch separately, consider adding ifetch here so that we can unify the handling.
 }
 
 enum AccessPolicy {
@@ -46,7 +49,7 @@ enum AccessPrivilege {
     /// only U-flag
     UserOnly,
 
-    /// only NO U-flag
+    /// only S-flag
     SupervisorOnly,
 
     /// ignore U-flag in S mode, except ifetch.
@@ -56,41 +59,41 @@ enum AccessPrivilege {
     MachineOnly,
 }
 
-impl AccessPrivilege {
-    fn new(csr: &mut CsrRegFile) -> Self {
-        match csr.privelege_level() {
-            PrivilegeLevel::M => {
-                let mstatus = csr.get_by_type_existing::<Mstatus>();
+/// Determine in which mode the data access should be performed, and which PTE flags should be checked,
+/// based on the current privilege level and relevant CSR settings.
+fn determine_data_access_privilege(csr: &mut CsrRegFile) -> AccessPrivilege {
+    match csr.privelege_level() {
+        PrivilegeLevel::M => {
+            let mstatus = csr.get_by_type_existing::<Mstatus>();
 
-                if mstatus.get_mprv() == 0 {
-                    Self::MachineOnly
-                } else {
-                    match (mstatus.get_mpp() as u8).into() {
-                        PrivilegeLevel::M => Self::MachineOnly,
-                        PrivilegeLevel::S => {
-                            if mstatus.get_sum() == 0 {
-                                Self::SupervisorOnly
-                            } else {
-                                Self::SupervisorAndUser
-                            }
+            if mstatus.get_mprv() == 0 {
+                AccessPrivilege::MachineOnly
+            } else {
+                match (mstatus.get_mpp() as u8).into() {
+                    PrivilegeLevel::M => AccessPrivilege::MachineOnly,
+                    PrivilegeLevel::S => {
+                        if mstatus.get_sum() == 0 {
+                            AccessPrivilege::SupervisorOnly
+                        } else {
+                            AccessPrivilege::SupervisorAndUser
                         }
-                        PrivilegeLevel::U => Self::UserOnly,
-                        PrivilegeLevel::V => todo!(), // Doesn't have V-mode.
                     }
+                    PrivilegeLevel::U => AccessPrivilege::UserOnly,
+                    PrivilegeLevel::V => todo!(), // Doesn't have V-mode.
                 }
             }
-            PrivilegeLevel::S => {
-                let sstatus = csr.get_by_type_existing::<Sstatus>();
-
-                if sstatus.get_sum() == 0 {
-                    Self::SupervisorOnly
-                } else {
-                    Self::SupervisorAndUser
-                }
-            }
-            PrivilegeLevel::U => Self::UserOnly,
-            PrivilegeLevel::V => unreachable!(), // Doesn't have V-mode.
         }
+        PrivilegeLevel::S => {
+            let sstatus = csr.get_by_type_existing::<Sstatus>();
+
+            if sstatus.get_sum() == 0 {
+                AccessPrivilege::SupervisorOnly
+            } else {
+                AccessPrivilege::SupervisorAndUser
+            }
+        }
+        PrivilegeLevel::U => AccessPrivilege::UserOnly,
+        PrivilegeLevel::V => unreachable!(), // Doesn't have V-mode.
     }
 }
 
@@ -109,17 +112,22 @@ impl VirtAddrManager {
         }
     }
 
+    /// NOTE: This function only resolves data access, for ifetch, please use `resolve_ifetch_policy`.
     #[inline]
-
-    /// NOTE: This function only resolve data access, for ifetch, please use `resolve_ifetch_policy`.
-    fn resolve_data_policy(csr: &mut CsrRegFile, access: AccessType) -> AccessPolicy {
+    fn resolve_data_policy(
+        csr: &mut CsrRegFile,
+        access: AccessType,
+        side_effect: bool,
+    ) -> AccessPolicy {
         let fault = match access {
             AccessType::Read => MemError::LoadPageFault,
             AccessType::Write | AccessType::ReadWrite => MemError::StorePageFault,
         };
-        let effect = match access {
-            AccessType::Read => AccessEffect::Accessed,
-            AccessType::Write | AccessType::ReadWrite => AccessEffect::AccessedDirty,
+
+        let effect = match (side_effect, access) {
+            (false, _) => AccessEffect::None,
+            (true, AccessType::Read) => AccessEffect::Accessed,
+            (true, AccessType::Write | AccessType::ReadWrite) => AccessEffect::AccessedDirty,
         };
 
         let rwx_base = match access {
@@ -128,7 +136,7 @@ impl VirtAddrManager {
             AccessType::ReadWrite => PTEFlags::R | PTEFlags::W,
         };
 
-        let (masks, flags) = match AccessPrivilege::new(csr) {
+        let (masks, flags) = match determine_data_access_privilege(csr) {
             AccessPrivilege::MachineOnly => return AccessPolicy::Direct,
 
             AccessPrivilege::SupervisorAndUser => (rwx_base, rwx_base),
@@ -195,7 +203,7 @@ impl VirtAddrManager {
         // Don't check alignment here since some devices may allow unaligned access.
         // Only check alignment in device's implementations.
 
-        let policy = Self::resolve_data_policy(csr, AccessType::Read);
+        let policy = Self::resolve_data_policy(csr, AccessType::Read, true);
         let paddr = self.translate_with_policy(addr, policy)?;
 
         self.mmio.read_by_type(paddr)
@@ -210,7 +218,7 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
-        let policy = Self::resolve_data_policy(csr, AccessType::Write);
+        let policy = Self::resolve_data_policy(csr, AccessType::Write, true);
         let paddr = self.translate_with_policy(addr, policy)?;
 
         self.mmio.write_by_type(paddr, data)
@@ -229,7 +237,7 @@ impl VirtAddrManager {
             return Err(MemError::LoadMisaligned);
         }
 
-        let policy = Self::resolve_data_policy(csr, AccessType::Read);
+        let policy = Self::resolve_data_policy(csr, AccessType::Read, true);
         let paddr = self.translate_with_policy(addr, policy)?;
 
         self.mmio.load_reserved(paddr)
@@ -248,7 +256,7 @@ impl VirtAddrManager {
             return Err(MemError::StoreMisaligned);
         }
 
-        let policy = Self::resolve_data_policy(csr, AccessType::Write);
+        let policy = Self::resolve_data_policy(csr, AccessType::Write, true);
         let paddr = self.translate_with_policy(addr, policy)?;
 
         self.mmio.store_conditional(paddr, data)
@@ -291,7 +299,7 @@ impl VirtAddrManager {
         T: UnsignedInteger,
         F: Fn(&T::AtomicType, T) -> Result<T, Exception>,
     {
-        let policy = Self::resolve_data_policy(csr, AccessType::ReadWrite);
+        let policy = Self::resolve_data_policy(csr, AccessType::ReadWrite, true);
         let mut paddr = match self.translate_with_policy(addr, policy) {
             Ok(p) => p,
             Err(_) => return Err(Exception::StorePageFault),
@@ -397,21 +405,37 @@ impl VirtAddrManager {
             .map(|addr| addr.into())
     }
 
-    /// Translate virtual address to physical address without side-effect.
+    /// Translates a virtual address to a physical address without checking any PTE flags or updating any bits, provided for debugger.
     ///
-    /// NOTE: This function donesn't respect privilege level.
-    pub(crate) fn debug_translate_vaddr(&self, vaddr: WordType) -> Result<u64, PageTableError> {
-        let (masks, flags) = (PTEFlags::empty(), PTEFlags::empty());
+    /// This function doesn't respect the current privilege mode or check PTE flags.
+    pub(crate) fn debug_vaddr_to_paddr(&mut self, vaddr: WordType) -> Result<u64, PageTableError> {
+        self.translate_vaddr(
+            vaddr,
+            PTEFlags::empty(),
+            PTEFlags::empty(),
+            AccessEffect::None,
+        )
+    }
 
-        self.page_table
-            .translate_vaddr(
-                unsafe { self.ram.as_mut_unchecked() },
-                vaddr.into(),
+    /// Translates an address to a physical address as a real instruction would, but without side effects (such as writing A/D bits).
+    ///
+    /// This means the function will check PTE flags, and consider CPU state like CSR settings and privilege mode.
+    pub(crate) fn debug_translate(
+        &mut self,
+        addr: u64,
+        access: AccessType,
+        csr: &mut CsrRegFile,
+    ) -> Result<u64, PageTableError> {
+        let policy = Self::resolve_data_policy(csr, access, false);
+        match policy {
+            AccessPolicy::Direct => Ok(addr),
+            AccessPolicy::Translated {
                 masks,
                 flags,
-                AccessEffect::None,
-            )
-            .map(|paddr| paddr.0)
+                effect,
+                fault: _fault,
+            } => self.translate_vaddr(addr, masks, flags, effect),
+        }
     }
 
     // virtual memory

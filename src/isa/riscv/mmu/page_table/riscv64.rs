@@ -2,6 +2,8 @@ use core::panic;
 
 use bitflags::bitflags;
 
+use super::*;
+
 use crate::{
     config::arch_config::WordType,
     isa::riscv::mmu::{
@@ -127,13 +129,6 @@ impl PageTableEntry {
     fn set_dirty(&mut self) {
         self.bits |= PTEFlags::D.bits() as WordType;
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum PageTableError {
-    AlignFault,
-    PageFault,
-    PrivilegeFault,
 }
 
 #[derive(Copy, Clone)]

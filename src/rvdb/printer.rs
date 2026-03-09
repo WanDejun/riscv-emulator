@@ -98,6 +98,12 @@ impl Printer {
                     f64_val,
                 );
             }
+            CommandOutput::Translate {
+                virt_addr,
+                phys_addr,
+            } => {
+                println!("{} -> {}", format_addr(*virt_addr), format_addr(*phys_addr));
+            }
             CommandOutput::Csr { name, val } => {
                 if let Some(v) = val {
                     #[cfg(feature = "riscv64")]

@@ -11,6 +11,7 @@ use riscv_emulator::{
     isa::riscv::{
         csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
         debugger::{Address, Debugger},
+        mmu::AccessType,
     },
     load::ELFLoader,
 };
@@ -33,6 +34,7 @@ impl<'a, B: Board> Handler<'a, B> {
             Cli::Print(cmd) => self.handle_print(cmd),
             Cli::Display(cmd) => self.handle_display(cmd),
             Cli::Undisplay(cmd) => self.handle_undisplay(cmd),
+            Cli::Translate { addr, access } => self.handle_translate(addr, access.into()),
             Cli::List => self.handle_list(),
             Cli::History { count } => self.handle_history(count),
             Cli::FTrace { count } => self.handle_ftrace(count),
@@ -47,6 +49,22 @@ impl<'a, B: Board> Handler<'a, B> {
             Cli::Quit => Ok(CommandOutput::Exit),
             Cli::SymbolFile { path } => self.handle_symbol_file(path),
         }
+    }
+
+    fn handle_translate(
+        &mut self,
+        addr: String,
+        kind: AccessType,
+    ) -> Result<CommandOutput, String> {
+        let virt_addr = parse_u64(&addr)?;
+        let phys_addr = self
+            .dbg
+            .translate(virt_addr, kind)
+            .map_err(|e| format!("{:?}", e))?;
+        Ok(CommandOutput::Translate {
+            phys_addr,
+            virt_addr,
+        })
     }
 
     fn handle_symbol_file(&mut self, path: String) -> Result<CommandOutput, String> {
