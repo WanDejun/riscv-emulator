@@ -11,9 +11,8 @@ use crate::{
     fpu::soft_float::SoftFPU,
     isa::{
         DecoderTrait,
-        icache::{ICache, SetICache},
+        cache::{Cache, SetCache},
         riscv::{
-            RiscvTypes,
             csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, instr_table::RiscvInstr},
@@ -63,7 +62,7 @@ pub struct RVCPU {
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
-    pub(super) icache: SetICache<RiscvTypes, 256, 8>,
+    pub(super) icache: SetCache<DecodeInstr, 256, 8>,
     pub(super) fpu: SoftFPU,
 
     /// The address of the memory-mapped `mtime` CSR.
@@ -115,7 +114,7 @@ impl RVCPU {
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
             csr: csr,
-            icache: SetICache::new(),
+            icache: SetCache::new(),
             fpu,
             time_addr: None,
             pending_tval: None,

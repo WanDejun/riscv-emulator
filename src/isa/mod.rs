@@ -11,7 +11,7 @@ use crate::{
     utils::UnsignedInteger,
 };
 
-pub mod icache;
+pub mod cache;
 pub mod riscv;
 
 mod utils;

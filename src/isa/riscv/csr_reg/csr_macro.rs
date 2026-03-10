@@ -128,6 +128,9 @@ macro_rules! gen_csr_address_hashmap {
 ///
 /// NOTE: If you have overlapping fields, the bits will be allowed to write if any validator allows it,
 /// so don't forget to make overlapping fields readonly when necessary.
+///
+/// TODO: Maybe it's better to use `validate_readonly` by default,
+/// because for all WARL field, we should ignore writing when we don't support.
 macro_rules! gen_csr_regfile {
     (
         $( $name:ident, $name_str: literal, $addr:expr, $default:expr,

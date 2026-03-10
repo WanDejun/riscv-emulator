@@ -4,6 +4,7 @@ use crate::{
     config::arch_config::WordType,
     isa::{
         DecoderTrait,
+        cache::Cacheable,
         riscv::{
             RiscvTypes,
             instruction::{InstrFormat, RVInstrInfo, instr_table::*},
@@ -17,6 +18,10 @@ mod mask_decoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeInstr(pub RiscvInstr, pub RVInstrInfo);
+
+impl Cacheable for DecodeInstr {
+    const ADDR_SHIFT_BITS: usize = 1;
+}
 
 impl Display for DecodeInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
