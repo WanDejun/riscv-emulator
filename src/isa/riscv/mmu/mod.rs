@@ -97,15 +97,19 @@ fn determine_data_access_privilege(csr: &mut CsrRegFile) -> AccessPrivilege {
 
 pub(crate) struct VirtAddrManager {
     mmio: MemoryMapIO,
-    page_table: PageTable,
+    page_table: PageTableWalker,
     ram: Rc<UnsafeCell<Ram>>,
 }
 
+/// The main struct for determining how to access memory and performing address translation,
+/// according to the current CSR settings, the type of access, etc.
+///
+/// The logic of TLB and walking page tables is implemented in the [`PageTable`] struct.
 impl VirtAddrManager {
     pub(crate) fn from_ram_and_mmio(ram_ref: Rc<UnsafeCell<Ram>>, mmio: MemoryMapIO) -> Self {
         Self {
             mmio: mmio,
-            page_table: PageTable::new(0, config::VirtualMemoryMode::None),
+            page_table: PageTableWalker::new(0, config::VirtualMemoryMode::None),
             ram: ram_ref,
         }
     }
@@ -466,7 +470,7 @@ impl VirtAddrManager {
         }
     }
 
-    // virtual memory
+    /// Set the virtual memory mode.
     pub fn set_mode(&mut self, mode: u8) {
         self.page_table.set_mode(mode);
     }
@@ -479,8 +483,12 @@ impl VirtAddrManager {
         self.page_table.set_ad_update_policy(policy);
     }
 
-    // sync mmio devices
+    /// sync MMIO devices
     pub fn sync(&mut self) {
         self.mmio.sync();
+    }
+
+    pub fn flush_tlb(&mut self) {
+        self.page_table.flush_tlb();
     }
 }

@@ -194,6 +194,8 @@ impl RVCPU {
             return Err(Exception::IllegalInstruction);
         }
 
+        // Changing satp.MODE from Bare to other modes and vice versa also takes effect immediately,
+        // without the need to execute an SFENCE.VMA instruction.
         if addr == Satp::get_index() {
             let satp = self.csr.get_by_type_existing::<Satp>();
             self.memory.set_mode(satp.get_mode() as u8);
@@ -311,8 +313,12 @@ impl RVCPU {
         return Ok(());
     }
 
-    pub fn clear_all_cache(&mut self) {
+    pub fn flush_icache(&mut self) {
         self.icache.clear();
+    }
+
+    pub fn flush_tlb(&mut self) {
+        self.memory.flush_tlb();
     }
 
     pub fn power_off(&mut self) -> Result<(), Exception> {

@@ -166,7 +166,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::FENCE => exec_nop,
 
         RiscvInstr::FENCE_I => |_info, cpu| {
-            cpu.clear_all_cache();
+            cpu.flush_icache();
+            cpu.flush_tlb();
             cpu.pc = cpu.pc.wrapping_add(4);
             cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
@@ -361,7 +362,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
                 return Err(Exception::IllegalInstruction);
             }
 
-            cpu.clear_all_cache();
+            cpu.memory.flush_tlb();
+            cpu.flush_icache();
+
             cpu.write_pc(cpu.pc.wrapping_add(4));
             cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())

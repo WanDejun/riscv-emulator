@@ -3,7 +3,7 @@ pub mod riscv64;
 #[cfg(feature = "riscv64")]
 pub use riscv64::*;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageTableError {
     AlignFault,
     PageFault,

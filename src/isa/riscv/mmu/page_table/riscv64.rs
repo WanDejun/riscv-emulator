@@ -1,14 +1,16 @@
-use core::panic;
-
 use bitflags::bitflags;
+use core::panic;
 
 use super::*;
 
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::mmu::{
-        address::{PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
-        config::*,
+    isa::{
+        cache::*,
+        riscv::mmu::{
+            address::{PhysicalAddr, PhysicalPageNum, VirtualAddr, VirtualPageNum},
+            config::*,
+        },
     },
     ram::Ram,
     ram_config,
@@ -139,19 +141,29 @@ struct WalkInfo {
     leaf_ppn: PhysicalPageNum,
 }
 
-pub struct PageTable {
+impl Cacheable for WalkInfo {
+    const ADDR_SHIFT_BITS: usize = PAGE_SIZE_XLEN;
+}
+
+pub struct PageTableWalker {
+    tlb: SetCache<WalkInfo, 64, 8>,
     root_address: WordType,
     mode: VirtualMemoryMode,
     ad_update_policy: AdUpdatePolicy,
 }
 
-impl PageTable {
+impl PageTableWalker {
     pub fn new(root_address: WordType, mode: VirtualMemoryMode) -> Self {
         Self {
+            tlb: SetCache::new(),
             root_address,
             mode,
-            ad_update_policy: AdUpdatePolicy::AutoSet,
+            ad_update_policy: AdUpdatePolicy::FaultOnClear,
         }
+    }
+
+    pub fn flush_tlb(&mut self) {
+        self.tlb.clear();
     }
 
     pub fn set_ad_update_policy(&mut self, ad_update_policy: AdUpdatePolicy) {
@@ -179,7 +191,7 @@ impl PageTable {
     }
 
     pub fn translate_vaddr(
-        &self,
+        &mut self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
         check: PermissionCheck,
@@ -192,7 +204,13 @@ impl PageTable {
             return Err(PageTableError::PageFault);
         }
 
-        let walk_info = self.walk_pte(mem, vaddr.vpn())?;
+        let walk_info = if let Some(info) = self.tlb.get(vaddr.vpn().address) {
+            info
+        } else {
+            let info = self.walk_pte(mem, vaddr.vpn())?;
+            // self.tlb.put(vaddr.vpn().address, info);
+            info
+        };
 
         if (walk_info.leaf_flags & check.exact_mask) != check.exact_flags
             || (check.any_of.is_empty() == false
@@ -277,6 +295,8 @@ impl PageTable {
     /// Walk page tables and return the matched leaf PTE.
     /// Return `(leaf_pte, leaf_level)` where level counts down from top to bottom.
     /// For example, in Sv39, the root level is 2, and the leaf level is 0.
+    ///
+    /// TODO: This function can be substituted by `walk_pte`, only tests are using it now.
     fn find_pte<'a>(
         &self,
         mem: &'a mut Ram,
@@ -384,10 +404,10 @@ mod test_sv39 {
     fn page_table_test() {
         let mut ram: Ram = Ram::new();
 
-        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+        let leaf_flags = PTEFlags::A | PTEFlags::V | PTEFlags::R | PTEFlags::W;
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         let paddr = page_table
             .translate_vaddr(
                 &mut ram,
@@ -416,12 +436,12 @@ mod test_sv39 {
         let pt0 = 0x8000_1000u64;
         let pt1 = 0x8000_2000u64;
         let data_page = 0x8100_0000u64;
-        let leaf_flags = PTEFlags::V | PTEFlags::R | PTEFlags::W;
+        let leaf_flags = PTEFlags::A | PTEFlags::V | PTEFlags::R | PTEFlags::W;
 
         setup_pte(&mut ram, pt0, pt1, PTEFlags::V);
         setup_pte(&mut ram, pt1, data_page, leaf_flags);
 
-        let page_table = PageTable::new(pt0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(pt0.into(), VirtualMemoryMode::Page39bit);
         let (leaf_pte, level) = page_table
             .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_8000))
             .unwrap();
@@ -450,7 +470,7 @@ mod test_sv39 {
 
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
 
         // try get instr, without X authority.
         let err = page_table
@@ -477,7 +497,7 @@ mod test_sv39 {
         setup_pte(&mut ram, PT1, PT2, PTEFlags::V);
         setup_pte(&mut ram, PT2, next_pt, PTEFlags::V);
 
-        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         let err = page_table
             .translate_vaddr(
                 &mut ram,
@@ -501,7 +521,7 @@ mod test_sv39 {
 
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         let paddr = page_table
             .translate_vaddr(
                 &mut ram,
@@ -529,7 +549,7 @@ mod test_sv39 {
 
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
 
         let err = page_table
@@ -555,7 +575,7 @@ mod test_sv39 {
 
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
 
         let paddr = page_table
@@ -581,7 +601,7 @@ mod test_sv39 {
 
         setup_3level_leaf(&mut ram, DATA_PAGE, leaf_flags);
 
-        let mut page_table = PageTable::new(PT0.into(), VirtualMemoryMode::Page39bit);
+        let mut page_table = PageTableWalker::new(PT0.into(), VirtualMemoryMode::Page39bit);
         page_table.set_ad_update_policy(AdUpdatePolicy::FaultOnClear);
 
         let paddr = page_table

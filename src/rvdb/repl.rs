@@ -1,3 +1,5 @@
+use std::process::exit;
+
 use super::Cli;
 
 use super::CommandOutput;
@@ -26,7 +28,9 @@ impl<'a, B: Board> DebugREPL<'a, B> {
     }
 
     /// Run multiple lines of commands in sequence.
-    pub fn run_script(&mut self, lines: &[String]) {
+    ///
+    /// Return true if the script contains an exit command, and false otherwise.
+    pub fn run_script(&mut self, lines: &[String]) -> bool {
         for line in lines {
             let line = line.trim();
             if line.is_empty() {
@@ -35,11 +39,15 @@ impl<'a, B: Board> DebugREPL<'a, B> {
             println!("{}{}", PROMPT, line);
 
             match self.process_line(line) {
-                Ok(CommandOutput::Exit) => break,
+                Ok(CommandOutput::Exit) => {
+                    exit(0);
+                }
                 Ok(output) => self.printer.print(&output),
                 Err(err) => println!("Error: {}", err),
             }
         }
+
+        false
     }
 
     /// REPL main loop.

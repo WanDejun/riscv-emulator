@@ -213,7 +213,8 @@ impl<'a, B: Board> Debugger<'a, B> {
         };
 
         let pc = self.read_pc();
-        let symbol = self.symbol_in_addr_range(pc).ok().cloned();
+        let in_symbol = self.symbol_in_addr_range(pc).ok().cloned();
+        let exact_symbol = self.symbol_by_addr(pc).ok().cloned();
 
         if instr_kind == RiscvInstr::JALR
             && let RVInstrInfo::I { rs1, rd, imm } = info
@@ -221,19 +222,19 @@ impl<'a, B: Board> Debugger<'a, B> {
             if rd == 0 && rs1 == 1 && imm == 0 {
                 // `jalr zero, 0(ra)` -> `ret`
                 return Some(FuncTrace::Return {
-                    name: symbol,
+                    name: in_symbol,
                     addr: pc,
                 });
             } else if rd == 1 && rs1 == 1 {
                 // jalr ra, imm(ra) -> `call`
                 return Some(FuncTrace::Call {
-                    name: symbol,
+                    name: exact_symbol,
                     addr: pc,
                 });
             } else if rd == 0 && rs1 == 6 {
                 // jalr zero, imm(x6) -> `tail`
                 return Some(FuncTrace::Call {
-                    name: symbol,
+                    name: in_symbol,
                     addr: pc,
                 });
             }
@@ -243,7 +244,7 @@ impl<'a, B: Board> Debugger<'a, B> {
             if rd == 1 {
                 // jal ra, imm -> `call`
                 return Some(FuncTrace::Call {
-                    name: symbol,
+                    name: exact_symbol,
                     addr: pc,
                 });
             }
