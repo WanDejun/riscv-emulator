@@ -2,6 +2,7 @@ use std::fs;
 
 use super::*;
 
+#[cfg(not(test))]
 use riscv_emulator::cli_coordinator::CliCoordinator;
 
 use riscv_emulator::{

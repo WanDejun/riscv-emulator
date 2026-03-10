@@ -422,10 +422,11 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
 pub(super) struct ExecRemw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
-            return Ok(a as WordType);
-        }
         let [sa, sb] = [a, b].map(|x| u32::truncate_from(x).cast_signed());
+        if unlikely(sb == 0) {
+            return Ok(sign_extend_u32(sa.cast_unsigned()));
+        }
+
         Ok(sign_extend(
             (sa.wrapping_rem(sb)).cast_unsigned() as WordType,
             32,
@@ -447,10 +448,10 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
 pub(super) struct ExecRemuw {}
 impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
-            return Ok(a);
-        }
         let [sa, sb] = [a, b].map(|x| u32::truncate_from(x));
+        if unlikely(sb == 0) {
+            return Ok(sign_extend_u32(sa));
+        }
         Ok(sign_extend((sa % sb) as WordType, 32))
     }
 }

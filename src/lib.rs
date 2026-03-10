@@ -4,7 +4,6 @@
 #![feature(macro_metavar_expr_concat)]
 #![feature(likely_unlikely)]
 #![feature(unsafe_cell_access)]
-#![feature(uint_gather_scatter_bits)]
 
 mod cpu;
 mod fpu;

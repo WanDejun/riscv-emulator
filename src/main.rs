@@ -1,7 +1,6 @@
 #![cfg_attr(debug_assertions, allow(dead_code))]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
-#![feature(macro_metavar_expr_concat)]
 
 mod logging;
 mod rvdb;
