@@ -6,6 +6,9 @@ pub use page_table::PageTableError;
 
 use std::{cell::UnsafeCell, rc::Rc};
 
+use self::config::*;
+use self::page_table::*;
+
 use crate::{
     config::arch_config::WordType,
     device::{DeviceTrait, MemError, mmio::MemoryMapIO},
@@ -15,10 +18,6 @@ use crate::{
             csr_macro::{Mstatus, Sstatus},
         },
         debugger::Address,
-        mmu::{
-            config::{AccessEffect, AdUpdatePolicy, PAGE_SIZE_XLEN},
-            page_table::{PTEFlags, PageTable},
-        },
         trap::Exception,
     },
     ram::Ram,
@@ -38,8 +37,7 @@ pub enum AccessType {
 enum AccessPolicy {
     Direct,
     Translated {
-        masks: PTEFlags,
-        flags: PTEFlags,
+        check: PermissionCheck,
         effect: AccessEffect,
         fault: MemError,
     },
@@ -130,23 +128,41 @@ impl VirtAddrManager {
             (true, AccessType::Write | AccessType::ReadWrite) => AccessEffect::AccessedDirty,
         };
 
+        let (masks, flags) = match determine_data_access_privilege(csr) {
+            AccessPrivilege::MachineOnly => return AccessPolicy::Direct,
+
+            AccessPrivilege::SupervisorAndUser => (PTEFlags::empty(), PTEFlags::empty()),
+            AccessPrivilege::SupervisorOnly => (PTEFlags::U, PTEFlags::empty()),
+            AccessPrivilege::UserOnly => (PTEFlags::U, PTEFlags::U),
+        };
+
+        if csr.get_by_type_existing::<Mstatus>().get_mxr() == 1 && access == AccessType::Read {
+            // "The MXR (Make eXecutable Readable) bit modifies the privilege with which loads access virtual memory.
+            // When MXR=0, only loads from pages marked readable (R=1) will succeed.
+            // When MXR=1, loads from pages marked either readable or executable (R=1 or X=1) will succeed."
+            return AccessPolicy::Translated {
+                check: PermissionCheck {
+                    any_of: PTEFlags::R | PTEFlags::X,
+                    exact_mask: masks,
+                    exact_flags: flags,
+                },
+                effect,
+                fault,
+            };
+        }
+
         let rwx_base = match access {
             AccessType::Read => PTEFlags::R,
             AccessType::Write => PTEFlags::W,
             AccessType::ReadWrite => PTEFlags::R | PTEFlags::W,
         };
 
-        let (masks, flags) = match determine_data_access_privilege(csr) {
-            AccessPrivilege::MachineOnly => return AccessPolicy::Direct,
-
-            AccessPrivilege::SupervisorAndUser => (rwx_base, rwx_base),
-            AccessPrivilege::SupervisorOnly => (rwx_base | PTEFlags::U, rwx_base),
-            AccessPrivilege::UserOnly => (rwx_base | PTEFlags::U, rwx_base | PTEFlags::U),
-        };
-
         AccessPolicy::Translated {
-            masks,
-            flags,
+            check: PermissionCheck {
+                any_of: PTEFlags::empty(),
+                exact_mask: masks | rwx_base,
+                exact_flags: flags | rwx_base,
+            },
             effect,
             fault,
         }
@@ -163,14 +179,20 @@ impl VirtAddrManager {
         match csr.privelege_level() {
             PrivilegeLevel::M => AccessPolicy::Direct,
             PrivilegeLevel::S => AccessPolicy::Translated {
-                masks: PTEFlags::X | PTEFlags::U,
-                flags: PTEFlags::X,
+                check: PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::X | PTEFlags::U,
+                    exact_flags: PTEFlags::X,
+                },
                 effect,
                 fault: MemError::LoadPageFault,
             },
             PrivilegeLevel::U => AccessPolicy::Translated {
-                masks: PTEFlags::X | PTEFlags::U,
-                flags: PTEFlags::X | PTEFlags::U,
+                check: PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::X | PTEFlags::U,
+                    exact_flags: PTEFlags::X | PTEFlags::U,
+                },
                 effect,
                 fault: MemError::LoadPageFault,
             },
@@ -186,12 +208,11 @@ impl VirtAddrManager {
         match policy {
             AccessPolicy::Direct => Ok(vaddr),
             AccessPolicy::Translated {
-                masks,
-                flags,
+                check,
                 effect,
                 fault,
             } => self
-                .translate_vaddr(vaddr, masks, flags, effect)
+                .translate_vaddr(vaddr, check, effect)
                 .map_err(|_| fault),
         }
     }
@@ -306,14 +327,13 @@ impl VirtAddrManager {
         };
 
         if !crate::utils::check_align::<T>(paddr) {
-            // FIXME: AMO instructions will do both load/store, which exception to raise?
             return Err(Exception::StoreMisaligned);
         }
 
         if !(ram_config::BASE_ADDR..ram_config::BASE_ADDR + ram_config::SIZE as WordType)
             .contains(&paddr)
         {
-            // FIXME: Check manual to see what should we do here.
+            // The full name of this exception is Store/AMO access fault
             return Err(Exception::StoreFault);
         }
 
@@ -357,9 +377,13 @@ impl VirtAddrManager {
         match addr {
             Address::Phys(addr) => self.read_by_paddr::<T>(addr),
             Address::Virt(addr) => {
-                let (masks, flags) = (PTEFlags::empty(), PTEFlags::empty());
+                let check = PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::empty(),
+                    exact_flags: PTEFlags::empty(),
+                };
 
-                if let Ok(paddr) = self.translate_vaddr(addr, masks, flags, AccessEffect::None) {
+                if let Ok(paddr) = self.translate_vaddr(addr, check, AccessEffect::None) {
                     self.mmio.read_by_type(paddr)
                 } else {
                     Err(MemError::LoadPageFault)
@@ -376,9 +400,13 @@ impl VirtAddrManager {
         match addr {
             Address::Phys(addr) => self.write_by_paddr::<T>(addr, data),
             Address::Virt(addr) => {
-                let (masks, flags) = (PTEFlags::empty(), PTEFlags::empty());
+                let check = PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::empty(),
+                    exact_flags: PTEFlags::empty(),
+                };
 
-                if let Ok(paddr) = self.translate_vaddr(addr, masks, flags, AccessEffect::None) {
+                if let Ok(paddr) = self.translate_vaddr(addr, check, AccessEffect::None) {
                     self.mmio.write_by_type(paddr, data)
                 } else {
                     Err(MemError::StorePageFault)
@@ -390,16 +418,14 @@ impl VirtAddrManager {
     fn translate_vaddr(
         &mut self,
         vaddr: WordType,
-        masks: PTEFlags,
-        target_flags: PTEFlags,
+        check: PermissionCheck,
         effect: AccessEffect,
     ) -> Result<u64, PageTableError> {
         self.page_table
             .translate_vaddr(
                 unsafe { self.ram.as_mut_unchecked() },
                 vaddr.into(),
-                masks,
-                target_flags,
+                check,
                 effect,
             )
             .map(|addr| addr.into())
@@ -411,8 +437,11 @@ impl VirtAddrManager {
     pub(crate) fn debug_vaddr_to_paddr(&mut self, vaddr: WordType) -> Result<u64, PageTableError> {
         self.translate_vaddr(
             vaddr,
-            PTEFlags::empty(),
-            PTEFlags::empty(),
+            PermissionCheck {
+                any_of: PTEFlags::empty(),
+                exact_mask: PTEFlags::empty(),
+                exact_flags: PTEFlags::empty(),
+            },
             AccessEffect::None,
         )
     }
@@ -430,11 +459,10 @@ impl VirtAddrManager {
         match policy {
             AccessPolicy::Direct => Ok(addr),
             AccessPolicy::Translated {
-                masks,
-                flags,
+                check,
                 effect,
                 fault: _fault,
-            } => self.translate_vaddr(addr, masks, flags, effect),
+            } => self.translate_vaddr(addr, check, effect),
         }
     }
 

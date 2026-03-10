@@ -37,7 +37,9 @@ pub enum Exception {
     Breakpoint,
     LoadMisaligned,
     LoadFault,
+    /// Store/AMO address misaligned
     StoreMisaligned,
+    /// Store/AMO access fault
     StoreFault,
     UserEnvCall,
     SupervisorEnvCall,
@@ -46,6 +48,7 @@ pub enum Exception {
     InstructionPageFault,
     LoadPageFault,
     Unknown,
+    /// Store/AMO page fault
     StorePageFault,
 }
 

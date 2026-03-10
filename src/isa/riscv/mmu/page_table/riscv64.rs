@@ -182,8 +182,7 @@ impl PageTable {
         &self,
         mem: &mut Ram,
         vaddr: VirtualAddr,
-        masks: PTEFlags,
-        target_flags: PTEFlags,
+        check: PermissionCheck,
         effect: AccessEffect,
     ) -> Result<PhysicalAddr, PageTableError> {
         if self.mode == VirtualMemoryMode::None {
@@ -194,16 +193,25 @@ impl PageTable {
         }
 
         let walk_info = self.walk_pte(mem, vaddr.vpn())?;
-        if (walk_info.leaf_flags.bits() & masks.bits()) != target_flags.bits() {
+
+        if (walk_info.leaf_flags & check.exact_mask) != check.exact_flags
+            || (check.any_of.is_empty() == false
+                && (walk_info.leaf_flags & check.any_of) == PTEFlags::empty())
+        {
             // privilege fault
 
             // When running Linux, many such logs are normal, like copy-on-write:
             // it marks pages read-only initially, and when a write access occurs,
             // the kernel will create a private copy.
             log::info!(
-                "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), target flags: ({:?})",
+                "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), {}target flags: ({:?})",
                 vaddr.0,
-                masks.0,
+                check.exact_mask.0,
+                if check.any_of.is_empty() {
+                    String::new()
+                } else {
+                    format!("and any of {:?}, ", check.any_of)
+                },
                 walk_info.leaf_flags.0
             );
             return Err(PageTableError::PrivilegeFault);
@@ -384,8 +392,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::R,
-                PTEFlags::R,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::R,
+                    exact_flags: PTEFlags::R,
+                },
                 AccessEffect::Accessed,
             )
             .unwrap();
@@ -421,8 +432,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0011_4514.into(),
-                PTEFlags::W,
-                PTEFlags::W,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::W,
+                    exact_flags: PTEFlags::W,
+                },
                 AccessEffect::Accessed,
             )
             .unwrap();
@@ -443,8 +457,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0010.into(),
-                PTEFlags::X,
-                PTEFlags::X,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::X,
+                    exact_flags: PTEFlags::X,
+                },
                 AccessEffect::Accessed,
             )
             .unwrap_err();
@@ -465,8 +482,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::R,
-                PTEFlags::R,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::R,
+                    exact_flags: PTEFlags::R,
+                },
                 AccessEffect::Accessed,
             )
             .unwrap_err();
@@ -486,8 +506,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::R,
-                PTEFlags::R,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::R,
+                    exact_flags: PTEFlags::R,
+                },
                 AccessEffect::None,
             )
             .unwrap();
@@ -513,8 +536,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::R,
-                PTEFlags::R,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::R,
+                    exact_flags: PTEFlags::R,
+                },
                 AccessEffect::Accessed,
             )
             .unwrap_err();
@@ -536,8 +562,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::R,
-                PTEFlags::R,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::R,
+                    exact_flags: PTEFlags::R,
+                },
                 AccessEffect::None,
             )
             .unwrap();
@@ -559,8 +588,11 @@ mod test_sv39 {
             .translate_vaddr(
                 &mut ram,
                 0x0000_0123.into(),
-                PTEFlags::W,
-                PTEFlags::W,
+                PermissionCheck {
+                    any_of: PTEFlags::empty(),
+                    exact_mask: PTEFlags::W,
+                    exact_flags: PTEFlags::W,
+                },
                 AccessEffect::AccessedDirty,
             )
             .unwrap();
