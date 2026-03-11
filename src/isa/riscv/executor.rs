@@ -331,7 +331,6 @@ impl RVCPU {
 
 impl RiscvIRQHandler for RVCPU {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool) {
-        log::trace!("Handling IRQ: {:?}, level: {}", interrupt, level);
         let mip = self.csr.get_by_type_existing::<Mip>();
         let level = level as WordType;
 

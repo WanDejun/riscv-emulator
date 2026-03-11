@@ -26,6 +26,8 @@ lazy_static! {
 
 impl CliCoordinator {
     pub fn new() -> Self {
+        enable_raw_mode().unwrap();
+
         Self {
             state: Arc::new((Mutex::new(CliThreadState::Running), Condvar::new())),
         }
@@ -57,6 +59,7 @@ impl CliCoordinator {
         }
 
         disable_raw_mode().unwrap();
+        log::trace!("Terminal resumed and raw mode disabled");
     }
 
     pub fn resume_uart(&self) {
@@ -70,6 +73,7 @@ impl CliCoordinator {
 
     pub fn confirm_pause_and_wait(&self) {
         let (lock, cvar) = &*self.state;
+
         {
             let mut s = lock.lock().unwrap();
 
@@ -86,5 +90,6 @@ impl CliCoordinator {
         }
 
         enable_raw_mode().unwrap();
+        log::trace!("Terminal resumed and raw mode enabled");
     }
 }

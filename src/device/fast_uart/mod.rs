@@ -1,16 +1,14 @@
-//! Only realize the basic functions of Uart16550J: TX, RX for 8bits data, 2/1stop bits.
-//! # TODO
-//! - [ ] interrupt
-//! - [ ] FIFO
-//! - [ ] DMA support
-//! - [ ] Even/Odd Parity
-//! - [ ] Different length of data bits;
+//! TODO: this module is not fully implemented according to the spec.
+//! Some features are missing, and some behavior may be incorrect due to limited test coverage.
 
 pub mod virtual_io;
 
 use std::{
     cell::RefCell,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU8},
+    },
     u8,
 };
 
@@ -21,7 +19,7 @@ use crate::{
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
-        config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
+        config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
         fast_uart::virtual_io::{SerialDestination, TerminalIO},
     },
     utils::{clear_bit, read_bit, set_bit},
@@ -30,9 +28,15 @@ use crate::{
 const UART_DATA_LENGTH: u8 = 8;
 
 pub struct UartIOChannel {
-    input_tx: Sender<u8>,
-    output_rx: Receiver<u8>,
-    busy: Arc<AtomicBool>,
+    pub(crate) input_tx: Sender<u8>,
+    pub(crate) output_rx: Receiver<u8>,
+    pub(crate) busy: Arc<AtomicBool>,
+    /// Shared IER register value for interrupt condition checking from the polling thread.
+    pub(crate) ier: Arc<AtomicU8>,
+    /// Shared THRE event latch used by the ETBEI/THRE interrupt path.
+    pub(crate) thre_pending: Arc<AtomicBool>,
+    /// PLIC interrupt source ID for this UART.
+    pub(crate) interrupt_id: u32,
 }
 
 #[allow(unused)]
@@ -62,8 +66,7 @@ struct Uart16550Reg {   //  | LCR   |  Addr |         Description               
     THR:    u8,         //  | 0     | +0x0  | Transmitter Holding Register      |   WO
     IER:    u8,         //  | 0     | +0x1  | Interrupt Enable Register         |   RW
     IIR:    u8,         //  | Any   | +0x2  | Interrupt Identification Register |   RO
-    // FCR:    u8,      //  | Any   | +0x2  | FIFO Control Register             |   WO
-    FCR:    u8,         //  | 1     | +0x2  | FIFO Control Register             |   RO
+    FCR:    u8,         //  | Any   | +0x2  | FIFO Control Register             |   WO
     LCR:    u8,         //  | Any   | +0x3  | Line Control Register             |   RW
     MCR:    u8,         //  | Any   | +0x4  | Modem Control Register            |   RW
     LSR:    u8,         //  | Any   | +0x5  | Line Status Register              |   RW
@@ -129,6 +132,11 @@ pub struct FastUart16550 {
     output_tx: Sender<u8>,
     output_rx: Receiver<u8>,
     sync_lock: Arc<AtomicBool>,
+    /// Shared IER value for the polling thread to check interrupt conditions.
+    ier_shared: Arc<AtomicU8>,
+    /// THRE event latch for simplified ETBEI behavior.
+    /// Cleared when IIR reports THRE as the identified interrupt source.
+    thre_pending: Arc<AtomicBool>,
 }
 impl FastUart16550 {
     pub fn new() -> Self {
@@ -168,15 +176,8 @@ impl FastUart16550 {
         let (input_tx, input_rx) = channel::unbounded();
         let (output_tx, output_rx) = channel::unbounded();
         let sync_lock = Arc::new(AtomicBool::new(false));
-
-        // if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-        //     spawn_io_thread(input_tx.clone(), output_rx.clone(), sync_lock.clone());
-        // } else {
-        //     SIMULATION_IO
-        //         .lock()
-        //         .unwrap()
-        //         .set(Some((input_tx.clone(), output_rx.clone())));
-        // }
+        let ier_shared = Arc::new(AtomicU8::new(0));
+        let thre_pending = Arc::new(AtomicBool::new(true)); // THR is initially empty.
 
         drop(reg_ref);
         Self {
@@ -189,7 +190,52 @@ impl FastUart16550 {
             output_tx,
             output_rx,
             sync_lock,
+            ier_shared,
+            thre_pending,
         }
+    }
+
+    /// Compute a simplified IIR (Interrupt Identification Register) view based on current IER/LSR/FCR state.
+    fn compute_iir(&mut self) -> u8 {
+        let reg = self.reg.borrow();
+        let ier = reg.IER;
+        let lsr = reg.LSR;
+        let fcr = reg.FCR;
+
+        let mut iir: u8 = 0x01;
+
+        // FIFO enabled status in IIR[7:6]
+        if fcr & 0x01 != 0 {
+            iir |= 0xC0;
+        }
+
+        // Check interrupt conditions in priority order.
+        if ier & 0x04 != 0 && lsr & 0x1E != 0 {
+            // Receiver Line Status (OE, PE, FE, BI)
+            iir = (iir & 0xC0) | 0x06;
+        } else if ier & 0x01 != 0 && lsr & 0x01 != 0 {
+            // Received Data Available
+            iir = (iir & 0xC0) | 0x04;
+        } else if ier & 0x02 != 0 && self.thre_pending.load(std::sync::atomic::Ordering::Acquire) {
+            // Transmitter Holding Register Empty (edge-triggered)
+            // Reading IIR with THRE identified clears the pending condition.
+            self.thre_pending
+                .store(false, std::sync::atomic::Ordering::Release);
+            iir = (iir & 0xC0) | 0x02;
+        } else if ier & 0x08 != 0 {
+            // Modem Status
+            iir = (iir & 0xC0) | 0x00;
+        }
+
+        log::trace!(
+            "[UART] compute_iir: IER={:#04x} LSR={:#04x} thre_pending={} => IIR={:#04x}",
+            ier,
+            lsr,
+            self.thre_pending.load(std::sync::atomic::Ordering::Relaxed),
+            iir
+        );
+
+        iir
     }
 
     fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
@@ -221,6 +267,9 @@ impl FastUart16550 {
             for i in inner_addr..8.min(inner_addr + size) {
                 if i == 0 {
                     data = self.read_RBR().into(); // RBR must be the first byte.
+                } else if i == 2 {
+                    // IIR: compute dynamically instead of reading stale value
+                    data |= T::from(self.compute_iir() << (8 * (i - inner_addr)));
                 } else {
                     data |= T::from(
                         unsafe { self.reg_ptr[i].read_volatile() } << (8 * (i - inner_addr)),
@@ -242,20 +291,54 @@ impl FastUart16550 {
         let mut data: u64 = data.into();
 
         if (self.reg.borrow().LCR & (1 << 7)) == (1 << 7) {
-            // LCR
+            // LCR (Divisor Latch Access)
             for i in inner_addr..8.min(inner_addr + size) {
                 unsafe { self.reg_lcr_ptr[i].write_volatile((data & (0xff)) as u8) }
-                data >>= 1;
+                data >>= 8;
             }
         } else {
             // Normal
             for i in inner_addr..8.min(inner_addr + size) {
                 if i == 0 {
-                    let _ = self.output_tx.send((data & (0xff)) as u8);
+                    // Writing to THR: send the byte immediately.
+                    let byte = (data & 0xff) as u8;
+                    log::trace!(
+                        "[UART] THR write: {:#04x} '{}'",
+                        byte,
+                        if byte.is_ascii_graphic() || byte == b' ' {
+                            byte as char
+                        } else {
+                            '.'
+                        }
+                    );
+                    let _ = self.output_tx.send(byte);
+                    // In a real 16550, writing THR clears LSR[5] (THRE) momentarily,
+                    // then sets it again when the shift register accepts the byte.
+                    // Since fast_uart sends instantly, we just re-arm the THRE event.
+                    self.thre_pending
+                        .store(true, std::sync::atomic::Ordering::Release);
                 } else {
                     unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
+                    if i == 1 {
+                        let new_ier = (data & 0xff) as u8;
+                        let old_ier = self
+                            .ier_shared
+                            .swap(new_ier, std::sync::atomic::Ordering::AcqRel);
+                        // Re-arm THRE event when ETBEI (IER bit1) transitions 0->1.
+                        if new_ier & 0x02 != 0 && old_ier & 0x02 == 0 {
+                            self.thre_pending
+                                .store(true, std::sync::atomic::Ordering::Release);
+                            log::trace!(
+                                "[UART] IER write: {:#04x} -> {:#04x}, ETBEI newly set, thre_pending=true",
+                                old_ier,
+                                new_ier
+                            );
+                        } else {
+                            log::trace!("[UART] IER write: {:#04x} -> {:#04x}", old_ier, new_ier);
+                        }
+                    }
                 }
-                data >>= 1;
+                data >>= 8;
             }
         }
 
@@ -267,33 +350,10 @@ impl FastUart16550 {
             input_tx: self.input_tx.clone(),
             output_rx: self.output_rx.clone(),
             busy: self.sync_lock.clone(),
+            ier: self.ier_shared.clone(),
+            thre_pending: self.thre_pending.clone(),
+            interrupt_id: UART_IRQ,
         }
-    }
-
-    #[cfg(test)]
-    /// ## TEST ONLY
-    /// Do not enable terminal output for test, uart will send output data here.
-    /// You can use the function to receive output data for assert.
-    pub fn read_output_data(&mut self) -> Vec<u8> {
-        let mut datas = Vec::new();
-        while let Ok(data) = self.output_rx.try_recv() {
-            datas.push(data);
-        }
-
-        datas
-    }
-
-    /// ## TEST ONLY
-    /// Do not enable terminal input for test, uart will send output data here.
-    /// You can use the function to receive output data for assert.
-    #[cfg(test)]
-    pub fn send_input_data(&mut self) -> Vec<u8> {
-        let mut datas = Vec::new();
-        while let Ok(data) = self.output_rx.try_recv() {
-            datas.push(data);
-        }
-
-        datas
     }
 
     #[allow(non_snake_case)]

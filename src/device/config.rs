@@ -22,6 +22,8 @@ pub const UART_DEFAULT_DIV: usize = 1;
 pub const UART_NAME: &'static str = "uart";
 pub const UART_BASE: WordType = 0x1000_0000;
 pub const UART_SIZE: WordType = 8;
+/// UART PLIC interrupt source ID, must match DTS `interrupts = <0xa>`
+pub const UART_IRQ: u32 = 10;
 
 pub const VIRTIO_MMIO_NAME: &'static str = "virtio-mmio-device";
 pub const VIRTIO_MMIO_BASE: WordType = 0x1000_1000;

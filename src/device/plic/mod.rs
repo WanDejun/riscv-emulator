@@ -290,6 +290,7 @@ impl PLIC {
                 } else if offset_in_context == 1 {
                     // Claim/Complete
                     let data = self.layout.contexts[context_id].claim;
+                    log::trace!("[PLIC] claim read ctx={} => id={}", context_id, data);
                     Ok(unsafe { core::mem::transmute_copy(&data) })
                 } else {
                     Err(MemError::LoadFault)
@@ -345,10 +346,17 @@ impl PLIC {
                 } else if offset_in_context == 1 {
                     // Claim/Complete
                     let old_claim = &mut self.layout.contexts[context_id].claim;
+                    log::trace!("[PLIC] complete write ctx={} id={}", context_id, *old_claim);
                     self.layout
                         .interrupt_sources_busy
                         .remove(*old_claim as usize);
                     *old_claim = 0;
+                    // De-assert the interrupt line after completion.
+                    // The next try_get_interrupt() call will re-assert if more
+                    // pending interrupts are waiting.
+                    if let Some(irq_line) = &mut self.irq_line[context_id] {
+                        irq_line.set_irq(false);
+                    }
                     Ok(())
                 } else {
                     Err(MemError::StoreFault)
@@ -381,9 +389,26 @@ impl PLIC {
             if let Some(irq_line) = &mut self.irq_line[context_nr] {
                 irq_line.set_irq(true);
             }
+            log::trace!(
+                "[PLIC] assert IRQ line ctx={} id={}",
+                context_nr,
+                interrupt_id
+            );
 
             Some(interrupt_id)
+        } else if self.layout.contexts[context_nr].claim == 0 {
+            // No pending interrupts AND no in-flight claim — safe to de-assert.
+            // This is critical: without de-assertion after completion, xEIP stays
+            // stuck at 1 and the CPU re-enters the handler endlessly.
+            if let Some(irq_line) = &mut self.irq_line[context_nr] {
+                irq_line.set_irq(false);
+            }
+            None
         } else {
+            // claim != 0: interrupt was pre-claimed by check_interrupt() but the
+            // CPU hasn't read the claim register yet.  Keep the IRQ line asserted
+            // so SEIP stays set — the CPU will service it once it finishes its
+            // current work (e.g. page-fault handling).
             None
         }
     }

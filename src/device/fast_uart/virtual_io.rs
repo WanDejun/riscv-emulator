@@ -64,7 +64,7 @@ impl PollingEventTrait for TerminalIO {
         // We should merge them in the future.
         CliCoordinator::global().confirm_pause_and_wait();
 
-        // output epoll
+        // output polling
         loop {
             // lock
             if !self
@@ -85,11 +85,14 @@ impl PollingEventTrait for TerminalIO {
             .busy
             .store(false, std::sync::atomic::Ordering::Release);
 
-        // input epoll
+        // input polling
+        let mut has_input = false;
         if event::poll(Duration::from_millis(20)).unwrap() {
             if let Event::Key(k) = event::read().unwrap() {
+                has_input = true;
                 match k.code {
                     KeyCode::Char(c) => self.channel.input_tx.send(c as u8).unwrap(),
+                    KeyCode::Esc => self.channel.input_tx.send(0x1B).unwrap(),
                     KeyCode::Tab => self.channel.input_tx.send(b'\t').unwrap(),
                     KeyCode::Backspace => self.channel.input_tx.send(0x08).unwrap(),
                     KeyCode::Enter => self.channel.input_tx.send(b'\r').unwrap(),
@@ -104,19 +107,44 @@ impl PollingEventTrait for TerminalIO {
                         }
                     }
                     KeyCode::Left => {
-                        for v in [0x1B, 0x5B, 0x43] {
-                            self.channel.input_tx.send(v).unwrap();
-                        }
-                    }
-                    KeyCode::Right => {
                         for v in [0x1B, 0x5B, 0x44] {
                             self.channel.input_tx.send(v).unwrap();
                         }
                     }
-                    _ => {}
+                    KeyCode::Right => {
+                        for v in [0x1B, 0x5B, 0x43] {
+                            self.channel.input_tx.send(v).unwrap();
+                        }
+                    }
+                    _ => {
+                        has_input = false;
+                    }
                 }
             }
         }
-        None
+
+        // Check UART interrupt conditions from IER bits.
+        // IER bit1 (ETBEI) gates THRE interrupt signaling.
+        // IER bit0 (ERBFI) gates RDA interrupt signaling.
+        let ier = self.channel.ier.load(std::sync::atomic::Ordering::Acquire);
+        let thre_interrupt = ier & 0x02 != 0
+            && self
+                .channel
+                .thre_pending
+                .load(std::sync::atomic::Ordering::Acquire);
+        let rda_interrupt = ier & 0x01 != 0 && has_input;
+
+        if thre_interrupt || rda_interrupt {
+            log::trace!(
+                "[UART-poll] firing IRQ {}: thre={} rda={} ier={:#04x}",
+                self.channel.interrupt_id,
+                thre_interrupt,
+                rda_interrupt,
+                ier
+            );
+            Some(self.channel.interrupt_id)
+        } else {
+            None
+        }
     }
 }
