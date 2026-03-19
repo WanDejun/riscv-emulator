@@ -50,8 +50,8 @@ lto = "off"
 codegen-units = 16
 incremental = true
 
-
-[profile.release]
+[profile.release-with-debug]
+inherits = "release"
 debug = true
 
 [dev-dependencies.cargo-husky]

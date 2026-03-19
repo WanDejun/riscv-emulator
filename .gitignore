@@ -59,6 +59,10 @@
 # track all files in `data/`
 !data/**
 
+!dts/
+!dts/*.dts
+!dts/*.dtsi
+
 # track submodule
 !.gitmodules
 !riscv-tests/

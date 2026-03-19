@@ -1,0 +1,99 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x2>;  // 节点中的 reg 的地址宽度为64位
+	#size-cells = <0x2>;     // 节点中的 reg 的大小宽度为64位
+	compatible = "virt-board"; // 设备兼容性标识
+	model = "virt-board,riscv-emulator"; // 人类可读的板级型号
+
+	// 通过 syscon-poweroff 关机：向 regmap 指向的寄存器 offset 写入 value 后触发关机
+	poweroff {
+		value = <0x5555>;
+		offset = <0x00>;
+		regmap = <&powermanager>;
+		compatible = "syscon-poweroff";
+	};
+
+    // 定义chosen子节点，用于传递输入参数
+	chosen {
+		stdout-path = "/soc/uart0@10000000";  // 定义系统标准输出stdout节点
+		bootargs = "console=ttyS0 earlycon=sbi initcall_debug";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		// reg = <addr_high addr_low size_high size_low>;
+		// 因为前面定义了 #address-cells 和 #size-cells 为 2
+		reg = <0x0 0x80000000 0x0 0x80000000>;
+	};
+
+	cpus {
+		#address-cells = <0x1>; // 节点中的 reg 的地址宽度为 32 位
+		#size-cells = <0x0>;    // 节点中的 reg 不指示大小
+		timebase-frequency = <0x989680>;
+
+		cpu0: cpu@0 {
+			phandle = <0xf>;
+			device_type = "cpu";
+			reg = <0x0>;
+			status = "okay";      // 表示启用该设备
+			compatible = "riscv";
+			riscv,isa = "rv64imafd";
+			mmu-type = "riscv,sv39";
+
+			cpu0_intc: interrupt-controller { // 中断控制器子节点
+				#interrupt-cells = <0x1>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <0xf>;
+				};
+			};
+		};
+	};
+
+	// soc 子节点，用于定义外设信息
+	soc {
+		#address-cells = <0x2>; // 节点中的 reg 的地址宽度为64位
+		#size-cells = <0x2>;    // 节点中的 reg 的大小宽度为64位
+		compatible = "simple-bus";
+		ranges;                 // 子节点地址空间和父地址空间的映射计算方式，这里为空是直接映射的
+ 
+		uart0: uart0@10000000 {
+			interrupts = <0xa>;
+			interrupt-parent = <0x11>;
+			clock-frequency = <0x384000>;
+			reg = <0x0 0x10000000 0x0 0x8>;
+			compatible = "ns16550a";
+		};
+
+		plic@c000000 {
+			phandle = <0x11>;
+			riscv,ndev = <0x35>;
+			reg = <0x0 0xc000000 0x0 0x4000000>;
+			// 0xb: Machine external interrupt, 0x9: Supervisor external interrupt
+			interrupts-extended = <&cpu0_intc 0xb &cpu0_intc 0x9>;
+			interrupt-controller;
+			compatible = "riscv,plic0";
+			#interrupt-cells = <0x1>;
+			#address-cells = <0x0>;
+		};
+
+		clint@2000000 {
+			// 0x3: Machine software interrupt, 0x7: Machine timer interrupt
+			interrupts-extended = <&cpu0_intc 0x3 &cpu0_intc 0x7>;
+			reg = <0x0 0x2000000 0x0 0x10000>;
+			compatible = "riscv,clint0";
+		};
+
+		powermanager: test@100000 {
+			reg = <0x00 0x100000 0x00 0x1000>;
+			compatible = "sifive,test1", "sifive,test0", "syscon";
+		};
+	};
+};

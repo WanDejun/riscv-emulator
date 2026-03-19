@@ -1,9 +1,9 @@
 use crate::config::arch_config::WordType;
 
-// TODO add size() fn to DeviceTrait
 pub const POWER_MANAGER_NAME: &'static str = "virt-power";
 pub const POWER_MANAGER_BASE: WordType = 0x10_0000;
-pub const POWER_MANAGER_SIZE: WordType = 2;
+// Cannot be too small - the OpenSBI disallow.
+pub const POWER_MANAGER_SIZE: WordType = 0x1000;
 
 #[cfg(feature = "test-device")]
 pub const TEST_DEVICE_BASE: WordType = 0x10_1000;
