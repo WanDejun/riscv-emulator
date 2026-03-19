@@ -58,19 +58,23 @@ where
     result
 }
 
+#[inline(always)]
 pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
     let sign_bit = XLEN as u32 - from_bits;
     ((value << sign_bit) as SignedWordType >> sign_bit) as WordType
 }
 
+#[inline]
 pub fn sign_extend_u32(value: u32) -> u64 {
     sign_extend(value as WordType, 32)
 }
 
+#[inline]
 pub fn is_sign_extended(value: WordType, bits: u32) -> bool {
     value == sign_extend(value, bits)
 }
 
+#[inline]
 pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
     lhs.cast_signed()
         .wrapping_add(rhs.cast_signed())
@@ -78,6 +82,7 @@ pub fn wrapping_add_as_signed(lhs: WordType, rhs: WordType) -> WordType {
 }
 
 /// get the negative of given number of [`WordType`] in 2's complement.
+#[inline]
 pub fn negative_of(value: WordType) -> WordType {
     (!value).wrapping_add(1)
 }

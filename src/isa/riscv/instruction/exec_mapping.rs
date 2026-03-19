@@ -17,7 +17,6 @@ use crate::{
             trap::{Exception, trap_controller::TrapController},
         },
     },
-    utils::sign_extend,
 };
 
 pub(in crate::isa::riscv) fn get_exec_func(
@@ -92,7 +91,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // Jump and link
         RiscvInstr::JAL => |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
             if let RVInstrInfo::J { rd, imm } = inst_info {
-                let target = cpu.pc.wrapping_add(sign_extend(imm, 21));
+                let target = cpu.pc.wrapping_add(imm); // imm has been sign_extended
 
                 // > "The JAL and JALR instructions will generate an instruction-address-misaligned exception
                 // if the target address is not aligned to a four-byte boundary."
@@ -114,7 +113,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             if let RVInstrInfo::I { rs1, rd, imm } = inst_info {
                 let t = cpu.pc + 4;
                 let val = cpu.reg_file.read(rs1, 0).0;
-                let target: WordType = val.wrapping_add(sign_extend(imm, 12)) & !1;
+                let target: WordType = val.wrapping_add(imm) & !1; // imm has been sign_extended
 
                 // Same as JAL
                 if unlikely((target & 0x3) != 0) {
@@ -133,8 +132,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::AUIPC => |inst_info, cpu| {
             if let RVInstrInfo::U { rd, imm } = inst_info {
-                cpu.reg_file
-                    .write(rd, cpu.pc.wrapping_add(sign_extend(imm, 32)));
+                cpu.reg_file.write(rd, cpu.pc.wrapping_add(imm)); // imm has been sign_extended
                 cpu.pc = cpu.pc.wrapping_add(4);
                 cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
                 Ok(())
@@ -145,7 +143,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::LUI => |inst_info, cpu| {
             if let RVInstrInfo::U { rd, imm } = inst_info {
-                cpu.reg_file.write(rd, sign_extend(imm, 32));
+                cpu.reg_file.write(rd, imm); // imm has been sign_extended
                 cpu.pc = cpu.pc.wrapping_add(4);
                 cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
                 Ok(())

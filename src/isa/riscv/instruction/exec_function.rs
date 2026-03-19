@@ -1,4 +1,7 @@
-use std::{hint::unlikely, marker::PhantomData};
+use std::{
+    hint::{unlikely, unreachable_unchecked},
+    marker::PhantomData,
+};
 
 pub(super) use super::exec_float_function::*;
 use super::normal_exec;
@@ -25,9 +28,10 @@ pub(super) trait ExecTrait<T> {
     fn exec(a: WordType, b: WordType) -> T;
 }
 
+// XXX: Remeber that `imm` has been sign_extended in decoder.
+
 /// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I/RV64I.
-///
-/// This will always do signed extension to `imm` as 12 bit.
+#[inline]
 pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     F: ExecTrait<Result<WordType, Exception>>,
@@ -40,10 +44,9 @@ where
             }
             RVInstrInfo::I { rs1, rd, imm } => {
                 let val1 = cpu.reg_file.read(rs1, 0).0;
-                let simm = sign_extend(imm, 12);
-                (rd, F::exec(val1, simm)?)
+                (rd, F::exec(val1, imm)?) // imm has been sign_extended
             }
-            _ => std::unreachable!(),
+            _ => unsafe { unreachable_unchecked() },
         };
 
         cpu.reg_file.write(rd, rst);
@@ -59,7 +62,7 @@ where
         let (val1, val2) = cpu.reg_file.read(rs1, rs2);
 
         if F::exec(val1, val2) {
-            let target = cpu.pc.wrapping_add(sign_extend(imm, 13));
+            let target = cpu.pc.wrapping_add(imm); // imm has been sign_extended
 
             // Like JAL(R), branch instructions will generate an exception.
             // TODO: Like JAL(R), remember that this check should be disabled if 16-bit instructions are enabled.
@@ -87,33 +90,32 @@ where
     T: UnsignedInteger,
 {
     normal_exec(cpu, |cpu| {
-        if let RVInstrInfo::I { rs1, rd, imm } = info {
-            let val = cpu.reg_file.read(rs1, 0).0;
-            let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
-            let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
-
-            match ret {
-                Ok(data) => {
-                    let data_64: u64 = data.into();
-                    let mut data = data_64 as WordType;
-                    if EXTEND {
-                        data = sign_extend(data, (size_of::<T>() as u32) * 8);
-                    }
-                    cpu.reg_file.write(rd, data);
-                }
-                Err(err) => {
-                    cpu.pending_tval = Some(addr);
-
-                    // `LoadPageFault` and `LoadMisaligned` are common, so no need to log.
-                    if unlikely(err == MemError::LoadFault) {
-                        log::warn!("Load fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
-                    }
-
-                    return Err(Exception::from_memory_err(err));
-                }
-            }
-        } else {
+        let RVInstrInfo::I { rs1, rd, imm } = info else {
             std::unreachable!();
+        };
+        let val = cpu.reg_file.read(rs1, 0).0;
+        let addr = wrapping_add_as_signed(val, imm);
+        let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
+
+        match ret {
+            Ok(data) => {
+                let data_64: u64 = data.into();
+                let mut data = data_64 as WordType;
+                if EXTEND {
+                    data = sign_extend(data, (size_of::<T>() as u32) * 8);
+                }
+                cpu.reg_file.write(rd, data);
+            }
+            Err(err) => {
+                cpu.pending_tval = Some(addr);
+
+                // `LoadPageFault` and `LoadMisaligned` are common, so no need to log.
+                if unlikely(err == MemError::LoadFault) {
+                    log::warn!("Load fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
+                }
+
+                return Err(Exception::from_memory_err(err));
+            }
         }
         Ok(())
     })
@@ -124,23 +126,22 @@ where
     T: UnsignedInteger,
 {
     normal_exec(cpu, |cpu| {
-        if let RVInstrInfo::S { rs1, rs2, imm } = info {
-            let (val1, val2) = cpu.reg_file.read(rs1, rs2);
-            let addr = wrapping_add_as_signed(val1, sign_extend(imm, 12));
-
-            let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
-            if let Err(err) = ret {
-                cpu.pending_tval = Some(addr);
-
-                // `SotrePageFault` and `SotreMisaligned` are common, so no need to log.
-                if unlikely(err == MemError::StoreFault) {
-                    log::warn!("Store fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
-                }
-
-                return Err(Exception::from_memory_err(err));
-            }
-        } else {
+        let RVInstrInfo::S { rs1, rs2, imm } = info else {
             std::unreachable!();
+        };
+        let (val1, val2) = cpu.reg_file.read(rs1, rs2);
+        let addr = wrapping_add_as_signed(val1, imm);
+
+        let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
+        if let Err(err) = ret {
+            cpu.pending_tval = Some(addr);
+
+            // `SotrePageFault` and `SotreMisaligned` are common, so no need to log.
+            if unlikely(err == MemError::StoreFault) {
+                log::warn!("Store fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
+            }
+
+            return Err(Exception::from_memory_err(err));
         }
         Ok(())
     })
@@ -151,6 +152,10 @@ pub(super) fn exec_csrw<const UIMM: bool>(
     cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
     if let RVInstrInfo::I { rs1, rd, imm } = info {
+        // For I-type instructions, `imm` has been 12-bit sign-extended in decoder for performance,
+        // but in CSRW instruction, `imm` is actually a CSR index, sign-extend is not needed.
+        let imm = imm.truncate_to_bits(12);
+
         // Check write permission before read CSR.
         if cpu.csr.is_write_priv_legal(imm) == false {
             return Err(Exception::IllegalInstruction);
@@ -186,6 +191,9 @@ pub(super) fn exec_csr_bit<const SET: bool, const UIMM: bool>(
     let RVInstrInfo::I { rs1, rd, imm } = info else {
         unreachable!();
     };
+
+    // See the comments in [`exec_csrw`].
+    let imm = imm.truncate_to_bits(12);
 
     let rhs = if UIMM {
         rs1 as WordType
@@ -412,10 +420,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
             return Ok(WordType::MAX);
         }
 
-        Ok(sign_extend(
-            (sa.wrapping_div(sb)).cast_unsigned() as WordType,
-            32,
-        ))
+        Ok(sign_extend_u32((sa.wrapping_div(sb)).cast_unsigned()))
     }
 }
 
@@ -427,10 +432,7 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
             return Ok(sign_extend_u32(sa.cast_unsigned()));
         }
 
-        Ok(sign_extend(
-            (sa.wrapping_rem(sb)).cast_unsigned() as WordType,
-            32,
-        ))
+        Ok(sign_extend_u32((sa.wrapping_rem(sb)).cast_unsigned()))
     }
 }
 

@@ -59,7 +59,7 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::I { rs1, rd, imm } = info {
             let val = cpu.reg_file.read(rs1, 0).0;
-            let addr = wrapping_add_as_signed(val, sign_extend(imm, 12));
+            let addr = wrapping_add_as_signed(val, imm); // imm has been sign_extended
             let rst = cpu.memory.read::<F::BitsType>(addr, &mut cpu.csr);
 
             match rst {
@@ -86,7 +86,7 @@ where
         if let RVInstrInfo::S { rs1, rs2, imm } = info {
             let addr = cpu.reg_file.read(rs1, 0).0;
             let val: F::BitsType = cpu.fpu.load_raw(rs2).truncate_to();
-            let addr = wrapping_add_as_signed(addr, sign_extend(imm, 12));
+            let addr = wrapping_add_as_signed(addr, imm); // imm has been sign_extended
 
             let ret = cpu.memory.write(addr, val, &mut cpu.csr);
             if let Err(err) = ret {

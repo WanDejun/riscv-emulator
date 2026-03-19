@@ -54,11 +54,26 @@ where
 
 type ExecFn = fn(RVInstrInfo, &mut RVCPU) -> Result<(), riscv::trap::Exception>;
 
-/// `imm` value is shifted:
+/// XXX: The `imm` value has been processed (shifted and sign_extended) for performance.
+/// DO NOT process it again.
 ///
-/// Type B: 1
-/// Type U: 12
-/// Type J: 12
+/// `imm` value is shifted by:
+///
+/// Type B: 1,
+/// Type J: 12,
+/// Type U: 12,
+///
+/// `imm` value is sign_extended by:
+///
+/// Type B: 13,
+/// Type I: 12,
+/// Type J: 21,
+/// Type U: 32,
+/// Type S: 12,
+///
+/// The `imm` value has been masked in the right shift instructions like `SRLI`.
+///
+/// For detailed implementation, see [`super::decoder::decode_info`].
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RVInstrInfo {

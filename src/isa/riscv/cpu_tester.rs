@@ -305,6 +305,11 @@ impl ExecTester {
     {
         let val = self.rand_word();
         let imm = self.rand_imm12();
-        self.test_rand_i_with(instr, val, imm, calc(val, sign_extend(imm, 12)));
+        self.test_rand_i_with(
+            instr,
+            val,
+            sign_extend(imm, 12),
+            calc(val, sign_extend(imm, 12)),
+        );
     }
 }

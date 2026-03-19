@@ -126,6 +126,9 @@ impl RVCPU {
         instr: RiscvInstr,
         info: RVInstrInfo,
     ) -> Result<(), Exception> {
+        // Replacing function-pointer dispatch in `get_exec_func` with immediate call to the execution function,
+        // makes the program 10%-20% slower on my machine.
+        // This is likely because it hurts jump-table dispatch and pulls some cold paths into the hot path.
         let rst = get_exec_func(instr)(info, self);
         self.reg_file[0] = 0;
 

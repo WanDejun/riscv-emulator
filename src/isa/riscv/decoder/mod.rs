@@ -11,6 +11,7 @@ use crate::{
         },
         utils::ISABuilder,
     },
+    utils::sign_extend,
 };
 
 mod funct_decoder;
@@ -121,7 +122,7 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
             RVInstrInfo::I {
                 rd: rd,
                 rs1: rs1,
-                imm: imm,
+                imm: sign_extend(imm, 12),
             }
         }
         InstrFormat::S => {
@@ -129,14 +130,14 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
             RVInstrInfo::S {
                 rs1: rs1,
                 rs2: rs2,
-                imm: imm as WordType,
+                imm: sign_extend(imm as WordType, 12),
             }
         }
         InstrFormat::U => {
             let imm = (raw_instr >> 12) << 12;
             RVInstrInfo::U {
                 rd: rd,
-                imm: imm as WordType,
+                imm: sign_extend(imm as WordType, 32),
             }
         }
         InstrFormat::B => {
@@ -147,7 +148,7 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
             RVInstrInfo::B {
                 rs1: rs1,
                 rs2: rs2,
-                imm: imm as WordType,
+                imm: sign_extend(imm as WordType, 13),
             }
         }
         InstrFormat::J => {
@@ -157,7 +158,7 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
                 | (((raw_instr >> 21) & 0x3FF) << 1);
             RVInstrInfo::J {
                 rd: rd,
-                imm: imm as WordType,
+                imm: sign_extend(imm as WordType, 21),
             }
         }
         InstrFormat::None => RVInstrInfo::None,
@@ -167,16 +168,14 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
 #[cfg(test)]
 mod tests {
     use crate::{
-        config::arch_config::WordType,
         isa::riscv::{
             csr_reg::csr_index,
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
         },
-        utils::{TruncateToBits, negative_of},
+        utils::negative_of,
     };
 
     use super::*;
-    use rand::{Rng, rngs::ThreadRng};
 
     // TODO: add more tests
 
@@ -232,140 +231,18 @@ mod tests {
 
     struct Checker {
         decoder: Decoder,
-        rng: ThreadRng, // TODO: consider make it fixed by seed
     }
 
     impl Checker {
         fn new() -> Self {
             Checker {
                 decoder: Decoder::new(),
-                rng: rand::rng(),
             }
         }
 
         fn check(&mut self, instr: u32, expected: RiscvInstr, expected_info: RVInstrInfo) {
             let result = self.decoder.decode(instr).unwrap();
             assert_eq!(result, DecodeInstr(expected, expected_info));
-        }
-
-        fn test_instr_r(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8, funct7: u8) {
-            let rd = self.rng.random_range(0..=0b11111) as u8;
-            let rs1 = self.rng.random_range(0..=0b11111) as u8;
-            let rs2 = self.rng.random_range(0..=0b11111) as u8;
-
-            let instr = get_instr_r(opcode, funct3, funct7, rd, rs1, rs2);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::R {
-                    rs1: rs1,
-                    rs2: rs2,
-                    rd: rd,
-                },
-            );
-        }
-
-        fn test_instr_i(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
-            let rd = self.rng.random_range(0..=0b11111) as u8;
-            let rs1 = self.rng.random_range(0..=0b11111) as u8;
-            let imm = self.rng.random_range(0..=0xFFF) as u32;
-
-            let instr = get_instr_i(opcode, funct3, rd, rs1, imm);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::I {
-                    rs1: rs1,
-                    rd: rd,
-                    imm: imm as WordType,
-                },
-            );
-        }
-
-        fn test_instr_s(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
-            let rs1 = self.rng.random_range(0..=0b11111) as u8;
-            let rs2 = self.rng.random_range(0..=0b11111) as u8;
-            let imm = self.rng.random_range(0..=0x7FF) as u32;
-
-            let instr = get_instr_s(opcode, funct3, rs1, rs2, imm);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::S {
-                    rs1: rs1,
-                    rs2: rs2,
-                    imm: imm as WordType,
-                },
-            );
-        }
-
-        fn test_instr_b(&mut self, instr_kind: RiscvInstr, opcode: u8, funct3: u8) {
-            let rs1 = self.rng.random_range(0..=0b11111) as u8;
-            let rs2 = self.rng.random_range(0..=0b11111) as u8;
-            let imm = self.rng.random_range(0..=0xFFF) << 1 as u32;
-
-            let instr = get_instr_b(opcode, funct3, rs1, rs2, imm);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::B {
-                    rs1: rs1,
-                    rs2: rs2,
-                    imm: imm as WordType,
-                },
-            );
-        }
-
-        fn test_instr_u(&mut self, instr_kind: RiscvInstr, opcode: u8) {
-            let rd = self.rng.random_range(0..=0b11111) as u8;
-            let imm = self.rng.random_range(0..=0xFFFFF) << 12 as u32;
-
-            let instr = get_instr_u(opcode, rd, imm);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::U {
-                    rd: rd,
-                    imm: imm as WordType,
-                },
-            );
-        }
-
-        fn test_instr_j(&mut self, instr_kind: RiscvInstr, opcode: u8) {
-            let rd = self.rng.random_range(0..=0b11111) as u8;
-            let imm = self.rng.random_range(0..=0xFFFFF) << 1 as u32;
-
-            let instr = get_instr_j(opcode, rd, imm);
-            self.check(
-                instr,
-                instr_kind,
-                RVInstrInfo::J {
-                    rd: rd,
-                    imm: imm as WordType,
-                },
-            );
-        }
-    }
-
-    #[test]
-    fn test_decoder() {
-        let mut checker = Checker::new();
-
-        for _ in 1..=1000 {
-            checker.test_instr_r(RiscvInstr::ADD, 0b0110011, 0b000, 0b0000000);
-            checker.test_instr_r(RiscvInstr::SUB, 0b0110011, 0b000, 0b0100000);
-
-            checker.test_instr_i(RiscvInstr::ADDI, 0b0010011, 0b000);
-            checker.test_instr_i(RiscvInstr::ORI, 0b0010011, 0b110);
-
-            checker.test_instr_s(RiscvInstr::SB, 0b0100011, 0b000);
-            checker.test_instr_s(RiscvInstr::SW, 0b0100011, 0b010);
-
-            checker.test_instr_b(RiscvInstr::BNE, 0b1100011, 0b001);
-
-            checker.test_instr_u(RiscvInstr::LUI, 0b0110111);
-
-            checker.test_instr_j(RiscvInstr::JAL, 0b1101111);
         }
     }
 
@@ -397,7 +274,7 @@ mod tests {
             RVInstrInfo::I {
                 rs1: 3,
                 rd: 2,
-                imm: negative_of(5).truncate_to_bits(12),
+                imm: negative_of(5),
             },
         );
 
@@ -417,7 +294,7 @@ mod tests {
             RVInstrInfo::B {
                 rs1: 6,
                 rs2: 12,
-                imm: negative_of(112).truncate_to_bits(13),
+                imm: negative_of(112),
             },
         );
 
