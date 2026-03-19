@@ -89,6 +89,7 @@ impl<T: Cacheable, const W: usize> CacheSet<T, W> {
         }
     }
 
+    #[inline]
     fn invalidate(&mut self, addr: WordType) {
         if let Some(index) = self.source_addr.iter().position(|&item| item == addr) {
             self.source_addr[index] = 0;
@@ -152,6 +153,7 @@ impl<T: Cacheable, const S: usize, const W: usize> Cache<T> for SetCache<T, S, W
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

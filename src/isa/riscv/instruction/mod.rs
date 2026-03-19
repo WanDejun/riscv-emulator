@@ -52,8 +52,6 @@ where
     Ok(())
 }
 
-type ExecFn = fn(RVInstrInfo, &mut RVCPU) -> Result<(), riscv::trap::Exception>;
-
 /// XXX: The `imm` value has been processed (shifted and sign_extended) for performance.
 /// DO NOT process it again.
 ///

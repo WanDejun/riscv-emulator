@@ -26,16 +26,6 @@ impl LogLevel {
             LogLevel::Error => LevelFilter::Error,
         }
     }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            LogLevel::Trace => "trace",
-            LogLevel::Debug => "debug",
-            LogLevel::Info => "info",
-            LogLevel::Warn => "warn",
-            LogLevel::Error => "error",
-        }
-    }
 }
 
 fn duration_to_str_min(dur: time::Duration) -> String {

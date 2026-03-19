@@ -177,8 +177,6 @@ mod tests {
 
     use super::*;
 
-    // TODO: add more tests
-
     fn get_instr_r(opcode: u8, funct3: u8, funct7: u8, rd: u8, rs1: u8, rs2: u8) -> u32 {
         (opcode as u32)
             | ((rd as u32) << 7)

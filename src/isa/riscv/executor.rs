@@ -298,8 +298,11 @@ impl RVCPU {
             // so we can't throw and panic here.
             // Err(Exception::Breakpoint) => return excute_result,
             Err(Exception::IllegalInstruction) => {
-                // TODO: Consider reuse the fetched instr_bytes
-                // (do we have to put raw instruction in i-cache to avoid another ifetch here?)
+                cold_path();
+
+                // We cannot reuse the fetched raw instruction on the i-cache hit path,
+                // because the raw instruction bytes are not stored in the i-cache.
+                // This is acceptable because `illegal instruction` is a cold path.
                 let instr_bytes = self.ifetch().expect("ifetch should not fail here");
                 TrapController::try_send_trap_signal(
                     self,

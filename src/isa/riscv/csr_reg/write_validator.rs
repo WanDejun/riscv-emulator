@@ -11,13 +11,6 @@ trait ValidateCond {
     fn check(value: WordType, ctx: &CsrContext) -> bool;
 }
 
-struct NeverCond {}
-impl ValidateCond for NeverCond {
-    fn check(_value: WordType, _ctx: &CsrContext) -> bool {
-        false
-    }
-}
-
 struct RangeCond<const MIN: WordType, const MAX: WordType> {}
 impl<const MIN: WordType, const MAX: WordType> ValidateCond for RangeCond<MIN, MAX> {
     fn check(value: WordType, _ctx: &CsrContext) -> bool {
@@ -100,21 +93,4 @@ macro_rules! combine_validators {
 #[inline]
 pub(super) fn validate_readonly(_value: WordType, _ctx: &CsrContext) -> CsrWriteOp {
     CsrWriteOp { mask: 0 }
-}
-
-#[inline]
-pub(super) fn validate_misa_extension(_value: WordType, ctx: &CsrContext) -> CsrWriteOp {
-    // TODO: We need to check extension combination for example, if 'D' is set, 'F' must be set too.
-    CsrWriteOp::new(ctx.extension)
-}
-
-pub(super) fn validate_xlen<const L: usize, const R: usize>(
-    value: WordType,
-    ctx: &CsrContext,
-) -> CsrWriteOp {
-    if ctx.xlen == 32 {
-        validate_range::<L, R, 1, 1>(value, ctx)
-    } else {
-        validate_range::<L, R, 2, 2>(value, ctx)
-    }
 }

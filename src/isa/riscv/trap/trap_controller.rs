@@ -22,12 +22,12 @@ impl TrapController {
     //                M-Mode
     // ======================================
     fn is_exception_delegated_m_mode(cpu: &mut RVCPU, exception: Exception) -> bool {
-        let medeleg_val = cpu.debug_csr(Medeleg::get_index(), None).unwrap();
+        let medeleg_val = cpu.csr.get_by_type_existing::<Medeleg>().data();
         (medeleg_val & (1 << exception as u8)) != 0
     }
 
     fn is_interrupt_delegated_m_mode(cpu: &mut RVCPU, interrupt: Interrupt) -> bool {
-        let mideleg = cpu.csr.get_by_type::<Mideleg>().unwrap();
+        let mideleg = cpu.csr.get_by_type_existing::<Mideleg>();
         match interrupt {
             Interrupt::MachineExternal | Interrupt::MachineSoft | Interrupt::MachineTimer => false,
             Interrupt::SupervisorExternal | Interrupt::UserExternal => mideleg.get_seip() != 0,
@@ -52,8 +52,7 @@ impl TrapController {
         }
 
         cpu.csr
-            .get_by_type::<Mstatus>()
-            .unwrap()
+            .get_by_type_existing::<Mstatus>()
             .set_mpp(cpu.csr.privelege_level() as u8 as WordType);
         cpu.csr.set_current_privileged(PrivilegeLevel::M);
         cpu.csr

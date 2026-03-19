@@ -70,8 +70,4 @@ impl PowerManager {
         POWER_STATUS.store(0, std::sync::atomic::Ordering::Release);
         Self { reg: 0 }
     }
-
-    pub fn shut_down(&self) -> bool {
-        self.reg.eq(&POWER_OFF_CODE)
-    }
 }

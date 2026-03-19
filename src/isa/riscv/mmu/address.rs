@@ -1,13 +1,6 @@
-use std::slice;
-
 use crate::{
     config::arch_config::WordType,
-    isa::riscv::mmu::{
-        config::{PAGE_SIZE, PAGE_SIZE_XLEN, PHYSICAL_ADDR_WIDTH},
-        page_table::PageTableEntry,
-    },
-    ram::Ram,
-    ram_config,
+    isa::riscv::mmu::config::{PAGE_SIZE, PAGE_SIZE_XLEN, PHYSICAL_ADDR_WIDTH},
 };
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
@@ -33,17 +26,6 @@ impl VirtualAddr {
 }
 
 impl PhysicalPageNum {
-    pub(super) fn get_pte_array(&self, mem: &mut Ram) -> &'static mut [PageTableEntry] {
-        let ptr = &mut mem[(self.address - ram_config::BASE_ADDR) as usize] as *mut u8 as usize;
-        #[cfg(feature = "riscv64")]
-        unsafe {
-            slice::from_raw_parts_mut(ptr as *mut PageTableEntry, 512)
-        }
-        #[cfg(feature = "riscv32")]
-        unsafe {
-            slice::from_raw_parts_mut(ptr as *mut PageTableEntry, 1024)
-        }
-    }
     pub(super) fn from_ppn(ppn: WordType) -> Self {
         PhysicalPageNum {
             address: ppn << PAGE_SIZE_XLEN,

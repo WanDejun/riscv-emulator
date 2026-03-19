@@ -115,7 +115,6 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         self.memory.debug_vaddr_to_paddr(vaddr)
     }
 
-    // TODO: Respect the CSR settings like SUM, MXR, etc.
     fn debug_translate(
         &mut self,
         vaddr: WordType,

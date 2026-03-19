@@ -290,6 +290,7 @@ impl Board for VirtBoard {
         self.cpu.step()?;
         self.clock.advance(1);
 
+        // TODO: We can simply read from `PowerManager` if VirtBoard owns `PowerManager`.
         if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
             cold_path();
             self.cpu.power_off()?;

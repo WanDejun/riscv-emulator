@@ -60,8 +60,6 @@ impl SimulationIO {
 
 impl PollingEventTrait for TerminalIO {
     fn poll(&mut self) -> Option<ExternalInterrupt> {
-        // TODO: CliCoordinator and TerminalIO::UartIOChannel are both coordinating the usage of terminal.
-        // We should merge them in the future.
         CliCoordinator::global().confirm_pause_and_wait();
 
         // output polling
