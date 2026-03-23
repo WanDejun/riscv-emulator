@@ -153,6 +153,29 @@ impl<T: Cacheable, const S: usize, const W: usize> Cache<T> for SetCache<T, S, W
     }
 }
 
+/// Used to test the performance of other cache implementations.
+pub(super) struct NullCache<T: Cacheable> {
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: Cacheable> Cache<T> for NullCache<T> {
+    fn new() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    fn get(&self, _addr: WordType) -> Option<T> {
+        None
+    }
+
+    fn put(&mut self, _addr: WordType, _data: T) {}
+
+    fn invalidate(&mut self, _addr: WordType) {}
+
+    fn clear(&mut self) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
