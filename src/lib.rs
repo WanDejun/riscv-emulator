@@ -5,6 +5,12 @@
 #![feature(likely_unlikely)]
 #![feature(unsafe_cell_access)]
 
+#[cfg(all(feature = "native-cli", target_arch = "wasm32"))]
+compile_error!("feature 'native-cli' is not supported on wasm32 targets");
+
+#[cfg(all(feature = "web", not(target_arch = "wasm32")))]
+compile_error!("feature 'web' requires wasm32 target");
+
 mod cpu;
 mod fpu;
 mod utils;
@@ -19,6 +25,9 @@ pub mod isa;
 pub mod load;
 pub mod ram;
 
+#[cfg(feature = "web")]
+pub mod wasm_api;
+
 pub use config::ram_config;
 use lazy_static::lazy_static;
 
@@ -28,7 +37,7 @@ use crate::{
     isa::riscv::trap::Exception,
 };
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::{Mutex, MutexGuard},
 };
@@ -96,17 +105,16 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn from_binary(path: &Path) -> Self {
-        let bytes = std::fs::read(path).unwrap();
+    pub fn from_binary_bytes(bytes: &[u8]) -> Self {
         Self {
-            board: VirtBoard::from_binary(&bytes),
+            board: VirtBoard::from_binary(bytes),
         }
     }
 
-    pub fn from_elf(path: &Path) -> Self {
-        Self {
-            board: VirtBoard::from_elf(std::fs::read(path).unwrap()),
-        }
+    pub fn try_from_elf_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+        Ok(Self {
+            board: VirtBoard::try_from_elf(bytes)?,
+        })
     }
 
     pub fn from_board(board: VirtBoard) -> Self {
@@ -126,5 +134,32 @@ impl Emulator {
             self.board.step()?;
         }
         Ok(())
+    }
+
+    pub fn run_steps(&mut self, max_steps: u64) -> Result<u64, Exception> {
+        let mut steps = 0;
+        while self.board.status() != BoardStatus::Halt && steps < max_steps {
+            self.board.step()?;
+            steps += 1;
+        }
+        Ok(steps)
+    }
+
+    pub fn board(&self) -> &VirtBoard {
+        &self.board
+    }
+
+    pub fn board_mut(&mut self) -> &mut VirtBoard {
+        &mut self.board
+    }
+
+    #[cfg(feature = "web")]
+    pub fn push_uart_input_bytes(&self, bytes: &[u8]) {
+        self.board.push_uart_input(bytes);
+    }
+
+    #[cfg(feature = "web")]
+    pub fn take_uart_output_bytes(&self) -> Vec<u8> {
+        self.board.take_uart_output()
     }
 }

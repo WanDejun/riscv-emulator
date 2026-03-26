@@ -34,7 +34,9 @@ __attribute__((weak)) void trap_handler(TrapContext* trap_ctx) {
 }
 
 void trap_init() {
-    write_csr_mie((uint64_t)(1 << 11));  // enable machine external interrupt
+    uint64_t mie = 1ull << 7;  // MTIE (machine timer interrupt enable)
+    mie |= 1ull << 11;  // MEIE (machine external interrupt enable)
+    write_csr_mie(mie);
     uint64_t mstatus = read_csr_mstatus();
     write_csr_mstatus(mstatus | 1 << 3);        // set MIE bit in mstatus
     write_csr_mtvec((uint64_t)(*__traps_entry));

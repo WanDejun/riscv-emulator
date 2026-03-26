@@ -1,16 +1,10 @@
 use crate::{
-    cli_coordinator::CliCoordinator,
     device::{fast_uart::UartIOChannel, plic::ExternalInterrupt},
     device_poller::PollingEventTrait,
 };
-use clap::ValueEnum;
-use crossterm::event::{self, Event, KeyCode};
-use std::{
-    io::{self, Write},
-    time::Duration,
-};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+#[cfg_attr(feature = "native-cli", derive(clap::ValueEnum))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SerialDestination {
     Test,
     Stdio,
@@ -60,58 +54,67 @@ impl SimulationIO {
 
 impl PollingEventTrait for TerminalIO {
     fn poll(&mut self) -> Option<ExternalInterrupt> {
+        terminal_impl::poll_terminal(&mut self.channel)
+    }
+}
+
+#[cfg(feature = "native-cli")]
+mod terminal_impl {
+    use crate::cli_coordinator::CliCoordinator;
+    use crossterm::event::{self, Event, KeyCode};
+    use std::{
+        io::{self, Write},
+        time::Duration,
+    };
+
+    use super::{ExternalInterrupt, UartIOChannel};
+
+    pub(super) fn poll_terminal(channel: &mut UartIOChannel) -> Option<ExternalInterrupt> {
         CliCoordinator::global().confirm_pause_and_wait();
 
-        // output polling
         loop {
-            // lock
-            if !self
-                .channel
-                .busy
-                .swap(true, std::sync::atomic::Ordering::AcqRel)
-            {
+            if !channel.busy.swap(true, std::sync::atomic::Ordering::AcqRel) {
                 break;
             }
         }
 
-        while let Ok(v) = self.channel.output_rx.try_recv() {
+        while let Ok(v) = channel.output_rx.try_recv() {
             print!("{}", v as char);
         }
         io::stdout().flush().unwrap();
 
-        self.channel
+        channel
             .busy
             .store(false, std::sync::atomic::Ordering::Release);
 
-        // input polling
         let mut has_input = false;
         if event::poll(Duration::from_millis(20)).unwrap() {
             if let Event::Key(k) = event::read().unwrap() {
                 has_input = true;
                 match k.code {
-                    KeyCode::Char(c) => self.channel.input_tx.send(c as u8).unwrap(),
-                    KeyCode::Esc => self.channel.input_tx.send(0x1B).unwrap(),
-                    KeyCode::Tab => self.channel.input_tx.send(b'\t').unwrap(),
-                    KeyCode::Backspace => self.channel.input_tx.send(0x08).unwrap(),
-                    KeyCode::Enter => self.channel.input_tx.send(b'\r').unwrap(),
+                    KeyCode::Char(c) => channel.input_tx.send(c as u8).unwrap(),
+                    KeyCode::Esc => channel.input_tx.send(0x1B).unwrap(),
+                    KeyCode::Tab => channel.input_tx.send(b'\t').unwrap(),
+                    KeyCode::Backspace => channel.input_tx.send(0x08).unwrap(),
+                    KeyCode::Enter => channel.input_tx.send(b'\r').unwrap(),
                     KeyCode::Up => {
                         for v in [0x1B, 0x5B, 0x41] {
-                            self.channel.input_tx.send(v).unwrap();
+                            channel.input_tx.send(v).unwrap();
                         }
                     }
                     KeyCode::Down => {
                         for v in [0x1B, 0x5B, 0x42] {
-                            self.channel.input_tx.send(v).unwrap();
+                            channel.input_tx.send(v).unwrap();
                         }
                     }
                     KeyCode::Left => {
                         for v in [0x1B, 0x5B, 0x44] {
-                            self.channel.input_tx.send(v).unwrap();
+                            channel.input_tx.send(v).unwrap();
                         }
                     }
                     KeyCode::Right => {
                         for v in [0x1B, 0x5B, 0x43] {
-                            self.channel.input_tx.send(v).unwrap();
+                            channel.input_tx.send(v).unwrap();
                         }
                     }
                     _ => {
@@ -121,13 +124,9 @@ impl PollingEventTrait for TerminalIO {
             }
         }
 
-        // Check UART interrupt conditions from IER bits.
-        // IER bit1 (ETBEI) gates THRE interrupt signaling.
-        // IER bit0 (ERBFI) gates RDA interrupt signaling.
-        let ier = self.channel.ier.load(std::sync::atomic::Ordering::Acquire);
+        let ier = channel.ier.load(std::sync::atomic::Ordering::Acquire);
         let thre_interrupt = ier & 0x02 != 0
-            && self
-                .channel
+            && channel
                 .thre_pending
                 .load(std::sync::atomic::Ordering::Acquire);
         let rda_interrupt = ier & 0x01 != 0 && has_input;
@@ -135,14 +134,23 @@ impl PollingEventTrait for TerminalIO {
         if thre_interrupt || rda_interrupt {
             log::trace!(
                 "[UART-poll] firing IRQ {}: thre={} rda={} ier={:#04x}",
-                self.channel.interrupt_id,
+                channel.interrupt_id,
                 thre_interrupt,
                 rda_interrupt,
                 ier
             );
-            Some(self.channel.interrupt_id)
+            Some(channel.interrupt_id)
         } else {
             None
         }
+    }
+}
+
+#[cfg(not(feature = "native-cli"))]
+mod terminal_impl {
+    use super::{ExternalInterrupt, UartIOChannel};
+
+    pub(super) fn poll_terminal(_channel: &mut UartIOChannel) -> Option<ExternalInterrupt> {
+        None
     }
 }

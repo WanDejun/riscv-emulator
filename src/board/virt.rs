@@ -17,13 +17,13 @@ use crate::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
         fast_uart::FastUart16550,
+        fast_uart::virtual_io::SimulationIO,
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
             PLIC,
             irq_line::{PlicIRQLine, PlicIRQSource},
         },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
-        test_device::TestDevice,
         virtio::{
             virtio_blk::VirtIOBlkDeviceBuilder,
             virtio_mmio::{VirtIODeviceID, VirtIOMMIO},
@@ -40,6 +40,9 @@ use crate::{
     ram::Ram,
     vclock::{Timer, VirtualClockRef},
 };
+
+#[cfg(feature = "test-device")]
+use crate::device::test_device::TestDevice;
 
 pub trait RiscvIRQHandler {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool);
@@ -124,6 +127,7 @@ impl RVBoardBuilder {
 
         // Construct devices
         let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
+        let serial_io = SimulationIO::new(uart1.borrow().get_io_channel());
         self = self.add_plic_device(uart1);
 
         const MTIME_OFFSET: u64 = 0xbff8;
@@ -224,6 +228,7 @@ impl RVBoardBuilder {
             clint,
             plic,
             plic_freq_counter: 0,
+            serial_io,
 
             status: BoardStatus::Running,
         }
@@ -242,6 +247,7 @@ pub struct VirtBoard {
     pub plic: Rc<RefCell<PLIC>>,
     pub plic_freq_counter: usize,
     pub device_poller: DevicePoller,
+    serial_io: SimulationIO,
 
     status: BoardStatus,
 }
@@ -254,24 +260,36 @@ impl VirtBoard {
     }
 
     pub fn from_elf(bytes: Vec<u8>) -> Self {
+        Self::try_from_elf(bytes).expect("ELF load failed in VirtBoard::from_elf")
+    }
+
+    pub fn try_from_elf(bytes: Vec<u8>) -> Result<Self, String> {
         let mut ram = Ram::new();
-        let loader = ELFLoader::try_new(bytes).unwrap();
+        let loader = ELFLoader::try_new(bytes).ok_or_else(|| "Invalid ELF file".to_string())?;
         loader.load_to_ram(&mut ram);
         let mut board = Self::from_ram(ram);
         board.loader = Some(loader);
-        board
+        Ok(board)
     }
 
     pub fn from_ram(ram: Ram) -> Self {
-        let mut builder =
+        let builder =
             RVBoardBuilder::new().add_virtio_devices(&mut EMULATOR_CONFIG.lock().unwrap().devices);
 
         #[cfg(feature = "test-device")]
-        {
-            builder = builder.add_plic_device(Rc::new(RefCell::new(TestDevice::new())));
-        }
+        let builder = builder.add_plic_device(Rc::new(RefCell::new(TestDevice::new())));
 
         builder.build(ram)
+    }
+
+    #[cfg(feature = "web")]
+    pub fn push_uart_input(&self, bytes: &[u8]) {
+        self.serial_io.send_input_data(bytes.iter().copied());
+    }
+
+    #[cfg(feature = "web")]
+    pub fn take_uart_output(&self) -> Vec<u8> {
+        self.serial_io.receive_output_data()
     }
 }
 

@@ -29,7 +29,8 @@ fn bench_emulator_run(c: &mut Criterion) {
                 let bench_name = format!("load_and_run_{}", name);
                 group.bench_function(&bench_name, move |b| {
                     b.iter(|| {
-                        let mut emu = Emulator::from_elf(&path);
+                        let mut emu =
+                            Emulator::try_from_elf_bytes(std::fs::read(&path).unwrap()).unwrap();
                         black_box(emu.run().unwrap());
                     })
                 });

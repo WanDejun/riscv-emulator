@@ -1,8 +1,5 @@
 use std::hint::cold_path;
 
-#[cfg(not(test))]
-use crossterm::terminal::disable_raw_mode;
-
 use crate::{
     board::virt::RiscvIRQHandler,
     config::arch_config::WordType,
@@ -330,7 +327,7 @@ impl RVCPU {
     pub fn power_off(&mut self) -> Result<(), Exception> {
         self.memory.sync();
         #[cfg(not(test))]
-        disable_raw_mode().unwrap();
+        crate::utils::disable_terminal_raw_mode();
         Ok(())
     }
 }

@@ -630,11 +630,17 @@ pub(crate) const fn make_mask(left: usize, right: usize) -> WordType {
     BIT_ONES_ARRAY[width] << left
 }
 
+pub fn disable_terminal_raw_mode() {
+    #[cfg(feature = "native-cli")]
+    {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
 #[macro_export]
 macro_rules! emulator_panic {
     ($($arg:tt)*) => {{
-        use crossterm::terminal::disable_raw_mode;
-        disable_raw_mode().unwrap();
+        $crate::utils::disable_terminal_raw_mode();
 
         panic!($($arg)*);
     }};

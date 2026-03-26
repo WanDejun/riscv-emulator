@@ -58,7 +58,7 @@ impl ELFLoader {
         let elf = self.elf();
         for ph in elf.program_iter() {
             if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
-                let start_addr = (ph.virtual_addr() as usize) as WordType;
+                let start_addr = ph.virtual_addr() as WordType;
                 // let end_addr = ((ph.virtual_addr() + ph.mem_size()) as usize) as WordType;
 
                 ram.insert_section(

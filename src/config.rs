@@ -5,6 +5,11 @@ pub mod ram_config {
     pub const BASE_ADDR: WordType = 0x8000_0000;
     pub const DEFAULT_PC_VALUE: WordType = BASE_ADDR;
 
+    // wasm32 cannot allocate a big vector because capacity is bounded by isize::MAX.
+    #[cfg(target_arch = "wasm32")]
+    pub const SIZE: usize = 0x40_000_000;
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub const SIZE: usize = 0x80_000_000;
 }
 
