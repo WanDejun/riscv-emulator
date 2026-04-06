@@ -6,7 +6,8 @@ use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
 use std::sync::{Arc, Mutex};
 
 pub trait PollingEventTrait: Send {
-    fn poll(&mut self) -> Option<ExternalInterrupt>;
+    /// Poll once without blocking the caller thread.
+    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt>;
 }
 
 struct PollerCore {
@@ -35,7 +36,7 @@ impl PollerCore {
         let mut pending = Vec::new();
         let mut guard = events.lock().unwrap();
         for event in guard.iter_mut() {
-            if let Some(id) = event.poll() {
+            if let Some(id) = event.poll_nonblocking() {
                 pending.push(id);
             }
         }
@@ -68,7 +69,7 @@ impl PollerCore {
 #[doc(inline)]
 pub use imp::DevicePoller;
 
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "multithreading")]
 mod imp {
     use std::{thread, time::Duration};
 
@@ -161,7 +162,7 @@ mod imp {
     }
 }
 
-#[cfg(feature = "web")]
+#[cfg(not(feature = "multithreading"))]
 mod imp {
     #[cfg(feature = "riscv64")]
     use super::{PlicIRQLine, PlicIRQSource};

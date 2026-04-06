@@ -1,4 +1,4 @@
-#[cfg(feature = "native-cli")]
+#[cfg(all(feature = "native-cli", feature = "multithreading"))]
 mod imp {
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use lazy_static::lazy_static;
@@ -28,8 +28,6 @@ mod imp {
 
     impl CliCoordinator {
         pub fn new() -> Self {
-            enable_raw_mode().unwrap();
-
             Self {
                 state: Arc::new((Mutex::new(CliThreadState::Running), Condvar::new())),
             }
@@ -94,7 +92,35 @@ mod imp {
     }
 }
 
-#[cfg(not(feature = "native-cli"))]
+#[cfg(all(feature = "native-cli", not(feature = "multithreading")))]
+mod imp {
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    #[derive(Clone)]
+    pub struct CliCoordinator;
+
+    impl CliCoordinator {
+        pub fn new() -> Self {
+            Self
+        }
+
+        pub fn global() -> &'static CliCoordinator {
+            static INSTANCE: CliCoordinator = CliCoordinator;
+            &INSTANCE
+        }
+
+        pub fn pause_uart_without_wait(&self) {}
+        pub fn pause_uart(&self) {
+            disable_raw_mode().unwrap();
+        }
+        pub fn resume_uart(&self) {}
+        pub fn confirm_pause_and_wait(&self) {
+            enable_raw_mode().unwrap();
+        }
+    }
+}
+
+#[cfg(feature = "web")]
 mod imp {
     #[derive(Clone)]
     pub struct CliCoordinator;

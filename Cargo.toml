@@ -4,20 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-core = []
-native-cli = [
-    "core",
-    "dep:clap",
-    "dep:crossterm",
-    "dep:flexi_logger",
-    "dep:rustyline",
-]
-web = [
-    "core",
-    "dep:wasm-bindgen",
-    "dep:console_error_panic_hook",
-    "dep:wasm-logger",
-]
+multithreading = []
+native-cli = ["dep:clap", "dep:crossterm", "dep:flexi_logger", "dep:rustyline"]
+web = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dep:wasm-logger"]
 
 riscv32 = []
 riscv64 = []
@@ -25,7 +14,13 @@ riscv-tests = []
 test-device = ["riscv64"]
 custom-instr = ["riscv64"]
 
-default = ["riscv64", "native-cli", "test-device", "riscv-tests"]
+default = [
+    "riscv64",
+    "native-cli",
+    "test-device",
+    "riscv-tests",
+    "multithreading",
+]
 
 [dependencies]
 xmas-elf = "0.7.0"

@@ -8,6 +8,9 @@
 #[cfg(all(feature = "native-cli", target_arch = "wasm32"))]
 compile_error!("feature 'native-cli' is not supported on wasm32 targets");
 
+#[cfg(all(feature = "multithreading", feature = "web"))]
+compile_error!("feature 'multithreading' is not compatible with 'web'");
+
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 compile_error!("feature 'web' requires wasm32 target");
 
@@ -33,7 +36,7 @@ use lazy_static::lazy_static;
 
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
-    device::{fast_uart::virtual_io::SerialDestination, virtio::virtio_mmio::VirtIODeviceID},
+    device::virtio::virtio_mmio::VirtIODeviceID,
     isa::riscv::trap::Exception,
 };
 use std::{
@@ -65,15 +68,11 @@ impl FromStr for DeviceConfig {
 }
 
 pub struct EmulatorConfig {
-    pub(crate) serial_destination: SerialDestination,
     pub(crate) devices: Vec<DeviceConfig>,
 }
 impl EmulatorConfig {
     pub fn new() -> Self {
-        Self {
-            serial_destination: SerialDestination::Test,
-            devices: vec![],
-        }
+        Self { devices: vec![] }
     }
 }
 lazy_static! {
@@ -89,11 +88,6 @@ impl<'a> EmulatorConfigurator<'a> {
             lock: EMULATOR_CONFIG.lock().unwrap(),
         }
     }
-    pub fn set_serial_destination(mut self, new_destination: SerialDestination) -> Self {
-        self.lock.serial_destination = new_destination;
-        self
-    }
-
     pub fn append_device(mut self, device: DeviceConfig) -> Self {
         self.lock.devices.push(device);
         self

@@ -17,7 +17,7 @@ use crate::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
         fast_uart::FastUart16550,
-        fast_uart::virtual_io::SimulationIO,
+        fast_uart::terminal_io::BufferedSerialHandle,
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
             PLIC,
@@ -127,7 +127,7 @@ impl RVBoardBuilder {
 
         // Construct devices
         let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
-        let serial_io = SimulationIO::new(uart1.borrow().get_io_channel());
+        let serial_io = uart1.borrow().serial_handle();
         self = self.add_plic_device(uart1);
 
         const MTIME_OFFSET: u64 = 0xbff8;
@@ -247,7 +247,7 @@ pub struct VirtBoard {
     pub plic: Rc<RefCell<PLIC>>,
     pub plic_freq_counter: usize,
     pub device_poller: DevicePoller,
-    serial_io: SimulationIO,
+    serial_io: Option<BufferedSerialHandle>,
 
     status: BoardStatus,
 }
@@ -284,12 +284,18 @@ impl VirtBoard {
 
     #[cfg(feature = "web")]
     pub fn push_uart_input(&self, bytes: &[u8]) {
-        self.serial_io.send_input_data(bytes.iter().copied());
+        if let Some(serial_io) = &self.serial_io {
+            serial_io.send_input_data(bytes.iter().copied());
+        }
     }
 
     #[cfg(feature = "web")]
     pub fn take_uart_output(&self) -> Vec<u8> {
-        self.serial_io.receive_output_data()
+        if let Some(serial_io) = &self.serial_io {
+            serial_io.receive_output_data()
+        } else {
+            Vec::new()
+        }
     }
 }
 

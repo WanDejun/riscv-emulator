@@ -14,10 +14,7 @@ use lazy_static::lazy_static;
 use riscv_emulator::board::Board;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
-use riscv_emulator::{
-    DeviceConfig, EmulatorConfigurator, board::virt::VirtBoard,
-    device::fast_uart::virtual_io::SerialDestination,
-};
+use riscv_emulator::{DeviceConfig, EmulatorConfigurator, board::virt::VirtBoard};
 
 use crate::{logging::LogLevel, rvdb::DebugREPL, welcome::display_welcome_message};
 
@@ -65,10 +62,6 @@ struct Args {
     /// Switch log level.
     #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Info)]
     log_level: LogLevel,
-
-    /// Choose serial io destination.
-    #[arg(value_enum, long = "serial", default_value_t = SerialDestination::Stdio)]
-    serial_destination: SerialDestination,
 
     /// Add devices to emulator. Example: --device=virtio-block:./tmp/img_blk
     #[arg(long = "device", action = clap::ArgAction::Append)]
@@ -179,7 +172,6 @@ fn main() {
 
     // Init emulator configuration by cli_args.
     let mut emu_cfg = EmulatorConfigurator::new();
-    emu_cfg = emu_cfg.set_serial_destination(cli_args.serial_destination);
     for device in cli_args.devices.iter() {
         emu_cfg = emu_cfg.append_device(device.clone())
     }

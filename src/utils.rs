@@ -631,7 +631,7 @@ pub(crate) const fn make_mask(left: usize, right: usize) -> WordType {
 }
 
 pub fn disable_terminal_raw_mode() {
-    #[cfg(feature = "native-cli")]
+    #[cfg(not(feature = "web"))]
     {
         let _ = crossterm::terminal::disable_raw_mode();
     }

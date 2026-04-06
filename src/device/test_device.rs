@@ -165,7 +165,7 @@ impl MemMappedDeviceTrait for TestDevice {
 }
 
 impl PollingEventTrait for TestDevicePoller {
-    fn poll(&mut self) -> Option<super::plic::ExternalInterrupt> {
+    fn poll_nonblocking(&mut self) -> Option<super::plic::ExternalInterrupt> {
         while let Ok(v) = self.receiver.try_recv() {
             match v {
                 PollerDataPackage::Data(t) => {

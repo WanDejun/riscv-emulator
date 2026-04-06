@@ -1,7 +1,7 @@
 //! TODO: this module is not fully implemented according to the spec.
 //! Some features are missing, and some behavior may be incorrect due to limited test coverage.
 
-pub mod virtual_io;
+pub mod terminal_io;
 
 use std::{
     cell::RefCell,
@@ -15,13 +15,16 @@ use std::{
 use crossbeam::channel::{self, Receiver, Sender};
 
 use crate::{
-    EMULATOR_CONFIG,
     config::arch_config::WordType,
+    device::plic::ExternalInterrupt,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        fast_uart::virtual_io::{SerialDestination, TerminalIO},
+        fast_uart::terminal_io::{
+            BufferedSerialHandle, HostSerialIO, TerminalIO, create_default_host_serial_io,
+        },
     },
+    device_poller::PollingEventTrait,
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -31,12 +34,37 @@ pub struct UartIOChannel {
     pub(crate) input_tx: Sender<u8>,
     pub(crate) output_rx: Receiver<u8>,
     pub(crate) busy: Arc<AtomicBool>,
-    /// Shared IER register value for interrupt condition checking from the polling thread.
-    pub(crate) ier: Arc<AtomicU8>,
-    /// Shared THRE event latch used by the ETBEI/THRE interrupt path.
-    pub(crate) thre_pending: Arc<AtomicBool>,
-    /// PLIC interrupt source ID for this UART.
-    pub(crate) interrupt_id: u32,
+}
+
+struct UartPollingEvent<IO: HostSerialIO> {
+    terminal_io: TerminalIO<IO>,
+    ier: Arc<AtomicU8>,
+    thre_pending: Arc<AtomicBool>,
+    interrupt_id: ExternalInterrupt,
+}
+
+impl<IO: HostSerialIO> PollingEventTrait for UartPollingEvent<IO> {
+    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt> {
+        let poll = self.terminal_io.poll_nonblocking();
+
+        let ier = self.ier.load(std::sync::atomic::Ordering::Acquire);
+        let thre_interrupt =
+            ier & 0x02 != 0 && self.thre_pending.load(std::sync::atomic::Ordering::Acquire);
+        let rda_interrupt = ier & 0x01 != 0 && poll.has_input;
+
+        if thre_interrupt || rda_interrupt {
+            log::trace!(
+                "[UART-poll] firing IRQ {}: thre={} rda={} ier={:#04x}",
+                self.interrupt_id,
+                thre_interrupt,
+                rda_interrupt,
+                ier
+            );
+            Some(self.interrupt_id)
+        } else {
+            None
+        }
+    }
 }
 
 #[allow(unused)]
@@ -137,6 +165,8 @@ pub struct FastUart16550 {
     /// THRE event latch for simplified ETBEI behavior.
     /// Cleared when IIR reports THRE as the identified interrupt source.
     thre_pending: Arc<AtomicBool>,
+    terminal_host_io: Option<terminal_io::DefaultHostSerialIO>,
+    serial_handle: Option<BufferedSerialHandle>,
 }
 impl FastUart16550 {
     pub fn new() -> Self {
@@ -178,6 +208,7 @@ impl FastUart16550 {
         let sync_lock = Arc::new(AtomicBool::new(false));
         let ier_shared = Arc::new(AtomicU8::new(0));
         let thre_pending = Arc::new(AtomicBool::new(true)); // THR is initially empty.
+        let (terminal_host_io, serial_handle) = create_default_host_serial_io();
 
         drop(reg_ref);
         Self {
@@ -192,6 +223,8 @@ impl FastUart16550 {
             sync_lock,
             ier_shared,
             thre_pending,
+            terminal_host_io: Some(terminal_host_io),
+            serial_handle,
         }
     }
 
@@ -350,10 +383,11 @@ impl FastUart16550 {
             input_tx: self.input_tx.clone(),
             output_rx: self.output_rx.clone(),
             busy: self.sync_lock.clone(),
-            ier: self.ier_shared.clone(),
-            thre_pending: self.thre_pending.clone(),
-            interrupt_id: UART_IRQ,
         }
+    }
+
+    pub(crate) fn serial_handle(&self) -> Option<BufferedSerialHandle> {
+        self.serial_handle.clone()
     }
 
     #[allow(non_snake_case)]
@@ -372,28 +406,16 @@ impl FastUart16550 {
 impl DeviceTrait for FastUart16550 {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn sync(&mut self) {
-        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Test {
-            return;
-        }
-        loop {
-            if self.output_rx.is_empty() {
-                loop {
-                    if !self.sync_lock.load(std::sync::atomic::Ordering::Acquire) {
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-    }
+    fn sync(&mut self) {}
 
-    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
-        if EMULATOR_CONFIG.lock().unwrap().serial_destination == SerialDestination::Stdio {
-            Some(Box::new(TerminalIO::new(self.get_io_channel())))
-        } else {
-            None
-        }
+    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
+        let host_io = self.terminal_host_io.take()?;
+        Some(Box::new(UartPollingEvent {
+            terminal_io: TerminalIO::new(self.get_io_channel(), host_io),
+            ier: self.ier_shared.clone(),
+            thre_pending: self.thre_pending.clone(),
+            interrupt_id: UART_IRQ,
+        }))
     }
 }
 
@@ -408,30 +430,31 @@ impl MemMappedDeviceTrait for FastUart16550 {
 
 #[cfg(test)]
 mod test {
-    use crate::{EmulatorConfigurator, device::fast_uart::virtual_io::SimulationIO};
-
     use super::*;
 
     #[test]
     fn output_test() {
-        EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test); // set test mode
         let mut uart = FastUart16550::new();
-        let uart_dest = SimulationIO::new(uart.get_io_channel());
+        let io = uart.get_io_channel();
 
         uart.write_impl(0, 'a' as u8).unwrap();
 
-        let receive = uart_dest.receive_output_data();
+        let mut receive = Vec::new();
+        while let Ok(v) = io.output_rx.try_recv() {
+            receive.push(v);
+        }
         assert_eq!(receive.len(), 1);
         assert_eq!(receive[0], 'a' as u8);
     }
 
     #[test]
     fn input_test() {
-        EmulatorConfigurator::new().set_serial_destination(SerialDestination::Test);
         let mut uart = FastUart16550::new();
-        let uart_dest = SimulationIO::new(uart.get_io_channel());
+        let io = uart.get_io_channel();
 
-        uart_dest.send_input_data(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
+        for v in ['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8] {
+            let _ = io.input_tx.send(v);
+        }
 
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);
