@@ -367,5 +367,332 @@ pub(in crate::isa::riscv) fn get_exec_func(
             cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
+
+        //---------------------------------------
+        // RV_V
+        //---------------------------------------
+        //--------- config instruction. ---------
+        RiscvInstr::VSETVL => !todo!(),
+        RiscvInstr::VSETVLI => !todo!(),
+        RiscvInstr::VSETIVLI => !todo!(),
+
+        //------- load store instruction. -------
+        RiscvInstr::VLE8_V => !todo!(),
+        RiscvInstr::VLE16_V => !todo!(),
+        RiscvInstr::VLE32_V => !todo!(),
+        RiscvInstr::VLE64_V => !todo!(),
+
+        RiscvInstr::VSE8_V => !todo!(),
+        RiscvInstr::VSE16_V => !todo!(),
+        RiscvInstr::VSE32_V => !todo!(),
+        RiscvInstr::VSE64_V => !todo!(),
+
+        //-------- OPIVV (func3 = 0b000) --------
+        RiscvInstr::VADD_VV => !todo!(), // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VSUB_VV => !todo!(),
+
+        RiscvInstr::VMUL_VV => !todo!(), // Single-Width Integer Multiply Instructions
+        RiscvInstr::VMULH_VV => !todo!(),
+        RiscvInstr::VMULHU_VV => !todo!(),
+        RiscvInstr::VMULHSU_VV => !todo!(),
+
+        RiscvInstr::VDIV_VV => !todo!(), // Integer Divide Instructions
+        RiscvInstr::VDIVU_VV => !todo!(),
+        RiscvInstr::VREM_VV => !todo!(),
+        RiscvInstr::VREMU_VV => !todo!(),
+
+        RiscvInstr::VAND_VV => !todo!(), // Bitwise Logical Instructions
+        RiscvInstr::VOR_VV => !todo!(),
+        RiscvInstr::VXOR_VV => !todo!(),
+
+        RiscvInstr::VSRA_VV => !todo!(), //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VV => !todo!(),
+        RiscvInstr::VSLL_VV => !todo!(),
+
+        RiscvInstr::VNSRL_WV => !todo!(), // Widening Shift Instructions
+        RiscvInstr::VNSRA_WV => !todo!(),
+
+        RiscvInstr::VMSEQ_VV => !todo!(), // Integer Compare Instructions
+        RiscvInstr::VMSNE_VV => !todo!(),
+        RiscvInstr::VMSLTU_VV => !todo!(),
+        RiscvInstr::VMSLT_VV => !todo!(),
+        RiscvInstr::VMSLEU_VV => !todo!(),
+        RiscvInstr::VMSLE_VV => !todo!(),
+
+        RiscvInstr::VADC_VVM => !todo!(), // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VV => !todo!(),
+        RiscvInstr::VMADC_VVM => !todo!(),
+        RiscvInstr::VSBC_VVM => !todo!(),
+        RiscvInstr::VMSBC_VV => !todo!(),
+        RiscvInstr::VMSBC_VVM => !todo!(),
+
+        RiscvInstr::VMAX_VV => !todo!(), // Integer Min/Max Instructions
+        RiscvInstr::VMAXU_VV => !todo!(),
+        RiscvInstr::VMIN_VV => !todo!(),
+        RiscvInstr::VMINU_VV => !todo!(),
+
+        //  Single-Width Integer Multiply-Add Instructions
+        RiscvInstr::VMACC_VV => !todo!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VNMSAC_VV => !todo!(), // vd[i] = -(vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VMADD_VV => !todo!(), // vd[i] = (vs1[i] * vd[i]) + vs2[i]
+        RiscvInstr::VNMSUB_VV => !todo!(), // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
+
+        RiscvInstr::VMERGE_VVM | RiscvInstr::VMV_V_V => {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
+                if let RVInstrInfo::V { vm, .. } = inst_info {
+                    if vm {
+                        todo!() // Handle VMV_V_V
+                    } else {
+                        todo!() // Handle VMERGE_VVM
+                    }
+                } else {
+                    std::unreachable!();
+                }
+            }
+        }
+
+        RiscvInstr::VSADDU_VV => !todo!(), // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VV => !todo!(),
+        RiscvInstr::VSSUBU_VV => !todo!(),
+        RiscvInstr::VSSUB_VV => !todo!(),
+
+        RiscvInstr::VAADDU_VV => !todo!(), // Single-Width Averaging Add and Subtract
+        RiscvInstr::VAADD_VV => !todo!(),
+        RiscvInstr::VASUBU_VV => !todo!(),
+        RiscvInstr::VASUB_VV => !todo!(),
+
+        RiscvInstr::VSMUL_VV => !todo!(), //  Single-Width Fractional Multiply with Rounding and Saturation
+
+        RiscvInstr::VSSRL_VV => !todo!(), // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VV => !todo!(),
+
+        RiscvInstr::VNCLIPU_WV => !todo!(), // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WV => !todo!(),
+
+        RiscvInstr::VRGATHER_VV => !todo!(), // Vector Gather Instructions
+        RiscvInstr::VRGATHEREI16_VV => !todo!(),
+
+        //-------- OPIVX (0x100) --------
+        RiscvInstr::VADD_VX => !todo!(), // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VSUB_VX => !todo!(),
+        RiscvInstr::VRSUB_VX => !todo!(),
+
+        RiscvInstr::VMUL_VX => !todo!(), // Single-Width Integer Multiply Instructions
+        RiscvInstr::VMULH_VX => !todo!(),
+        RiscvInstr::VMULHU_VX => !todo!(),
+        RiscvInstr::VMULHSU_VX => !todo!(),
+
+        RiscvInstr::VDIV_VX => !todo!(), // Integer Divide Instructions
+        RiscvInstr::VDIVU_VX => !todo!(),
+        RiscvInstr::VREM_VX => !todo!(),
+        RiscvInstr::VREMU_VX => !todo!(),
+
+        RiscvInstr::VAND_VX => !todo!(), // Bitwise Logical Instructions
+        RiscvInstr::VOR_VX => !todo!(),
+        RiscvInstr::VXOR_VX => !todo!(),
+
+        RiscvInstr::VSRA_VX => !todo!(), //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VX => !todo!(),
+        RiscvInstr::VSLL_VX => !todo!(),
+
+        RiscvInstr::VNSRL_WX => !todo!(), // Widening Shift Instructions
+        RiscvInstr::VNSRA_WX => !todo!(),
+
+        RiscvInstr::VMSEQ_VX => !todo!(), // Integer Compare Instructions
+        RiscvInstr::VMSNE_VX => !todo!(),
+        RiscvInstr::VMSLTU_VX => !todo!(),
+        RiscvInstr::VMSLT_VX => !todo!(),
+        RiscvInstr::VMSLEU_VX => !todo!(),
+        RiscvInstr::VMSLE_VX => !todo!(),
+        RiscvInstr::VMSGTU_VX => !todo!(),
+        RiscvInstr::VMSGT_VX => !todo!(),
+
+        RiscvInstr::VADC_VXM => !todo!(), // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VX => !todo!(),
+        RiscvInstr::VMADC_VXM => !todo!(),
+        RiscvInstr::VSBC_VXM => !todo!(),
+        RiscvInstr::VMSBC_VX => !todo!(),
+        RiscvInstr::VMSBC_VXM => !todo!(),
+
+        RiscvInstr::VMAX_VX => !todo!(), // Integer Min/Max Instructions
+        RiscvInstr::VMAXU_VX => !todo!(),
+        RiscvInstr::VMIN_VX => !todo!(),
+        RiscvInstr::VMINU_VX => !todo!(),
+
+        //  Single-Width Integer Multiply-Add Instructions
+        RiscvInstr::VMACC_VX => !todo!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VNMSAC_VX => !todo!(), // vd[i] = -(vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VMADD_VX => !todo!(), // vd[i] = (vs1[i] * vd[i]) + vs2[i]
+        RiscvInstr::VNMSUB_VX => !todo!(), // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
+
+        RiscvInstr::VMERGE_VXM | RiscvInstr::VMV_V_X => {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
+                if let RVInstrInfo::V { vm, .. } = inst_info {
+                    if vm {
+                        todo!() // Handle VMV_V_X
+                    } else {
+                        todo!() // Handle VMERGE_VXM
+                    }
+                } else {
+                    std::unreachable!();
+                }
+            }
+        }
+
+        RiscvInstr::VSADDU_VX => !todo!(), // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VX => !todo!(),
+        RiscvInstr::VSSUBU_VX => !todo!(),
+        RiscvInstr::VSSUB_VX => !todo!(),
+
+        RiscvInstr::VAADDU_VX => !todo!(), // Single-Width Averaging Add and Subtract
+        RiscvInstr::VAADD_VX => !todo!(),
+        RiscvInstr::VASUBU_VX => !todo!(),
+        RiscvInstr::VASUB_VX => !todo!(),
+
+        RiscvInstr::VSMUL_VX => !todo!(), //  Single-Width Fractional Multiply with Rounding and Saturation
+
+        RiscvInstr::VSSRL_VX => !todo!(), // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VX => !todo!(),
+
+        RiscvInstr::VNCLIPU_WX => !todo!(), // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WX => !todo!(),
+
+        RiscvInstr::VSLIDEUP_VX => !todo!(), // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VX => !todo!(),
+
+        RiscvInstr::VRGATHER_VX => !todo!(), // Vector Gather Instructions
+
+        //-------- OPIVI (func3 = 0b011) --------
+        RiscvInstr::VADD_VI => !todo!(), // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VRSUB_VI => !todo!(),
+
+        RiscvInstr::VAND_VI => !todo!(), // Bitwise Logical Instructions
+        RiscvInstr::VOR_VI => !todo!(),
+        RiscvInstr::VXOR_VI => !todo!(),
+
+        RiscvInstr::VSRA_VI => !todo!(), //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VI => !todo!(),
+        RiscvInstr::VSLL_VI => !todo!(),
+
+        RiscvInstr::VNSRL_WI => !todo!(), // Widening Shift Instructions
+        RiscvInstr::VNSRA_WI => !todo!(),
+
+        RiscvInstr::VMSEQ_VI => !todo!(), // Integer Compare Instructions
+        RiscvInstr::VMSNE_VI => !todo!(),
+        RiscvInstr::VMSLEU_VI => !todo!(),
+        RiscvInstr::VMSLE_VI => !todo!(),
+        RiscvInstr::VMSGTU_VI => !todo!(),
+        RiscvInstr::VMSGT_VI => !todo!(),
+
+        RiscvInstr::VADC_VIM => !todo!(), // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VI => !todo!(),
+        RiscvInstr::VMADC_VIM => !todo!(),
+
+        RiscvInstr::VMERGE_VIM | RiscvInstr::VMV_V_I => {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
+                if let RVInstrInfo::V { vm, .. } = inst_info {
+                    if vm {
+                        todo!() // Handle VMV_V_X
+                    } else {
+                        todo!() // Handle VMERGE_VXM
+                    }
+                } else {
+                    std::unreachable!();
+                }
+            }
+        }
+
+        RiscvInstr::VSADDU_VI => !todo!(), // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VI => !todo!(),
+
+        RiscvInstr::VSSRL_VI => !todo!(), // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VI => !todo!(),
+
+        RiscvInstr::VNCLIPU_WI => !todo!(), // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WI => !todo!(),
+
+        RiscvInstr::VSLIDEUP_VI => !todo!(), // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VI => !todo!(),
+
+        RiscvInstr::VRGATHER_VI => !todo!(), // Vector Gather Instructions
+
+        RiscvInstr::VMV1R_V => !todo!(), // Whole Vector Register Move
+        RiscvInstr::VMV2R_V => !todo!(),
+        RiscvInstr::VMV4R_V => !todo!(),
+        RiscvInstr::VMV8R_V => !todo!(),
+
+        //-------- OPMVV (func3 = 0b010) --------
+        RiscvInstr::VWADD_VV => !todo!(), // Widening Integer Add/Subtract
+        RiscvInstr::VWADD_WV => !todo!(),
+        RiscvInstr::VWADDU_VV => !todo!(),
+        RiscvInstr::VWADDU_WV => !todo!(),
+        RiscvInstr::VWSUB_VV => !todo!(),
+        RiscvInstr::VWSUB_WV => !todo!(),
+        RiscvInstr::VWSUBU_VV => !todo!(),
+        RiscvInstr::VWSUBU_WV => !todo!(),
+
+        RiscvInstr::VWMUL_VV => !todo!(), // Widening Integer Multiply Instructions
+        RiscvInstr::VWMULU_VV => !todo!(),
+        RiscvInstr::VWMULSU_VV => !todo!(),
+
+        RiscvInstr::VZEXT_VF2 => !unimplemented!(), // Vector Sign/Zero Extension Instructions (for floating-point formats)
+        RiscvInstr::VZEXT_VF4 => !unimplemented!(),
+        RiscvInstr::VZEXT_VF8 => !unimplemented!(),
+        RiscvInstr::VSEXT_VF2 => !unimplemented!(),
+        RiscvInstr::VSEXT_VF4 => !unimplemented!(),
+        RiscvInstr::VSEXT_VF8 => !unimplemented!(),
+
+        RiscvInstr::VWMACCU_VV => !todo!(), // Widening Integer Multiply-Add Instructions
+        RiscvInstr::VWMACC_VV => !todo!(),
+        RiscvInstr::VWMACCSU_VV => !todo!(),
+
+        RiscvInstr::VCOMPRESS_VM => !todo!(), // Vector Compress, Expand, and Slide Instructions
+
+        RiscvInstr::VMAND_MM => !todo!(), // Mask-Register Logical Instructions
+        RiscvInstr::VMNAND_MM => !todo!(),
+        RiscvInstr::VMANDN_MM => !todo!(),
+        RiscvInstr::VMXOR_MM => !todo!(),
+        RiscvInstr::VMOR_MM => !todo!(),
+        RiscvInstr::VMNOR_MM => !todo!(),
+        RiscvInstr::VMORN_MM => !todo!(),
+        RiscvInstr::VMXNOR_MM => !todo!(),
+
+        RiscvInstr::VCPOP_M => !todo!(), //count population in mask vcpop.m
+
+        RiscvInstr::VFIRST_M => !todo!(), // find first set bit in mask vfirst.m
+
+        RiscvInstr::VMSBF_M => !todo!(), // set-before-first mask bit
+        RiscvInstr::VMSIF_M => !todo!(), // set-including-first mask bit
+        RiscvInstr::VMSOF_M => !todo!(), // set-only-first mask bit
+
+        RiscvInstr::VIOTA_M => !todo!(), // Iota Instruction
+        RiscvInstr::VID_V => !todo!(),   //  Element Index Instruction
+
+        RiscvInstr::VMV_S_X => !todo!(), // Vector Slide Instructions
+        RiscvInstr::VMV_X_S => !todo!(),
+        // RiscvInstr::VFMV_S_F => !todo!(),
+        // RiscvInstr::VFMV_F_S => !todo!(),
+
+        //-------- OPMVX (func3 = 0b110) --------
+        RiscvInstr::VWADD_VX => !todo!(), // Widening Integer Add/Subtract
+        RiscvInstr::VWADD_WX => !todo!(),
+        RiscvInstr::VWADDU_VX => !todo!(),
+        RiscvInstr::VWADDU_WX => !todo!(),
+        RiscvInstr::VWSUB_VX => !todo!(),
+        RiscvInstr::VWSUB_WX => !todo!(),
+        RiscvInstr::VWSUBU_VX => !todo!(),
+        RiscvInstr::VWSUBU_WX => !todo!(),
+
+        RiscvInstr::VWMUL_VX => !todo!(), // Widening Integer Multiply Instructions
+        RiscvInstr::VWMULU_VX => !todo!(),
+        RiscvInstr::VWMULSU_VX => !todo!(),
+
+        RiscvInstr::VWMACCU_VX => !todo!(), // Widening Integer Multiply-Add Instructions
+        RiscvInstr::VWMACC_VX => !todo!(),
+        RiscvInstr::VWMACCSU_VX => !todo!(),
+        RiscvInstr::VWMACCUS_VX => !todo!(),
+        //-------- OPFVV (func3 = 0b001) --------
+        //-------- OPFVF (func3 = 0b101) --------
+        // _ => todo!(),
     }
 }

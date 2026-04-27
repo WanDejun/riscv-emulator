@@ -51,7 +51,8 @@ impl Decoder {
             .add(TABLE_RV64D)
             .add(TABLE_RVS)
             .add(TABLE_RV32A)
-            .add(TABLE_RV64A);
+            .add(TABLE_RV64A)
+            .add(TABLE_RVV);
         #[cfg(feature = "custom-instr")]
         let isa_builder = isa_builder.add(TABLE_RVCUSTOM0).add(TABLE_RVCUSTOM1);
 
@@ -81,6 +82,18 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
     let f3 = ((raw_instr >> 12) & 0b111) as u8;
 
     match fmt {
+        InstrFormat::V => {
+            let vd = rd;
+            let vm = (raw_instr & (1 << 25)) == 0;
+            let imm = ((raw_instr >> 26) & 0x3F) as WordType;
+            RVInstrInfo::V {
+                rs1,
+                rs2,
+                vd,
+                vm,
+                imm,
+            }
+        }
         InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },
         InstrFormat::R_rm => RVInstrInfo::R_rm {
             rs1,

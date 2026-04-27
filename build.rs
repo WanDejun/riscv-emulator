@@ -1,4 +1,5 @@
 use core::panic;
+use regex::Regex;
 use serde_json::Value;
 use std::{collections::HashMap, env, fs, path::PathBuf};
 
@@ -32,6 +33,49 @@ fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
+fn is_vector_load(encoding: &str) -> bool {
+    let func3 = get_funct3(encoding);
+    let func3_is_vector = match func3 {
+        0b000 | 0b101 | 0b110 | 0b111 => true,
+        _ => false,
+    };
+    get_opcode(encoding) == 0b0000111 && func3_is_vector
+}
+
+fn is_vector_store(encoding: &str) -> bool {
+    let func3 = get_funct3(encoding);
+    let func3_is_vector = match func3 {
+        0b000 | 0b101 | 0b110 | 0b111 => true,
+        _ => false,
+    };
+    get_opcode(encoding) == 0b0100111 && func3_is_vector
+}
+
+fn is_vector_arith(encoding: &str) -> bool {
+    get_opcode(encoding) == 0b1010111 // vector arithmetic instructions
+}
+
+fn is_vector_config(encoding: &str) -> bool {
+    get_opcode(encoding) == 0b1010111 && get_funct3(encoding) == 0b111 // vector configuration instructions
+}
+
+fn vector_ignore_instr(name: &str, encoding: &str) -> bool {
+    let re_ls_ignore1 = Regex::new("v[ls].*ei?[0-9]+.*_v").unwrap();
+    let re_ls_ignore2 = Regex::new("v[ls]([0-9]+r|m)_v").unwrap(); // VS1R_V
+    let re_ls_reserve = Regex::new("v[ls]e[0-9]+_v").unwrap();
+    let ignore_load_store = (re_ls_ignore1.is_match(name) || re_ls_ignore2.is_match(name))
+        && !re_ls_reserve.is_match(name);
+
+    let re_float_ignore = Regex::new("v.*red.*").unwrap();
+    let is_float_func3 = match get_funct3(encoding) {
+        0b001 | 0b101 => true,
+        _ => false,
+    }; // floating-point instructions
+    let is_float = (is_vector_arith(encoding) && is_float_func3) || re_float_ignore.is_match(name);
+
+    ignore_load_store || is_float
+}
+
 fn parse_instr<'a>(
     isa_dict: &mut HashMap<&'a str, Vec<String>>,
     ext_to_name: &HashMap<&str, &'a str>,
@@ -52,6 +96,10 @@ fn parse_instr<'a>(
         {
             let encoding = instr["encoding"].as_str().unwrap();
 
+            if vector_ignore_instr(name, encoding) {
+                continue;
+            }
+
             let fields = instr["variable_fields"]
                 .as_array()
                 .unwrap()
@@ -64,6 +112,8 @@ fn parse_instr<'a>(
                 || fields == ["rs1", "rs2"]
             {
                 "R"
+            } else if is_vector_arith(encoding) {
+                "V"
             } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
                 "R_rm"
             } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
@@ -77,6 +127,8 @@ fn parse_instr<'a>(
                 || fields == ["rd", "rs1", "shamtw"]
                 || fields == ["rd", "csr", "zimm5"]
                 || fields == ["rd", "rs1", "csr"]
+                || is_vector_load(encoding)
+                || is_vector_store(encoding)
             {
                 "I"
             } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {
@@ -118,7 +170,8 @@ fn parse_instr<'a>(
                 || fields.is_empty()
                 || fields.contains(&"rm")
                 || ext == "rv_s"
-                || ext == "rv_d";
+                || ext == "rv_d"
+                || is_vector_config(encoding);
 
             let s = format!(
                 "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",
@@ -157,6 +210,7 @@ fn main() {
         m.insert("rv_a", "RV32A");
         m.insert("rv64_a", "RV64A");
         m.insert("rv_zifencei", "RVZifencei");
+        m.insert("rv_v", "RVV");
 
         #[cfg(feature = "custom-instr")]
         m.insert("rv_custom0", "RVCustom0");

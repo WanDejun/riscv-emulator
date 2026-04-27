@@ -124,6 +124,13 @@ pub enum RVInstrInfo {
         rl: bool,
         aq: bool,
     },
+    V {
+        rs1: u8,
+        rs2: u8,
+        vd: u8,
+        vm: bool,
+        imm: WordType,
+    },
 }
 
 #[allow(non_camel_case_types)]
@@ -139,6 +146,7 @@ pub enum InstrFormat {
     U,
     J,
     A,
+    V,
 }
 
 // define a single enum for every instruction
