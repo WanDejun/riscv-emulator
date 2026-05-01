@@ -16,4 +16,13 @@ pub trait Board {
     fn cpu_mut(&mut self) -> &mut RVCPU;
 
     fn loader(&self) -> Option<&crate::load::ELFLoader>;
+
+    fn run(&mut self) {
+        while self.status() == BoardStatus::Running {
+            if let Err(e) = self.step() {
+                eprintln!("Board encountered an exception: {:?}", e);
+                break;
+            }
+        }
+    }
 }

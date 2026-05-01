@@ -42,12 +42,14 @@ bitflags = { version = "2.9.3" }
 rustc_apfloat = "0.2.3"
 num_enum = { version = "0.7.4" }
 bit-set = { version = "0.8.0" }
+gdbstub_arch = "0.3.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flexi_logger = { version = "0.31.2", optional = true }
 crossterm = { version = "0.28", optional = true }
 clap = { version = "4.5.43", features = ["derive"], optional = true }
 rustyline = { version = "17.0.1", optional = true }
+gdbstub = "0.7.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }

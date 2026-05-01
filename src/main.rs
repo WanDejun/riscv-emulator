@@ -12,6 +12,7 @@ use std::time::Instant;
 use clap::Parser;
 use lazy_static::lazy_static;
 use riscv_emulator::board::Board;
+use riscv_emulator::gdb;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
 use riscv_emulator::{DeviceConfig, EmulatorConfigurator, board::virt::VirtBoard};
@@ -47,9 +48,13 @@ struct Args {
     #[arg(value_enum, short, long, default_value_t = TargetFormat::Auto)]
     format: TargetFormat,
 
-    /// Enable debugger REPL.
+    /// Enable builtin debugger REPL (rvdb).
     #[arg(short = 'g', long = "debug", default_value_t = false)]
     debug: bool,
+
+    /// Enable GDB remote debugging server (gdb).
+    #[arg(short = 'G', long = "gdb", default_value_t = false)]
+    gdb: bool,
 
     /// Script file for debugger REPL, will be ignored if --debug is not set.
     #[arg(short = 'S', long = "script")]
@@ -80,6 +85,7 @@ struct Args {
     max_cycles: u64,
 }
 
+/// Used for riscv-arch-test.
 fn dump_signature(
     board: &mut VirtBoard,
     out_path: &std::path::Path,
@@ -170,6 +176,11 @@ fn main() {
         display_device_list(&cli_args.devices);
     }
 
+    if cli_args.debug && cli_args.gdb {
+        log::error!("Cannot enable both rvdb and gdb.");
+        panic!();
+    }
+
     // Init emulator configuration by cli_args.
     let mut emu_cfg = EmulatorConfigurator::new();
     for device in cli_args.devices.iter() {
@@ -216,6 +227,11 @@ fn main() {
             repl.run_script(&lines);
         }
         repl.run();
+    } else if cli_args.gdb {
+        if let Err(e) = gdb::event_loop(&mut board, gdb::Config::Tcp(1234)) {
+            log::error!("{:?}", e);
+            panic!();
+        }
     } else {
         if let Some(sig_path) = &cli_args.signature {
             // Create the signature file before running the emulator to ensure the file exists even if the emulator crashes.

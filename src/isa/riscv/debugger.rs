@@ -13,7 +13,7 @@ use crate::{
         DebugTarget, DecoderTrait, ISATypes,
         riscv::{
             RawInstrType, RiscvTypes,
-            csr_reg::PrivilegeLevel,
+            csr_reg::{NamedCsrReg, PrivilegeLevel, csr_macro::Mcycle},
             decoder::DecodeInstr,
             executor::{ExcuteInstrInfo, RVCPU},
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
@@ -495,6 +495,28 @@ impl<'a, B: Board> Debugger<'a, B> {
         rst
     }
 
+    /// Return `Ok(None)` if the condition is met, otherwise return `Ok(Some(DebugEvent))` for the event that causes the stop.
+    pub fn continue_until(
+        &mut self,
+        mut cond: impl FnMut(&mut Self) -> bool,
+    ) -> Result<Option<DebugEvent>, DebugError> {
+        loop {
+            if self.board.status() == crate::board::BoardStatus::Halt {
+                return Ok(Some(DebugEvent::BoardHalted));
+            }
+
+            if cond(self) {
+                return Ok(None);
+            }
+
+            self.cpu_step_internal()?;
+
+            if self.on_breakpoint() {
+                return Ok(Some(DebugEvent::BreakpointHit));
+            }
+        }
+    }
+
     /// Continue running until a breakpoint is hit, `max_steps` steps are executed or the board is halted.
     /// Returns the event that caused the stop and the actual steps executed.
     pub fn continue_until_step(&mut self, max_steps: u64) -> Result<(DebugEvent, u64), DebugError> {
@@ -542,6 +564,7 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     // re-export methods from `DebugTarget`
 
+    // TODO: Add checks here.
     pub fn read_reg(&self, idx: u8) -> WordType {
         self.board.cpu().read_reg(idx)
     }
@@ -560,6 +583,10 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     pub fn read_float_reg(&self, idx: u8) -> (f32, f64) {
         self.board.cpu().read_float_reg(idx)
+    }
+
+    pub fn write_float_reg(&mut self, idx: u8, value: f64) {
+        self.board.cpu_mut().fpu.store(idx, value);
     }
 
     pub fn read_instr(&mut self, addr: WordType) -> Option<RawInstrType> {
@@ -594,6 +621,10 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu_mut().get_current_privilege()
     }
 
+    pub fn set_current_privilege(&mut self, priv_level: PrivilegeLevel) {
+        self.board.cpu_mut().csr.set_current_privileged(priv_level);
+    }
+
     pub fn decoded_info(&self, raw: RawInstrType) -> Option<<RiscvTypes as ISATypes>::DecodeRst> {
         self.board.cpu().decoded_instr(raw)
     }
@@ -604,6 +635,14 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     pub fn translate(&mut self, addr: u64, access: AccessType) -> Result<u64, PageTableError> {
         self.board.cpu_mut().debug_translate(addr, access)
+    }
+
+    pub fn cycle(&mut self) -> WordType {
+        self.board
+            .cpu_mut()
+            .csr
+            .get_by_type_existing::<Mcycle>()
+            .data()
     }
 }
 
