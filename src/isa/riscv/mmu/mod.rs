@@ -67,7 +67,9 @@ fn determine_data_access_privilege(csr: &mut CsrRegFile) -> AccessPrivilege {
             if mstatus.get_mprv() == 0 {
                 AccessPrivilege::MachineOnly
             } else {
-                match (mstatus.get_mpp() as u8).into() {
+                match PrivilegeLevel::try_from(mstatus.get_mpp() as u8)
+                    .expect("mstatus.mpp must contain a valid privilege level")
+                {
                     PrivilegeLevel::M => AccessPrivilege::MachineOnly,
                     PrivilegeLevel::S => {
                         if mstatus.get_sum() == 0 {

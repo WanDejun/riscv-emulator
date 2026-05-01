@@ -19,6 +19,9 @@ mod fpu;
 mod utils;
 mod vclock;
 
+#[cfg(feature = "native-cli")]
+pub mod gdb;
+
 pub mod board;
 pub mod cli_coordinator;
 pub mod config;

@@ -86,7 +86,10 @@ impl TrapController {
             mstatus.set_mprv(0);
         }
 
-        cpu.csr.set_current_privileged(new_priv.into());
+        cpu.csr.set_current_privileged(
+            PrivilegeLevel::try_from(new_priv)
+                .expect("mstatus.mpp must contain a valid privilege level"),
+        );
         mstatus.set_mpp(0);
     }
 
@@ -135,7 +138,10 @@ impl TrapController {
         // `SPP` cannot be M, so no need to check.
         cpu.csr.get_by_type_existing::<Mstatus>().set_mprv(0);
 
-        cpu.csr.set_current_privileged(new_priv.into());
+        cpu.csr.set_current_privileged(
+            PrivilegeLevel::try_from(new_priv)
+                .expect("sstatus.spp must contain a valid privilege level"),
+        );
         sstatus.set_spp(PrivilegeLevel::U as u8 as WordType);
     }
 
