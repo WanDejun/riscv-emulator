@@ -27,3 +27,4 @@ impl ISATypes for RiscvTypes {
 }
 
 pub type RawInstrType = u32;
+pub const VECTOR_LEN: usize = 128;

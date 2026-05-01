@@ -364,7 +364,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        isa::riscv::{cpu_tester::*, csr_reg::csr_index},
+        isa::riscv::{VECTOR_LEN, cpu_tester::*, csr_reg::csr_index},
         ram_config,
         utils::{UnsignedInteger, negative_of, sign_extend},
     };
@@ -708,5 +708,107 @@ mod tests {
 
         let val: u64 = cpu.memory.read_by_paddr(TARGET_ADDR).unwrap();
         assert_eq!(val, (CNT * 2) as u64);
+    }
+
+    #[test]
+    fn test_vector_config() {
+        run_test_exec(
+            RiscvInstr::VSETVL,
+            RVInstrInfo::V {
+                rs1: 1,
+                rs2: 2,
+                rd: 3,
+                vm: false,
+                func6: 0b100000,
+            },
+            |builder| builder.reg(1, 100).reg(2, 0b00_010_001).pc(0x2000), // sew = 32, lmul = 2
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
+
+        run_test_exec(
+            RiscvInstr::VSETVLI,
+            RVInstrInfo::V {
+                rs1: 1,
+                rs2: 0b10_001,
+                rd: 3,
+                vm: false,
+                func6: 0b000000,
+            },
+            |builder| builder.reg(1, 100).reg(2, 0).pc(0x2000), // sew = 32, lmul = 2
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
+
+        run_test_exec(
+            RiscvInstr::VSETIVLI,
+            RVInstrInfo::V {
+                rs1: 0b11111,
+                rs2: 0b11_001,
+                rd: 3,
+                vm: false,
+                func6: 0b110000,
+            },
+            |builder| builder.pc(0x2000), // sew = 32, lmul = 2
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 64)
+                    .csr(Vtype::get_index(), 0b00_011_001)
+                    .pc(0x2004)
+            },
+        );
+
+        run_test_exec_decode(
+            0b1000000_00010_00001_111_00011_1010111, // vsetvl x3, x1, x2
+            |builder| builder.reg(1, 100).reg(2, 0b00_010_001).pc(0x2000),
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
+
+        run_test_exec_decode(
+            0b000000_010_001_00001_111_00011_1010111, // vsetvli x3, x1, e32, m2, ta, ma
+            |builder| builder.reg(1, 100).pc(0x2000),
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
+
+        run_test_exec_decode(
+            0b110000_010_001_10000_111_00011_1010111, // vsetivli x3, 32, e32, m2, ta, ma
+            |builder| builder.pc(0x2000),
+            |checker| {
+                checker
+                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
+
+        // maxvl > vl
+        run_test_exec_decode(
+            0b110000_010_001_00010_111_00011_1010111, // vsetivli x3, 32, e32, m2, ta, ma
+            |builder| builder.pc(0x2000),
+            |checker| {
+                checker
+                    .reg(3, 2)
+                    .csr(Vtype::get_index(), 0b00_010_001)
+                    .pc(0x2004)
+            },
+        );
     }
 }

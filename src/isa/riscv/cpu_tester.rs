@@ -27,7 +27,7 @@ pub(super) struct TestCPUBuilder {
 }
 
 impl TestCPUBuilder {
-    /// Build a CISC-V CPU, only has RAM, don't have other devices.
+    /// Build a RISC-V CPU, only has RAM, don't have other devices.
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);

@@ -1,5 +1,6 @@
 mod exec_atomic_function;
 mod exec_float_function;
+mod exec_vector_function;
 
 pub(super) mod exec_function;
 pub mod exec_mapping;
@@ -48,6 +49,28 @@ where
     normal_exec(cpu, f)?;
 
     save_fflags_to_cpu(cpu);
+
+    Ok(())
+}
+
+/// A helper function for normal vector instruction execution.
+///
+/// It first checks if the vector unit is enabled by examining the VS field in the Mstatus CSR.
+///
+/// If the VS field is 0, it returns an illegal instruction exception.
+/// Otherwise, it calls [`normal_exec`].
+#[inline(always)]
+pub(super) fn normal_vector_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
+where
+    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
+{
+    if cpu.csr.get_by_type_existing::<Mstatus>().get_vs() == 0 {
+        return Err(riscv::trap::Exception::IllegalInstruction);
+    }
+
+    normal_exec(cpu, f)?;
+
+    // TODO: updata vector registers status.
 
     Ok(())
 }
@@ -127,9 +150,9 @@ pub enum RVInstrInfo {
     V {
         rs1: u8,
         rs2: u8,
-        vd: u8,
+        rd: u8,
         vm: bool,
-        imm: WordType,
+        func6: WordType,
     },
 }
 

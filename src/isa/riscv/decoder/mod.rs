@@ -83,15 +83,14 @@ fn decode_info(raw_instr: u32, instr: RiscvInstr, fmt: InstrFormat) -> RVInstrIn
 
     match fmt {
         InstrFormat::V => {
-            let vd = rd;
-            let vm = (raw_instr & (1 << 25)) == 0;
-            let imm = ((raw_instr >> 26) & 0x3F) as WordType;
+            let vm = (raw_instr & (1 << 25)) != 0;
+            let func6 = ((raw_instr >> 26) & 0x3F) as WordType;
             RVInstrInfo::V {
                 rs1,
                 rs2,
-                vd,
+                rd,
                 vm,
-                imm,
+                func6,
             }
         }
         InstrFormat::R => RVInstrInfo::R { rd, rs1, rs2 },

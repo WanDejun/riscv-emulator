@@ -3,9 +3,8 @@ mod write_validator;
 #[macro_use]
 mod read_validator;
 
-mod m_utils;
-
 pub mod csr_macro;
+pub mod utils;
 
 use self::{
     csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
@@ -37,6 +36,15 @@ pub(crate) mod csr_index {
     pub const fflags    : WordType  = 0x001;
     pub const frm       : WordType  = 0x002;
     pub const fcsr      : WordType  = 0x003;
+
+    // Vector CSR
+    pub const vstart    : WordType  = 0x008;
+    pub const vxsat     : WordType  = 0x009;
+    pub const vxrm      : WordType  = 0x00a;
+    pub const vcsr      : WordType  = 0x00f;
+    pub const vl        : WordType  = 0xc20;
+    pub const vtype     : WordType  = 0xc21;
+    pub const vlenb     : WordType  = 0xc22;
 }
 
 #[repr(u8)]
@@ -361,6 +369,12 @@ impl CsrRegFile {
             // implementations shall ignore writes to these bits and supply a zero value when read."
             let fcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
             fcsr.value = data & 0xFF;
+        } else if addr == csr_index::vxsat {
+            let vcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            vcsr.value = (vcsr.value & !0b1) | (data & 0b1);
+        } else if addr == csr_index::vxrm {
+            let vcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            vcsr.value = (vcsr.value & !0b110) | ((data & 0b11) << 1);
         } else {
             if let Some(csr) = self.table[addr as usize].as_mut() {
                 if let Some(base_addr) = csr.read_validator {
@@ -390,6 +404,10 @@ impl CsrRegFile {
             Some(self.table[Fcsr::get_index() as usize].unwrap().value() & 0b11111)
         } else if addr == csr_index::frm {
             Some((self.table[Fcsr::get_index() as usize].unwrap().value() >> 5) & 0b111)
+        } else if addr == csr_index::vxsat {
+            Some(self.table[Fcsr::get_index() as usize].unwrap().value() & 0b1)
+        } else if addr == csr_index::vxrm {
+            Some((self.table[Fcsr::get_index() as usize].unwrap().value() >> 1) & 0b11)
         } else {
             if let Some(base_addr) = resolve_shadow_addr(addr) {
                 // This is a shadow CSR.

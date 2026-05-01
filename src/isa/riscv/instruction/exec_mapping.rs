@@ -12,7 +12,8 @@ use crate::{
             },
             executor::RVCPU,
             instruction::{
-                RVInstrInfo, exec_atomic_function::*, exec_function::*, instr_table::RiscvInstr,
+                RVInstrInfo, exec_atomic_function::*, exec_function::*, exec_vector_function::*,
+                instr_table::RiscvInstr,
             },
             trap::{Exception, trap_controller::TrapController},
         },
@@ -372,9 +373,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // RV_V
         //---------------------------------------
         //--------- config instruction. ---------
-        RiscvInstr::VSETVL => !todo!(),
-        RiscvInstr::VSETVLI => !todo!(),
-        RiscvInstr::VSETIVLI => !todo!(),
+        RiscvInstr::VSETVL => exec_vector_config::<VsetvlFieldExtractor>,
+        RiscvInstr::VSETVLI => exec_vector_config::<VsetvliFieldExtractor>,
+        RiscvInstr::VSETIVLI => exec_vector_config::<VsetivliFieldExtractor>,
 
         //------- load store instruction. -------
         RiscvInstr::VLE8_V => !todo!(),
