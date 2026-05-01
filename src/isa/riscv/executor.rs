@@ -15,6 +15,7 @@ use crate::{
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, instr_table::RiscvInstr},
             mmu::VirtAddrManager,
             trap::{Exception, Interrupt, Trap, trap_controller::TrapController},
+            vector::Vector,
         },
     },
     ram_config::DEFAULT_PC_VALUE,
@@ -61,6 +62,7 @@ pub struct RVCPU {
     pub(super) csr: CsrRegFile,
     pub(super) icache: SetCache<DecodeInstr, 256, 8>,
     pub(super) fpu: SoftFPU,
+    pub(super) vector: Vector,
 
     /// The address of the memory-mapped `mtime` CSR.
     pub(crate) time_addr: Option<WordType>,
@@ -111,6 +113,7 @@ impl RVCPU {
             pc: DEFAULT_PC_VALUE,
             decoder: Decoder::new(),
             csr: csr,
+            vector: Vector::new(),
             icache: SetCache::new(),
             fpu,
             time_addr: None,
@@ -364,7 +367,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        isa::riscv::{VECTOR_LEN, cpu_tester::*, csr_reg::csr_index},
+        isa::riscv::{cpu_tester::*, csr_reg::csr_index, vector::VLEN},
         ram_config,
         utils::{UnsignedInteger, negative_of, sign_extend},
     };
@@ -724,7 +727,7 @@ mod tests {
             |builder| builder.reg(1, 100).reg(2, 0b00_010_001).pc(0x2000), // sew = 32, lmul = 2
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .reg(3, VLEN as WordType * 2 / 32)
                     .csr(Vtype::get_index(), 0b00_010_001)
                     .pc(0x2004)
             },
@@ -742,7 +745,7 @@ mod tests {
             |builder| builder.reg(1, 100).reg(2, 0).pc(0x2000), // sew = 32, lmul = 2
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .reg(3, VLEN as WordType * 2 / 32)
                     .csr(Vtype::get_index(), 0b00_010_001)
                     .pc(0x2004)
             },
@@ -760,7 +763,7 @@ mod tests {
             |builder| builder.pc(0x2000), // sew = 32, lmul = 2
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 64)
+                    .reg(3, VLEN as WordType * 2 / 64)
                     .csr(Vtype::get_index(), 0b00_011_001)
                     .pc(0x2004)
             },
@@ -771,7 +774,7 @@ mod tests {
             |builder| builder.reg(1, 100).reg(2, 0b00_010_001).pc(0x2000),
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .reg(3, VLEN as WordType * 2 / 32)
                     .csr(Vtype::get_index(), 0b00_010_001)
                     .pc(0x2004)
             },
@@ -782,7 +785,7 @@ mod tests {
             |builder| builder.reg(1, 100).pc(0x2000),
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .reg(3, VLEN as WordType * 2 / 32)
                     .csr(Vtype::get_index(), 0b00_010_001)
                     .pc(0x2004)
             },
@@ -793,7 +796,7 @@ mod tests {
             |builder| builder.pc(0x2000),
             |checker| {
                 checker
-                    .reg(3, VECTOR_LEN as WordType * 2 / 32)
+                    .reg(3, VLEN as WordType * 2 / 32)
                     .csr(Vtype::get_index(), 0b00_010_001)
                     .pc(0x2004)
             },

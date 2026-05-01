@@ -11,6 +11,7 @@ pub mod executor;
 pub mod instruction;
 pub mod mmu;
 pub mod trap;
+pub mod vector;
 
 #[derive(Debug)]
 pub struct RiscvTypes;
@@ -27,4 +28,3 @@ impl ISATypes for RiscvTypes {
 }
 
 pub type RawInstrType = u32;
-pub const VECTOR_LEN: usize = 128;

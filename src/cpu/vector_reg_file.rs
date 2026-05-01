@@ -1,4 +1,4 @@
-use std::slice::from_raw_parts;
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 pub struct VectorRegFile<const VLEN: usize>
 where
@@ -17,45 +17,61 @@ where
         }
     }
 
-    pub fn read<const LMUL: usize>(&self, idx: usize) -> Option<&[u8]> {
-        self.read_as_type::<LMUL, u8>(idx)
+    pub fn read(&self, lmul: u8, idx: u8) -> Option<&[u8]> {
+        self.read_as_type::<u8>(lmul, idx)
     }
 
     #[inline]
-    pub fn read_as_type<const LMUL: usize, T>(&self, idx: usize) -> Option<&[T]> {
+    pub fn read_as_type<T>(&self, lmul: u8, idx: u8) -> Option<&[T]> {
         debug_assert!(idx < 32);
-        debug_assert!(LMUL <= 7);
+        debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
-        if idx % LMUL != 0 {
+        if idx % lmul != 0 {
             None
         } else {
-            let base = &self.reg[idx] as *const u8 as *const T;
-            let slides = unsafe { from_raw_parts(base, (VLEN >> 3) * LMUL / size_of::<T>()) };
+            let base = &self.reg[idx as usize] as *const u8 as *const T;
+            let slides =
+                unsafe { from_raw_parts(base, (VLEN >> 3) * (lmul as usize) / size_of::<T>()) };
             Some(slides)
         }
     }
 
-    pub fn write<const LMUL: usize, T>(&mut self, idx: usize, data: &[T], seq: usize) -> Option<()>
+    #[inline]
+    pub fn get_mut<T>(&self, lmul: u8, idx: u8) -> Option<&mut [T]> {
+        debug_assert!(idx < 32);
+        debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
+
+        if idx % lmul != 0 {
+            None
+        } else {
+            let base = &self.reg[idx as usize] as *const u8 as *mut T;
+            let slides =
+                unsafe { from_raw_parts_mut(base, (VLEN >> 3) * (lmul as usize) / size_of::<T>()) };
+            Some(slides)
+        }
+    }
+
+    pub fn write<T>(&mut self, lmul: usize, idx: usize, data: &[T], seq: usize) -> Option<()>
     where
         T: Sized,
     {
         debug_assert!(idx < 32);
-        debug_assert!(LMUL <= 7);
+        debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
         let element_size = size_of::<T>();
         debug_assert!(element_size <= 8);
-        if seq * LMUL > 8 {
+        if seq * lmul > 8 {
             return None;
         }
 
-        if idx % (LMUL * seq) != 0 {
+        if idx % (lmul * seq) != 0 {
             None
         } else {
             let mut input_index = 0;
 
-            for lmul_index in 0..LMUL {
+            for lmul_index in 0..lmul {
                 let reg_start = idx + lmul_index;
                 for inner_index in (0..(VLEN >> 3)).step_by(element_size) {
-                    for reg_index in (reg_start..reg_start + LMUL * seq).step_by(LMUL) {
+                    for reg_index in (reg_start..reg_start + lmul * seq).step_by(lmul) {
                         let dest = &mut self.reg[reg_index][inner_index] as *mut _ as *mut T;
                         let src = &data[input_index] as *const _ as *const T;
                         unsafe {
@@ -84,8 +100,8 @@ mod test {
             .iter_mut()
             .enumerate()
             .for_each(|(idx, v)| *v = idx as u32 * 2);
-        regfile.write::<2, u32>(0, &buffer, 1);
-        let result = regfile.read_as_type::<1, u16>(1).unwrap();
+        regfile.write::<u32>(2, 0, &buffer, 1);
+        let result = regfile.read_as_type::<u16>(1, 1).unwrap();
         // println!("{:?}", result);
         result.iter().enumerate().for_each(|(idx, v)| {
             if idx % 2 == 0 {
@@ -105,9 +121,9 @@ mod test {
             .for_each(|(idx, v)| *v = idx as u32);
 
         // seg = 1
-        regfile.write::<4, u32>(0, &buffer, 1);
-        assert!(regfile.read_as_type::<2, u32>(3).is_none()); // unaligned
-        let res = regfile.read_as_type::<2, u32>(2).unwrap(); // reg_u32[8..16]
+        regfile.write::<u32>(4, 0, &buffer, 1);
+        assert!(regfile.read_as_type::<u32>(2, 3).is_none()); // unaligned
+        let res = regfile.read_as_type::<u32>(2, 2).unwrap(); // reg_u32[8..16]
         // println!("{:?}", res);
         res.iter()
             .enumerate()
@@ -125,14 +141,14 @@ mod test {
             .for_each(|(idx, v)| *v = idx as u32);
 
         // seg = 2
-        regfile.write::<2, u32>(0, &buffer, 4);
-        assert!(regfile.read_as_type::<2, u32>(3).is_none()); // unaligned
-        let res = regfile.read_as_type::<2, u32>(2).unwrap(); // reg_u32[8..16] = buffer[4..8] ## buffer[12..16]
+        regfile.write::<u32>(2, 0, &buffer, 4);
+        assert!(regfile.read_as_type::<u32>(2, 3).is_none()); // unaligned
+        let res = regfile.read_as_type::<u32>(2, 2).unwrap(); // reg_u32[8..16] = buffer[4..8] ## buffer[12..16]
         // println!("{:?}", res);
         res.iter()
             .enumerate()
             .for_each(|(idx, &v)| assert!(v == idx as u32 * 4 + 1));
 
-        assert!(regfile.write::<2, u32>(0, &buffer, 8).is_none()); // LMUL * seq > 8
+        assert!(regfile.write::<u32>(2, 0, &buffer, 8).is_none()); // LMUL * seq > 8
     }
 }

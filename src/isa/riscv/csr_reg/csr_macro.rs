@@ -242,7 +242,7 @@ gen_csr_regfile! {
     ];
 
     Vtype, "vtype", 0xc21u64, 0x00, [
-        0, 3, vluml, validate_readonly;
+        0, 3, vlmul, validate_readonly;
         3, 3, vsew, validate_readonly;
         6, 1, vta, validate_readonly;
         7, 1, vma, validate_readonly;

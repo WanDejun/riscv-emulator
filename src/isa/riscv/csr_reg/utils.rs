@@ -1,8 +1,8 @@
 use crate::{
     config::arch_config::{WordType, XLEN},
     isa::riscv::{
-        VECTOR_LEN,
         csr_reg::{NamedCsrReg, csr_macro::*},
+        vector::VLEN,
     },
 };
 
@@ -27,7 +27,7 @@ impl Vtype {
         if illegal {
             None
         } else {
-            let part_vl = VECTOR_LEN as WordType >> (new_vsew as WordType + 3); // vlen / 8 / (vsew + 1)
+            let part_vl = VLEN as WordType >> (new_vsew as WordType + 3); // vlen / 8 / (vsew + 1)
             let vl = match new_vlmul {
                 0b000 => part_vl,      // 1
                 0b001 => part_vl << 1, // 2
