@@ -96,7 +96,7 @@ fn determine_data_access_privilege(csr: &mut CsrRegFile) -> AccessPrivilege {
 }
 
 pub(crate) struct VirtAddrManager {
-    mmio: MemoryMapIO,
+    pub(crate) mmio: MemoryMapIO,
     page_table: PageTableWalker,
     ram: Rc<UnsafeCell<Ram>>,
 }

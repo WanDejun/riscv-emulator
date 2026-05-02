@@ -87,3 +87,47 @@ impl VectorConfigFieldExtractor for VsetvlFieldExtractor {
         VectorConfigField { vtype, input_len }
     }
 }
+
+pub(super) fn vector_unit_stride_load<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    if let RVInstrInfo::V {
+        rs1,
+        rs2,
+        rd,
+        vm: _vm,
+        func6,
+    } = info
+    {
+        let nf = (func6 >> 3) & 0b111;
+        let _mew = (func6 >> 2) & 0b1;
+        let mop = func6 & 0b11;
+        let lumop = rs2;
+        debug_assert_eq!(mop, 0b00);
+
+        let vector = &mut cpu.vector;
+        let base_addr = cpu.reg_file.read(rs1, 0).0;
+        let res;
+
+        match lumop {
+            0b000 => {
+                res = vector.unit_stride_load(
+                    rd,
+                    EEW.into(),
+                    nf as u8,
+                    base_addr,
+                    &mut cpu.memory.mmio,
+                );
+            }
+            _ => todo!(),
+        }
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(err) => Err(Exception::from_memory_err(err)),
+        }
+    } else {
+        unreachable!()
+    }
+}

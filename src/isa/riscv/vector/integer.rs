@@ -25,6 +25,7 @@ impl Vector {
             vrf.get_mut(vlmul.get_lmul(), vd, 1).unwrap(),
             vsew.get_sew(),
             vlmul.get_lmul(),
+            1,
         );
         op(vsew, vs1_ref, vs2_ref, vd_ref)
     }

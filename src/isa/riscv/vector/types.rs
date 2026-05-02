@@ -149,14 +149,13 @@ pub(crate) struct VGFRefMut<'a> {
 }
 
 impl<'a> VGFRefMut<'a> {
-    pub(crate) fn new(val: &'a mut [u8], sew: u8, lmul: u8) -> Self {
+    pub(crate) fn new(val: &'a mut [u8], sew: u8, lmul: u8, seg: u8) -> Self {
         assert!(val.len() % lmul as usize == 0);
-        let seg = val.len() / (lmul as usize * VLEN_BYTE);
         Self {
             value: val,
             sew,
             lmul,
-            seg: seg as u8,
+            seg,
         }
     }
 
@@ -223,6 +222,8 @@ impl<'a> VGFRefIteratorMut<'a> {
 impl<'a> Iterator for VGFRefIteratorMut<'a> {
     type Item = RVVElemMutTy;
     fn next(&mut self) -> Option<Self::Item> {
+        let index = self.current_inner_index + self.current_seg_index * self.seg_length;
+        let current_ptr = unsafe { self.value.as_mut_ptr().add(index) };
         let is_last_seg = self.current_seg_index + 1 == self.seg as usize;
         let is_last_row = self.current_inner_index + self.sew as usize == self.seg_length;
         if is_last_seg && is_last_row {
@@ -234,8 +235,7 @@ impl<'a> Iterator for VGFRefIteratorMut<'a> {
             } else {
                 self.current_seg_index += 1;
             }
-            let index = self.current_inner_index + self.current_seg_index * self.seg_length;
-            unsafe { Some(RVVElemMutTy(self.value.as_mut_ptr().add(index))) }
+            Some(RVVElemMutTy(current_ptr))
         }
     }
 }
@@ -252,13 +252,14 @@ mod test {
         let v = VGFRef::new(value.as_slice(), Vsew::E16.get_sew());
         assert_eq!(v.get::<u16>(3), (3 * 2 + 1) << 8);
 
-        let mut value_mut: Vec<u8> = (0..(2 * VLEN_BYTE))
+        let mut value_mut: Vec<u8> = (0..(4 * VLEN_BYTE))
             .map(|i| if i % 2 == 0 { 0 } else { i as u8 })
             .collect();
         let mut v = VGFRefMut::new(
             value_mut.as_mut_slice(),
             Vsew::E16.get_sew(),
             Vlmul::M2.get_lmul(),
+            1,
         );
         assert_eq!(v.get::<u16>(3), (3 * 2 + 1) << 8);
         v.set::<u16>(3, 3);
