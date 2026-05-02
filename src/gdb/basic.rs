@@ -12,7 +12,7 @@ use crate::isa::riscv::csr_reg::PrivilegeLevel;
 use crate::isa::riscv::debugger::Address;
 
 impl<'a, B: Board> target::Target for GdbDebugger<'a, B> {
-    type Arch = gdbstub_arch::riscv::Riscv64;
+    type Arch = desc::Riscv64;
     type Error = &'static str;
 
     #[inline(always)]

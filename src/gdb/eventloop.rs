@@ -11,6 +11,11 @@ use gdbstub::target::Target;
 use std::net::TcpListener;
 use std::net::TcpStream;
 
+use crate::isa::riscv::csr_reg::NamedCsrReg;
+use crate::isa::riscv::csr_reg::csr_macro::CSR_NAME;
+use crate::isa::riscv::csr_reg::csr_macro::Misa;
+use crate::isa::riscv::debugger::Debugger;
+
 #[cfg(unix)]
 use std::os::unix::net::UnixListener;
 #[cfg(unix)]
@@ -156,13 +161,31 @@ pub enum Config {
 }
 
 pub fn event_loop(board: &mut impl Board, cfg: Config) -> DynResult<()> {
-    let dbg = GdbDebugger::new(board);
+    let mut gdb_debugger = GdbDebugger::new(board);
+
+    let misa = gdb_debugger.dbg.read_csr(Misa::get_index()).unwrap();
+    let with_f = ((misa >> ('F' as u32 - 'A' as u32)) & 1) != 0;
+    let with_d = ((misa >> ('D' as u32 - 'A' as u32)) & 1) != 0;
+
+    let builder =
+        desc::DescBuilder::with_csrs(CSR_NAME.entries().map(|(addr, name)| (*addr, *name)));
+
+    let builder = if with_d {
+        builder.with_d()
+    } else if with_f {
+        builder.with_f()
+    } else {
+        builder
+    };
+
+    desc::init_target_desc_xml(builder);
+
     let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = match cfg {
         Config::Tcp(port) => Box::new(wait_for_tcp(port)?),
         Config::Uds(path) => Box::new(wait_for_uds(&path)?),
     };
     let stub = GdbStub::new(conn);
-    gdb_stub_event_loop(stub, dbg);
+    gdb_stub_event_loop(stub, gdb_debugger);
 
     Ok(())
 }

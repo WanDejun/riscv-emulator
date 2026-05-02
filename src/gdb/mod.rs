@@ -7,6 +7,7 @@ use crate::isa::riscv::debugger::{DebugEvent, Debugger};
 
 mod basic;
 mod breakpoints;
+mod desc;
 mod eventloop;
 
 pub use eventloop::*;
