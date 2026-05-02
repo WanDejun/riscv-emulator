@@ -41,7 +41,11 @@ build-opensbi: build-dtb build-linux
 
 linux-qemu: build-opensbi
 	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
-	qemu-system-riscv64 -M virt -m 2G -nographic -bios "$(FW_BIN)"
+	qemu-system-riscv64 -M virt -m 8G -nographic -bios "$(FW_BIN)"
+
+linux-qemu-gdb: build-opensbi
+	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
+	qemu-system-riscv64 -M virt -m 8G -nographic -bios "$(FW_BIN)" -s -S
 
 linux: build-opensbi
 	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
