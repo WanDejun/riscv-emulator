@@ -1,19 +1,15 @@
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
-pub struct VectorRegFile<const VLEN: usize>
-where
-    [(); VLEN >> 3]:,
-{
-    reg: [[u8; VLEN >> 3]; 32],
+use crate::isa::riscv::vector::VLEN_BYTE;
+
+pub struct VectorRegFile {
+    reg: [[u8; VLEN_BYTE]; 32],
 }
 
-impl<const VLEN: usize> VectorRegFile<VLEN>
-where
-    [(); VLEN >> 3]:,
-{
+impl VectorRegFile {
     pub fn new() -> Self {
         Self {
-            reg: [[0; VLEN >> 3]; 32],
+            reg: [[0; VLEN_BYTE]; 32],
         }
     }
 
@@ -31,27 +27,28 @@ where
         } else {
             let base = &self.reg[idx as usize] as *const u8 as *const T;
             let slides =
-                unsafe { from_raw_parts(base, (VLEN >> 3) * (lmul as usize) / size_of::<T>()) };
+                unsafe { from_raw_parts(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
             Some(slides)
         }
     }
 
     #[inline]
-    pub fn get_mut<T>(&self, lmul: u8, idx: u8) -> Option<&mut [T]> {
+    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seq: u8) -> Option<&mut [T]> {
+        let lmul = lmul * seq;
         debug_assert!(idx < 32);
-        debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
+        assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
         if idx % lmul != 0 {
             None
         } else {
             let base = &self.reg[idx as usize] as *const u8 as *mut T;
             let slides =
-                unsafe { from_raw_parts_mut(base, (VLEN >> 3) * (lmul as usize) / size_of::<T>()) };
+                unsafe { from_raw_parts_mut(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
             Some(slides)
         }
     }
 
-    pub fn write<T>(&mut self, lmul: usize, idx: usize, data: &[T], seq: usize) -> Option<()>
+    pub fn write<T>(&mut self, lmul: u8, idx: u8, data: &[T], seq: u8) -> Option<()>
     where
         T: Sized,
     {
@@ -70,9 +67,10 @@ where
 
             for lmul_index in 0..lmul {
                 let reg_start = idx + lmul_index;
-                for inner_index in (0..(VLEN >> 3)).step_by(element_size) {
-                    for reg_index in (reg_start..reg_start + lmul * seq).step_by(lmul) {
-                        let dest = &mut self.reg[reg_index][inner_index] as *mut _ as *mut T;
+                for inner_index in (0..VLEN_BYTE).step_by(element_size) {
+                    for reg_index in (reg_start..reg_start + lmul * seq).step_by(lmul as usize) {
+                        let dest =
+                            &mut self.reg[reg_index as usize][inner_index] as *mut _ as *mut T;
                         let src = &data[input_index] as *const _ as *const T;
                         unsafe {
                             dest.write(src.read());
@@ -94,7 +92,7 @@ mod test {
     #[test]
     fn read_test() {
         const VLEN: usize = 128;
-        let mut regfile = VectorRegFile::<VLEN>::new();
+        let mut regfile = VectorRegFile::new();
         let mut buffer = [0u32; VLEN];
         buffer
             .iter_mut()
@@ -113,7 +111,7 @@ mod test {
     #[test]
     fn write_test_without_segement() {
         const VLEN: usize = 128;
-        let mut regfile = VectorRegFile::<VLEN>::new();
+        let mut regfile = VectorRegFile::new();
         let mut buffer = [0u32; VLEN];
         buffer
             .iter_mut()
@@ -133,7 +131,7 @@ mod test {
     #[test]
     fn write_segement_test() {
         const VLEN: usize = 128;
-        let mut regfile = VectorRegFile::<VLEN>::new();
+        let mut regfile = VectorRegFile::new();
         let mut buffer = [0u32; VLEN];
         buffer
             .iter_mut()

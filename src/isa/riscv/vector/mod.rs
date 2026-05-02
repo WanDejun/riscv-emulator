@@ -6,10 +6,11 @@ use crate::{
 pub mod integer;
 pub mod types;
 pub const VLEN: usize = 128;
+pub const VLEN_BYTE: usize = VLEN >> 3;
 
 pub(super) struct Vector {
     config: VectorConfig,
-    vector_regfile: VectorRegFile<VLEN>,
+    vector_regfile: VectorRegFile,
 }
 
 impl Vector {
@@ -23,8 +24,8 @@ impl Vector {
     #[inline(always)]
     fn set_config(&mut self, lmul_sew_ta_ma_vl: (Vlmul, Vsew, bool, bool, u16)) {
         (
-            self.config.lmul,
-            self.config.sew,
+            self.config.vlmul,
+            self.config.vsew,
             self.config.tail_agnostic,
             self.config.mask_agnostic,
             self.config.vl,

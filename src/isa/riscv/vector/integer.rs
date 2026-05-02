@@ -17,11 +17,15 @@ impl Vector {
     where
         Op: FnOnce(Vsew, VGFRef<'a>, VGFRef<'a>, VGFRefMut<'a>) -> Result<(), Exception>,
     {
-        let (lmul, sew) = (self.config.lmul, self.config.sew);
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let vrf = &self.vector_regfile;
-        let vs1_ref = VGFRef::new(sew.into(), vrf.read(lmul.into(), vs1).unwrap());
-        let vs2_ref = VGFRef::new(sew.into(), vrf.read(lmul.into(), vs2).unwrap());
-        let vd_ref = VGFRefMut::new(sew.into(), vrf.get_mut(lmul.into(), vd).unwrap());
-        op(sew, vs1_ref, vs2_ref, vd_ref)
+        let vs1_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs1).unwrap(), vsew.get_sew());
+        let vs2_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs2).unwrap(), vsew.get_sew());
+        let vd_ref = VGFRefMut::new(
+            vrf.get_mut(vlmul.get_lmul(), vd, 1).unwrap(),
+            vsew.get_sew(),
+            vlmul.get_lmul(),
+        );
+        op(vsew, vs1_ref, vs2_ref, vd_ref)
     }
 }
