@@ -152,7 +152,7 @@ pub enum RVInstrInfo {
         rs2: u8,
         rd: u8,
         vm: bool,
-        func6: WordType,
+        func6: u8,
     },
 }
 

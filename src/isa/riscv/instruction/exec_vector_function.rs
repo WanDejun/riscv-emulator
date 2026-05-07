@@ -97,7 +97,42 @@ impl VectorConfigFieldExtractor for VsetvlFieldExtractor {
     }
 }
 
-pub(super) fn vector_unit_stride_load<const EEW: u8>(
+// ---------------------------------------
+//          Vector Load/Store
+// ---------------------------------------
+pub(super) fn vector_load<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    if let RVInstrInfo::V { func6, .. } = info {
+        let mop = func6 & 0b11;
+        match mop {
+            0b00 => vector_unit_stride_load::<EEW>(info, cpu),
+            0b01 => vector_indexed_ordered_load::<EEW>(info, cpu),
+            0b10 => vector_constant_stride_load::<EEW>(info, cpu),
+            0b11 => vector_indexed_unordered_load::<EEW>(info, cpu),
+            _ => Err(Exception::IllegalInstruction),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+struct Func6Uop {
+    nf: u8,
+    mew: u8,
+    mop: u8,
+}
+
+#[inline(always)]
+fn load_store_func6_docode(func6: u8) -> Func6Uop {
+    let nf = (func6 >> 3) & 0b111;
+    let mew = (func6 >> 2) & 0b1;
+    let mop = func6 & 0b11;
+    Func6Uop { nf, mew, mop }
+}
+
+fn vector_unit_stride_load<const EEW: u8>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
@@ -109,16 +144,13 @@ pub(super) fn vector_unit_stride_load<const EEW: u8>(
         func6,
     } = info
     {
-        let nf = (func6 >> 3) & 0b111;
-        let _mew = (func6 >> 2) & 0b1;
-        let mop = func6 & 0b11;
+        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
         let lumop = rs2;
         debug_assert_eq!(mop, 0b00);
-
         let vector = &mut cpu.vector;
+
         let base_addr = cpu.reg_file.read(rs1, 0).0;
         let res;
-
         match lumop {
             0b000 => {
                 res = vector.unit_stride_load(
@@ -139,6 +171,73 @@ pub(super) fn vector_unit_stride_load<const EEW: u8>(
     } else {
         unreachable!()
     }
+}
+
+fn vector_indexed_unordered_load<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+fn vector_constant_stride_load<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+fn vector_indexed_ordered_load<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+pub(super) fn vector_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    if let RVInstrInfo::V { func6, .. } = info {
+        let mop = func6 & 0b11;
+        match mop {
+            0b00 => vector_unit_stride_store::<EEW>(info, cpu),
+            0b01 => vector_indexed_ordered_store::<EEW>(info, cpu),
+            0b10 => vector_constant_stride_store::<EEW>(info, cpu),
+            0b11 => vector_indexed_unordered_store::<EEW>(info, cpu),
+            _ => Err(Exception::IllegalInstruction),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+fn vector_unit_stride_store<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+fn vector_indexed_unordered_store<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+fn vector_constant_stride_store<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
+}
+
+fn vector_indexed_ordered_store<const EEW: u8>(
+    _info: RVInstrInfo,
+    _cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    unimplemented!()
 }
 
 #[cfg(test)]
