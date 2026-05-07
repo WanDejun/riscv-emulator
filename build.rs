@@ -112,7 +112,10 @@ fn parse_instr<'a>(
                 || fields == ["rs1", "rs2"]
             {
                 "R"
-            } else if is_vector_arith(encoding) {
+            } else if is_vector_arith(encoding)
+                || is_vector_load(encoding)
+                || is_vector_store(encoding)
+            {
                 "V"
             } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
                 "R_rm"
@@ -127,8 +130,6 @@ fn parse_instr<'a>(
                 || fields == ["rd", "rs1", "shamtw"]
                 || fields == ["rd", "csr", "zimm5"]
                 || fields == ["rd", "rs1", "csr"]
-                || is_vector_load(encoding)
-                || is_vector_store(encoding)
             {
                 "I"
             } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {

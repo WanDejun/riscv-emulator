@@ -33,8 +33,8 @@ impl VectorRegFile {
     }
 
     #[inline]
-    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seq: u8) -> Option<&mut [T]> {
-        let lmul = lmul * seq;
+    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seg: u8) -> Option<&mut [T]> {
+        let lmul = lmul * seg;
         debug_assert!(idx < 32);
         assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
@@ -48,7 +48,7 @@ impl VectorRegFile {
         }
     }
 
-    pub fn write<T>(&mut self, lmul: u8, idx: u8, data: &[T], seq: u8) -> Option<()>
+    pub fn write<T>(&mut self, lmul: u8, idx: u8, data: &[T], seg: u8) -> Option<()>
     where
         T: Sized,
     {
@@ -56,11 +56,11 @@ impl VectorRegFile {
         debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
         let element_size = size_of::<T>();
         debug_assert!(element_size <= 8);
-        if seq * lmul > 8 {
+        if seg * lmul > 8 {
             return None;
         }
 
-        if idx % (lmul * seq) != 0 {
+        if idx % (lmul * seg) != 0 {
             None
         } else {
             let mut input_index = 0;
@@ -68,7 +68,7 @@ impl VectorRegFile {
             for lmul_index in 0..lmul {
                 let reg_start = idx + lmul_index;
                 for inner_index in (0..VLEN_BYTE).step_by(element_size) {
-                    for reg_index in (reg_start..reg_start + lmul * seq).step_by(lmul as usize) {
+                    for reg_index in (reg_start..reg_start + lmul * seg).step_by(lmul as usize) {
                         let dest =
                             &mut self.reg[reg_index as usize][inner_index] as *mut _ as *mut T;
                         let src = &data[input_index] as *const _ as *const T;
@@ -147,6 +147,6 @@ mod test {
             .enumerate()
             .for_each(|(idx, &v)| assert!(v == idx as u32 * 4 + 1));
 
-        assert!(regfile.write::<u32>(2, 0, &buffer, 8).is_none()); // LMUL * seq > 8
+        assert!(regfile.write::<u32>(2, 0, &buffer, 8).is_none()); // LMUL * seg > 8
     }
 }

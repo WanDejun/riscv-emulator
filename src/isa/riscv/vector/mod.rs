@@ -26,7 +26,7 @@ pub(super) struct VectorUnitMemLoad {
 impl VectorGetAddrTrait for VectorUnitMemLoad {
     #[inline(always)]
     fn exec(&self, base: WordType, index: WordType) -> WordType {
-        base + index << self.vsew as u8
+        base + (index << self.vsew as u8)
     }
 }
 
@@ -39,7 +39,7 @@ impl Vector {
     }
 
     #[inline(always)]
-    fn set_config(&mut self, lmul_sew_ta_ma_vl: (Vlmul, Vsew, bool, bool, u16)) {
+    pub(super) fn set_config(&mut self, lmul_sew_ta_ma_vl: (Vlmul, Vsew, bool, bool, u16)) {
         (
             self.config.vlmul,
             self.config.vsew,
@@ -47,6 +47,12 @@ impl Vector {
             self.config.mask_agnostic,
             self.config.vl,
         ) = lmul_sew_ta_ma_vl;
+    }
+
+    #[inline]
+    pub(super) fn read_as_type<T>(&self, idx: u8) -> Option<&[T]> {
+        self.vector_regfile
+            .read_as_type(self.config.vlmul.get_lmul(), idx)
     }
 
     pub(super) fn unit_stride_load(

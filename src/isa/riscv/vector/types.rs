@@ -74,7 +74,12 @@ impl From<u8> for Vsew {
 
 impl Vsew {
     pub(crate) fn get_sew(self) -> u8 {
-        self as u8 + 1
+        match self {
+            Self::E8 => 1,
+            Self::E16 => 2,
+            Self::E32 => 4,
+            Self::E64 => 8,
+        }
     }
 }
 
@@ -225,10 +230,8 @@ impl<'a> Iterator for VGFRefIteratorMut<'a> {
         let index = self.current_inner_index + self.current_seg_index * self.seg_length;
         let current_ptr = unsafe { self.value.as_mut_ptr().add(index) };
         let is_last_seg = self.current_seg_index + 1 == self.seg as usize;
-        let is_last_row = self.current_inner_index + self.sew as usize == self.seg_length;
-        if is_last_seg && is_last_row {
-            None
-        } else {
+        let valid = self.current_inner_index < self.seg_length;
+        if valid {
             if is_last_seg {
                 self.current_seg_index = 0;
                 self.current_inner_index += self.sew as usize;
@@ -236,6 +239,8 @@ impl<'a> Iterator for VGFRefIteratorMut<'a> {
                 self.current_seg_index += 1;
             }
             Some(RVVElemMutTy(current_ptr))
+        } else {
+            None
         }
     }
 }
