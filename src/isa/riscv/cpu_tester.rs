@@ -1,5 +1,5 @@
 #![cfg(test)]
-use std::{cell::UnsafeCell, rc::Rc};
+use std::{cell::UnsafeCell, fmt::Debug, rc::Rc};
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
@@ -10,11 +10,15 @@ use crate::{
     isa::{
         DecoderTrait,
         riscv::{
-            csr_reg::csr_macro::Mstatus,
+            csr_reg::{
+                NamedCsrReg,
+                csr_macro::{Mstatus, Vl, Vtype},
+            },
             decoder::DecodeInstr,
             executor::RVCPU,
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
             mmu::VirtAddrManager,
+            vector::types::{Vlmul, Vsew},
         },
     },
     ram::Ram,
@@ -52,6 +56,36 @@ impl TestCPUBuilder {
         self
     }
 
+    pub(super) fn reg_vec(mut self, lmul: u8, idx: u8, value: &[u8]) -> Self {
+        self.cpu.vector.write_as_type(lmul, idx, value);
+        self
+    }
+
+    pub(super) fn vector_status(
+        mut self,
+        vlmul: Vlmul,
+        vsew: Vsew,
+        tail_agnostic: bool,
+        mask_agnostic: bool,
+    ) -> Self {
+        let new_vtype = vlmul.get_lmul() as WordType
+            | (vsew.get_sew() as WordType) << 3
+            | (tail_agnostic as WordType) << 6
+            | (mask_agnostic as WordType) << 7;
+        let vl = self
+            .cpu
+            .csr
+            .get_by_type::<Vtype>()
+            .unwrap()
+            .vsetvl(new_vtype)
+            .unwrap(); // set vtype csr
+        self.cpu.csr.write_directly(Vl::get_index(), vl).unwrap(); // set vl csr
+        self.cpu
+            .vector
+            .set_config((vlmul, vsew, tail_agnostic, mask_agnostic, vl as u16)); // set vector config
+        self
+    }
+
     pub(super) fn pc(mut self, value: WordType) -> Self {
         self.cpu.pc = value;
         self
@@ -62,6 +96,24 @@ impl TestCPUBuilder {
             .memory
             .write(addr, value, &mut self.cpu.csr)
             .unwrap();
+        self
+    }
+
+    pub(super) fn mem_range<It: Iterator, T: UnsignedInteger>(
+        mut self,
+        indexs: It,
+        f: fn(usize) -> (WordType, T),
+    ) -> Self
+    where
+        It: Iterator<Item = usize>,
+    {
+        for i in indexs {
+            let (addr, data) = f(i);
+            self.cpu
+                .memory
+                .write(addr, data, &mut self.cpu.csr)
+                .unwrap();
+        }
         self
     }
 
@@ -123,6 +175,21 @@ impl<'a> CPUChecker<'a> {
     pub(super) fn reg_f64(self, idx: u8, value: f64) -> Self {
         let reg_val: f64 = self.cpu.fpu.load(idx);
         assert_eq!(reg_val, value, "Float Register #{} incorrect", idx);
+        self
+    }
+
+    pub(super) fn reg_vec<T>(self, idx: u8, value: &[T]) -> Self
+    where
+        T: Eq + Debug,
+    {
+        let reg_val = self.cpu.vector.read_as_type::<T>(idx).unwrap();
+        assert_eq!(value.len(), reg_val.len());
+        for i in 0..reg_val.len() {
+            assert_eq!(
+                reg_val[i], value[i],
+                "Vector Register #{idx} [{i}] incorrect"
+            );
+        }
         self
     }
 

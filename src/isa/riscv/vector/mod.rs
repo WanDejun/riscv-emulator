@@ -39,20 +39,25 @@ impl Vector {
     }
 
     #[inline(always)]
-    pub(super) fn set_config(&mut self, lmul_sew_ta_ma_vl: (Vlmul, Vsew, bool, bool, u16)) {
+    pub(super) fn set_config(&mut self, vlmul_vsew_ta_ma_vl: (Vlmul, Vsew, bool, bool, u16)) {
         (
             self.config.vlmul,
             self.config.vsew,
             self.config.tail_agnostic,
             self.config.mask_agnostic,
             self.config.vl,
-        ) = lmul_sew_ta_ma_vl;
+        ) = vlmul_vsew_ta_ma_vl;
     }
 
     #[inline]
     pub(super) fn read_as_type<T>(&self, idx: u8) -> Option<&[T]> {
         self.vector_regfile
             .read_as_type(self.config.vlmul.get_lmul(), idx)
+    }
+
+    #[inline]
+    pub(super) fn write_as_type<T>(&mut self, lmul: u8, idx: u8, value: &[T]) {
+        self.vector_regfile.write(lmul, idx, value, 1).unwrap();
     }
 
     pub(super) fn unit_stride_load(

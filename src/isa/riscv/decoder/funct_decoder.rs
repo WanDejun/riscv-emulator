@@ -94,13 +94,17 @@ impl DecoderTrait<RiscvTypes> for Decoder {
                         map.insert((opcode, funct3, funct7_a), (instr, format));
                     }
                 }
-                InstrFormat::I | InstrFormat::S | InstrFormat::B => {
+                InstrFormat::I | InstrFormat::S | InstrFormat::B | InstrFormat::V => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::RequireF3;
                     map.insert((opcode, funct3, 0), (instr, format));
                 }
 
-                _ => {
+                InstrFormat::J
+                | InstrFormat::U
+                | InstrFormat::None
+                | InstrFormat::R4_rm
+                | InstrFormat::R_rm => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::Complete;
                     map.insert((opcode, funct3, funct7), (instr, format));
