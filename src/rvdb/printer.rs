@@ -498,6 +498,7 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
                 palette.data((imm >> 12).to_string().as_str())
             )
         }
+        RVInstrInfo::V { .. } => unimplemented!(),
 
         RVInstrInfo::None => {
             format!("{}", palette.instr(instr.name()))

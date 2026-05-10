@@ -9,7 +9,9 @@ use rustc_apfloat::Round as APFloatRound;
 
 use crate::{
     fpu::{Classification, Round},
-    utils::{FloatPoint, InFloat, SignedInteger, TruncateFrom, WordTrait, make_mask},
+    utils::{
+        BinaryOp, CmpOp, FloatPoint, InFloat, SignedInteger, TruncateFrom, WordTrait, make_mask,
+    },
 };
 
 impl Into<APFloatRound> for Round {
@@ -137,20 +139,12 @@ pub trait UnaryOpWithRound<F> {
     fn apply(a: F, round: Round) -> F;
 }
 
-pub trait BinaryOp<F> {
-    fn apply(a: F, b: F) -> F;
-}
-
 pub trait BinaryOpWithRound<F> {
     fn apply(a: F, b: F, round: Round) -> StatusAnd<F>;
 }
 
 pub trait TernaryOpWithRound<F> {
     fn apply(a: F, b: F, c: F, round: Round) -> StatusAnd<F>;
-}
-
-pub trait CmpOp<F> {
-    fn apply(a: F, b: F) -> StatusAnd<bool>;
 }
 
 // Implementation of operations:

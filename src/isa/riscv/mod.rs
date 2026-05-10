@@ -11,6 +11,7 @@ pub mod executor;
 pub mod instruction;
 pub mod mmu;
 pub mod trap;
+pub mod vector;
 
 #[derive(Debug)]
 pub struct RiscvTypes;

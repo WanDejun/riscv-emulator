@@ -4,6 +4,8 @@ use std::{
     usize,
 };
 
+use rustc_apfloat::StatusAnd;
+
 use crate::{
     config::arch_config::{SignedWordType, WordType, XLEN},
     fpu::soft_float::APFloatOf,
@@ -351,6 +353,7 @@ pub trait UnsignedInteger:
     const BITS: usize;
 
     type AtomicType;
+    type DoubleWidenType;
 
     fn mask_range(self, l: u32, r: u32) -> Self {
         debug_assert!(l <= r && (r as usize) < Self::BITS);
@@ -368,24 +371,28 @@ impl UnsignedInteger for u8 {
     const MIN: u8 = u8::MIN;
     const BITS: usize = 8;
     type AtomicType = std::sync::atomic::AtomicU8;
+    type DoubleWidenType = u16;
 }
 impl UnsignedInteger for u16 {
     const MAX: u16 = u16::MAX;
     const MIN: u16 = u16::MIN;
     const BITS: usize = 16;
     type AtomicType = std::sync::atomic::AtomicU16;
+    type DoubleWidenType = u32;
 }
 impl UnsignedInteger for u32 {
     const MAX: u32 = u32::MAX;
     const MIN: u32 = u32::MIN;
     const BITS: usize = 32;
     type AtomicType = std::sync::atomic::AtomicU32;
+    type DoubleWidenType = u64;
 }
 impl UnsignedInteger for u64 {
     const MAX: u64 = u64::MAX;
     const MIN: u64 = u64::MIN;
     const BITS: usize = 64;
     type AtomicType = std::sync::atomic::AtomicU64;
+    type DoubleWidenType = u128;
 }
 
 pub trait SignedInteger:
@@ -426,30 +433,36 @@ pub trait SignedInteger:
     const MIN: Self;
 
     const BITS: usize;
+
+    type DoubleWidenType;
 }
 
 impl SignedInteger for i8 {
     const MAX: i8 = i8::MAX;
     const MIN: i8 = i8::MIN;
     const BITS: usize = 8;
+    type DoubleWidenType = i16;
 }
 
 impl SignedInteger for i16 {
     const MAX: i16 = i16::MAX;
     const MIN: i16 = i16::MIN;
     const BITS: usize = 16;
+    type DoubleWidenType = i32;
 }
 
 impl SignedInteger for i32 {
     const MAX: i32 = i32::MAX;
     const MIN: i32 = i32::MIN;
     const BITS: usize = 32;
+    type DoubleWidenType = i64;
 }
 
 impl SignedInteger for i64 {
     const MAX: i64 = i64::MAX;
     const MIN: i64 = i64::MIN;
     const BITS: usize = 64;
+    type DoubleWidenType = i128;
 }
 
 pub trait WordTrait: UnsignedInteger + Into<u128> {
@@ -586,6 +599,14 @@ impl InFloat for u64 {
 }
 
 pub type FloatOf<T> = <T as InFloat>::Float;
+
+pub trait CmpOp<F> {
+    fn apply(a: F, b: F) -> StatusAnd<bool>;
+}
+
+pub trait BinaryOp<F> {
+    fn apply(a: F, b: F) -> F;
+}
 
 #[allow(unused)]
 pub fn set_bit<T>(data: &mut T, idx: u32)

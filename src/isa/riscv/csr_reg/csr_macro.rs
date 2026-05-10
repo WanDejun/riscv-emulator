@@ -212,12 +212,45 @@ gen_csr_regfile! {
         5, 3, rm;
     ];
 
+    Vstart, "vstart", 0x008u64, 0x00, [
+        0, XLEN, vstart;
+    ];
+
+    // Vxsat, "vxsat", 0x009u64, 0x00, [
+    //     0, 1, least_significant; // Fixed-Point Saturate Flag
+    // ];
+
+    // Vxrm, "vxrm", 0x00au64, 0x00, [
+    //     0, 2, vxrm;
+    // ];
+
+    Vcsr, "vcsr", 0x00fu64, 0x00, [
+        0, 1, vxsat; // Fixed-point accrued saturation flag
+        1, 2, vxrm; // Fixed-point rounding mode
+    ];
+
     Cycle, "cycle", 0xC00u64, 0x00, @shadow Mcycle, [
         0, XLEN, cycle, validate_readonly;
     ];
 
     Instret, "instret", 0xC02u64, 0x00, @shadow Minstret, [
         0, XLEN, instret, validate_readonly;
+    ];
+
+    Vl, "vlen", 0xc20u64, 0x00, [
+        0, XLEN, vl;
+    ];
+
+    Vtype, "vtype", 0xc21u64, 0x00, [
+        0, 3, vlmul, validate_readonly;
+        3, 3, vsew, validate_readonly;
+        6, 1, vta, validate_readonly;
+        7, 1, vma, validate_readonly;
+        -1, 1, vill, validate_readonly;
+    ];
+
+    Vlenb, "vlenb", 0xc22u64, 0x00, [
+        0, XLEN, vlenb;
     ];
 
     // ==================================

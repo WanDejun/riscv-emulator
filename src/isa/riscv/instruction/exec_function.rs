@@ -36,7 +36,7 @@ pub(super) fn exec_arith<F>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Ex
 where
     F: ExecTrait<Result<WordType, Exception>>,
 {
-    normal_exec(cpu, |cpu| {
+    super::normal_exec(cpu, |cpu| {
         let (rd, rst) = match info {
             RVInstrInfo::R { rs1, rs2, rd } => {
                 let (val1, val2) = cpu.reg_file.read(rs1, rs2);

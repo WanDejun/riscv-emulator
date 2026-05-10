@@ -8,7 +8,8 @@ use crate::{
         csr_reg::csr_macro::Fcsr, executor::RVCPU, instruction::RVInstrInfo, trap::Exception,
     },
     utils::{
-        FloatPoint, TruncateTo, TruncateToBits, WordTrait, sign_extend, wrapping_add_as_signed,
+        BinaryOp, CmpOp, FloatPoint, TruncateTo, TruncateToBits, WordTrait, sign_extend,
+        wrapping_add_as_signed,
     },
 };
 
@@ -119,7 +120,6 @@ where
         {
             let rm = rm_to_round(cpu, rm);
             cpu.fpu.exec_ternary_r::<Op, F>(rs1, rs2, rs3, rd, rm);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
@@ -140,7 +140,6 @@ where
             // TODO: The order of FPU exec and here is reversed.
             let rm = rm_to_round(cpu, rm);
             cpu.fpu.exec_binary_r::<Op, F>(rs1, rs2, rd, rm);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
@@ -201,7 +200,6 @@ where
             let rm = rm_to_round(cpu, rm);
             let data = U::truncate_from(cpu.fpu.get_and_cvt_unsigned::<F, U>(rs1, rm));
             let data = data.sign_extend_to_wordtype(); // fcvt.wu.[s/d] also needs sign extension
-            save_fflags_to_cpu(cpu);
             cpu.reg_file.write(rd, data.into());
         } else {
             std::unreachable!();
@@ -226,7 +224,6 @@ where
             let rm = rm_to_round(cpu, rm);
             let data = U::truncate_from(cpu.fpu.get_and_cvt_signed::<F, U>(rs1, rm) as u128);
             let data = data.sign_extend_to_wordtype();
-            save_fflags_to_cpu(cpu);
             cpu.reg_file.write(rd, data.into());
         } else {
             std::unreachable!();
@@ -254,7 +251,6 @@ where
             let rm = rm_to_round(cpu, rm);
             cpu.fpu
                 .cvt_unsigned_and_store::<F>(rd, val.truncate_to_bits(BITS) as u128, rm);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
@@ -281,7 +277,6 @@ where
             let rm = rm_to_round(cpu, rm);
             cpu.fpu
                 .cvt_signed_and_store::<F>(rd, val.cast_signed() as i128, rm);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
@@ -309,7 +304,6 @@ where
 
         let round = rm_to_round(cpu, rm);
         cpu.fpu.cvt_float_and_store::<F, T>(rd, rs1, round);
-        save_fflags_to_cpu(cpu);
 
         Ok(())
     })
@@ -323,7 +317,6 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2, rd } = info {
             let rst = cpu.fpu.compare::<Op, F>(rs1, rs2);
-            save_fflags_to_cpu(cpu);
             cpu.reg_file.write(rd, rst as WordType);
         } else {
             std::unreachable!();
@@ -393,7 +386,6 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2, rd } = info {
             cpu.fpu.min_num::<F>(rs1, rs2, rd);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
@@ -408,7 +400,6 @@ where
     normal_float_exec(cpu, |cpu| {
         if let RVInstrInfo::R { rs1, rs2, rd } = info {
             cpu.fpu.max_num::<F>(rs1, rs2, rd);
-            save_fflags_to_cpu(cpu);
         } else {
             std::unreachable!();
         }
