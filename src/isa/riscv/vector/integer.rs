@@ -20,8 +20,8 @@ impl Vector {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let vrf = &self.vector_regfile;
         let (sew, lmul) = (vsew.get_sew(), self.config.vlmul.get_lmul());
-        let vs1_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs1).unwrap(), sew, lmul);
-        let vs2_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs2).unwrap(), sew, lmul);
+        let vs1_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs1).unwrap(), sew, lmul, 1);
+        let vs2_ref = VGFRef::new(vrf.read(vlmul.get_lmul(), vs2).unwrap(), sew, lmul, 1);
         let vd_ref = VGFRefMut::new(
             vrf.get_mut(vlmul.get_lmul(), vd, 1).unwrap(),
             vsew.get_sew(),

@@ -32,7 +32,7 @@ where
         if let RVInstrInfo::V {
             rs1,
             rs2,
-            rd,
+            rd: vd,
             vm,
             func6,
         } = info
@@ -49,11 +49,11 @@ where
 
                 cpu.csr.write_directly(Vl::get_index(), vl).unwrap();
                 cpu.vector.set_config((vluml, vsew, vta, vma, vl as u16));
-                cpu.write_reg(rd, vl);
+                cpu.write_reg(vd, vl);
 
                 Ok(())
             } else {
-                cpu.write_reg(rd, 0);
+                cpu.write_reg(vd, 0);
                 Err(Exception::IllegalInstruction)
             }
         } else {
@@ -140,14 +140,13 @@ fn do_vector_unit_stride_load<const EEW: u8>(
 ) -> Result<(), Exception> {
     if let RVInstrInfo::V {
         rs1,
-        rs2,
-        rd,
+        rs2: lumop,
+        rd: vd,
         vm: _vm,
         func6,
     } = info
     {
         let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
-        let lumop = rs2;
         debug_assert_eq!(mop, 0b00);
         let vector = &mut cpu.vector;
 
@@ -156,9 +155,9 @@ fn do_vector_unit_stride_load<const EEW: u8>(
         match lumop {
             0b000 => {
                 res = vector.unit_stride_load(
-                    rd,
+                    vd,
                     EEW.into(),
-                    nf as u8 + 1,
+                    nf + 1,
                     base_addr,
                     &mut cpu.memory.mmio,
                 );
@@ -217,10 +216,43 @@ pub(super) fn vector_store<const EEW: u8>(
 }
 
 fn do_vector_unit_stride_store<const EEW: u8>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
-    unimplemented!()
+    if let RVInstrInfo::V {
+        rs1,
+        rs2: sumop,
+        rd: vs3,
+        vm: _vm,
+        func6,
+    } = info
+    {
+        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
+        debug_assert_eq!(mop, 0b00);
+        let vector = &mut cpu.vector;
+
+        let base_addr = cpu.reg_file.read(rs1, 0).0;
+        let res;
+        match sumop {
+            0b000 => {
+                res = vector.unit_stride_store(
+                    vs3,
+                    EEW.into(),
+                    nf + 1,
+                    base_addr,
+                    &mut cpu.memory.mmio,
+                );
+            }
+            _ => todo!(),
+        }
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err),
+        }
+    } else {
+        unreachable!()
+    }
 }
 
 fn do_vector_indexed_unordered_store<const EEW: u8>(
@@ -334,6 +366,75 @@ mod test {
                     .pc(0x2000)
             },
             |checker| checker.reg_vec(0, data.as_slice()).pc(0x2004),
+        );
+    }
+
+    #[test]
+    fn unit_stride_store_test() {
+        const TOTAL_DATA_LEN: WordType = 128;
+        const TEST_VSEW: Vsew = Vsew::E32;
+        const TEST_VLMUL: Vlmul = Vlmul::M8;
+        type ElemType = u32;
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
+        cpu.vector.set_config((
+            TEST_VLMUL,
+            TEST_VSEW,
+            false,
+            false,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+        ));
+
+        let vreg_len = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
+        let data: Vec<ElemType> = (0..vreg_len).map(|i| (i * 7 + 13) as ElemType).collect();
+        cpu.vector
+            .write_as_type::<ElemType>(TEST_VLMUL.get_lmul(), 0, &data);
+
+        let instr_info = RVInstrInfo::V {
+            rs1: 1,
+            rs2: 0,
+            rd: 0,
+            vm: false,
+            func6: 0b000000,
+        };
+        cpu.reg_file.write(1, TEST_DATA_BASE);
+        do_vector_unit_stride_store::<2>(instr_info, &mut cpu).unwrap();
+
+        for i in 0..vreg_len {
+            let addr = TEST_DATA_BASE + (i * size_of::<ElemType>()) as WordType;
+            let expected = data[i];
+            let read: ElemType = cpu.memory.read::<ElemType>(addr, &mut cpu.csr).unwrap();
+            assert_eq!(read, expected, "Memory mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn unit_stride_store_test_cpu() {
+        let data: Vec<u16> = (0..(VLEN_BYTE / size_of::<u16>()))
+            .map(|i| (i + 2000) as u16)
+            .collect();
+        let byte_data: Vec<u8> = data.iter().flat_map(|x| x.to_le_bytes()).collect();
+
+        let raw_instr = 0b000_0_00_0_00000_00001_101_00000_0100111;
+        run_test_exec_decode(
+            raw_instr,
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E16, false, false)
+                    .reg(1, TEST_DATA_BASE)
+                    .reg_vec(1, 0, byte_data.as_slice())
+                    .pc(0x2000)
+            },
+            |mut checker| {
+                let stride = size_of::<u16>() as WordType;
+                for (i, &val) in data.iter().enumerate() {
+                    let addr = TEST_DATA_BASE + (i as WordType) * stride;
+                    checker = checker.mem::<u16>(addr, val as WordType);
+                }
+                checker.pc(0x2004)
+            },
         );
     }
 }

@@ -112,12 +112,18 @@ impl Vector {
         &mut self,
         vs: u8,
         eew: Vsew,
+        seg: u8,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
         let f = VectorUnitMemLoad { vsew: eew };
         let lmul = self.config.vlmul.get_lmul();
-        let vd_ref = VGFRef::new(self.vector_regfile.read(lmul, vs)?, eew.get_sew(), lmul);
+        let vd_ref = VGFRef::new(
+            self.vector_regfile.read(lmul, vs)?,
+            eew.get_sew(),
+            lmul,
+            seg,
+        );
         let mut err = Ok(());
         vd_ref
             .iter()
@@ -202,7 +208,7 @@ mod test {
         vector_regfile.write_as_type::<u8>(Vlmul::M2.get_lmul(), 2, &test_values);
         // store v2 to memory at an offset from BASE_ADDR
         vector_regfile
-            .unit_stride_store(2, Vsew::E8, store_addr, &mut mmio)
+            .unit_stride_store(2, Vsew::E8, 1, store_addr, &mut mmio)
             .unwrap();
         // read back from memory and verify
         for i in 0..(VLEN_BYTE * 2) {
@@ -218,7 +224,7 @@ mod test {
             .collect();
         vector_regfile.write_as_type::<u8>(Vlmul::M1.get_lmul(), 4, &test_values_m1);
         vector_regfile
-            .unit_stride_store(4, Vsew::E8, store_addr, &mut mmio)
+            .unit_stride_store(4, Vsew::E8, 1, store_addr, &mut mmio)
             .unwrap();
         for i in 0..VLEN_BYTE {
             let val = mmio.read_u8(store_addr + i as WordType).unwrap();

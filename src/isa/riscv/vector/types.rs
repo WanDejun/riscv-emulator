@@ -130,16 +130,18 @@ impl VectorConfig {
 
 pub(crate) struct VGFRef<'a> {
     value: &'a [u8],
-    lmul: u8,
     sew: u8,
+    lmul: u8,
+    seg: u8,
 }
 
 impl<'a> VGFRef<'a> {
-    pub(crate) fn new(val: &'a [u8], sew: u8, lmul: u8) -> Self {
+    pub(crate) fn new(val: &'a [u8], sew: u8, lmul: u8, seg: u8) -> Self {
         Self {
             value: val,
             lmul,
             sew,
+            seg,
         }
     }
 
@@ -156,24 +158,30 @@ impl<'a> VGFRef<'a> {
     }
 
     pub(crate) fn iter(&'a self) -> VGFRefIterator<'a> {
-        VGFRefIterator::new(self.value, self.sew, self.lmul)
+        VGFRefIterator::new(self.value, self.sew, self.lmul, self.seg)
     }
 }
 
 pub(crate) struct VGFRefIterator<'a> {
+    current_seg_index: usize,
     current_inner_index: usize,
+    lmul: u8,
     sew: u8,
+    seg: u8,
     value: &'a [u8],
-    length: usize,
+    seg_length: usize,
 }
 
 impl<'a> VGFRefIterator<'a> {
-    pub(crate) fn new(value: &'a [u8], sew: u8, lmul: u8) -> Self {
+    fn new(value: &'a [u8], sew: u8, lmul: u8, seg: u8) -> Self {
         Self {
+            current_seg_index: 0,
             current_inner_index: 0,
+            lmul,
             sew,
+            seg,
             value,
-            length: sew as usize * lmul as usize * VLEN_BYTE,
+            seg_length: lmul as usize * VLEN_BYTE,
         }
     }
 }
@@ -181,11 +189,17 @@ impl<'a> VGFRefIterator<'a> {
 impl<'a> Iterator for VGFRefIterator<'a> {
     type Item = RVVElemTy;
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.current_inner_index;
+        let index = self.current_inner_index + self.current_seg_index * self.seg_length;
         let current_ptr = unsafe { self.value.as_ptr().add(index) };
-        let valid = self.current_inner_index < self.length;
+        let is_last_seg = self.current_seg_index + 1 == self.seg as usize;
+        let valid = self.current_inner_index < self.seg_length;
         if valid {
-            self.current_inner_index += self.sew as usize;
+            if is_last_seg {
+                self.current_seg_index = 0;
+                self.current_inner_index += self.sew as usize;
+            } else {
+                self.current_seg_index += 1;
+            }
             Some(RVVElemTy(current_ptr))
         } else {
             None
@@ -301,7 +315,7 @@ mod test {
         let value: Vec<u8> = (0..(2 * VLEN_BYTE))
             .map(|i| if i % 2 == 0 { 0 } else { i as u8 })
             .collect();
-        let v = VGFRef::new(value.as_slice(), Vsew::E16.get_sew(), 1);
+        let v = VGFRef::new(value.as_slice(), Vsew::E16.get_sew(), 1, 1);
         assert_eq!(v.get::<u16>(3), (3 * 2 + 1) << 8);
 
         let mut value_mut: Vec<u8> = (0..(4 * VLEN_BYTE))
@@ -327,7 +341,7 @@ mod test {
     #[should_panic(expected = "assertion failed: self.sew as usize == size_of::<T>()")]
     fn vector_type_test_unequal_sew() {
         let value: Vec<u8> = (0..128).map(|i| if i % 2 == 0 { 0 } else { i }).collect();
-        let v = VGFRef::new(value.as_slice(), Vsew::E16.get_sew(), 1);
+        let v = VGFRef::new(value.as_slice(), Vsew::E16.get_sew(), 1, 1);
         assert_eq!(v.get::<u32>(3), (3 * size_of::<u32>() as u32 + 1) << 8)
     }
 }
