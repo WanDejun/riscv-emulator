@@ -168,7 +168,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
 
         match res {
             Ok(()) => Ok(()),
-            Err(err) => Err(Exception::from_memory_err(err)),
+            Err(err) => Err(err),
         }
     } else {
         unreachable!()

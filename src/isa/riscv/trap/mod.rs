@@ -109,6 +109,7 @@ impl Exception {
         }
     }
 
+    #[inline(always)]
     pub fn from_memory_err(err: MemError) -> Self {
         match err {
             MemError::LoadMisaligned => Exception::LoadMisaligned,
@@ -127,6 +128,12 @@ impl Exception {
             MemError::LoadPageFault => Exception::InstructionPageFault,
             _ => unreachable!("Invalid instruction fetch error: {:?}", err),
         }
+    }
+}
+
+impl From<MemError> for Exception {
+    fn from(value: MemError) -> Self {
+        Self::from_memory_err(value)
     }
 }
 

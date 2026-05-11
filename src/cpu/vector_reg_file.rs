@@ -1,6 +1,6 @@
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
-use crate::isa::riscv::vector::VLEN_BYTE;
+use crate::isa::riscv::{trap::Exception, vector::VLEN_BYTE};
 
 pub struct VectorRegFile {
     reg: [[u8; VLEN_BYTE]; 32],
@@ -13,38 +13,38 @@ impl VectorRegFile {
         }
     }
 
-    pub fn read(&self, lmul: u8, idx: u8) -> Option<&[u8]> {
+    pub fn read(&self, lmul: u8, idx: u8) -> Result<&[u8], Exception> {
         self.read_as_type::<u8>(lmul, idx)
     }
 
     #[inline]
-    pub fn read_as_type<T>(&self, lmul: u8, idx: u8) -> Option<&[T]> {
+    pub fn read_as_type<T>(&self, lmul: u8, idx: u8) -> Result<&[T], Exception> {
         debug_assert!(idx < 32);
         debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
         if idx % lmul != 0 {
-            None
+            Err(Exception::IllegalInstruction)
         } else {
             let base = &self.reg[idx as usize] as *const u8 as *const T;
             let slides =
                 unsafe { from_raw_parts(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
-            Some(slides)
+            Ok(slides)
         }
     }
 
     #[inline]
-    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seg: u8) -> Option<&mut [T]> {
+    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seg: u8) -> Result<&mut [T], Exception> {
         let lmul = lmul * seg;
         debug_assert!(idx < 32);
         assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
         if idx % lmul != 0 {
-            None
+            Err(Exception::IllegalInstruction)
         } else {
             let base = &self.reg[idx as usize] as *const u8 as *mut T;
             let slides =
                 unsafe { from_raw_parts_mut(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
-            Some(slides)
+            Ok(slides)
         }
     }
 
@@ -120,7 +120,7 @@ mod test {
 
         // seg = 1
         regfile.write::<u32>(4, 0, &buffer, 1);
-        assert!(regfile.read_as_type::<u32>(2, 3).is_none()); // unaligned
+        assert!(regfile.read_as_type::<u32>(2, 3).is_err()); // unaligned
         let res = regfile.read_as_type::<u32>(2, 2).unwrap(); // reg_u32[8..16]
         // println!("{:?}", res);
         res.iter()
@@ -140,7 +140,7 @@ mod test {
 
         // seg = 2
         regfile.write::<u32>(2, 0, &buffer, 4);
-        assert!(regfile.read_as_type::<u32>(2, 3).is_none()); // unaligned
+        assert!(regfile.read_as_type::<u32>(2, 3).is_err()); // unaligned
         let res = regfile.read_as_type::<u32>(2, 2).unwrap(); // reg_u32[8..16] = buffer[4..8] ## buffer[12..16]
         // println!("{:?}", res);
         res.iter()
