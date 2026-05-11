@@ -83,7 +83,7 @@ impl Vector {
         vd_ref
             .iter_mut()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
             .for_each(|(index, element)| match eew {
                 Vsew::E8 => match mem.read_u8(f.exec(base_addr, index as WordType)) {
                     Ok(ram_value) => element.set(ram_value),
@@ -128,7 +128,7 @@ impl Vector {
         vd_ref
             .iter()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
             .for_each(|(index, element)| match eew {
                 Vsew::E8 => mem
                     .write_u8(f.exec(base_addr, index as WordType), element.get())
@@ -180,7 +180,7 @@ mod test {
         // --------------- Seg = 2 ---------------
         // write as m1, e8
         vector_regfile.config.vlmul = Vlmul::M1;
-        vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16;
+        vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16;
         vector_regfile
             .unit_stride_load(2, Vsew::E8, 2, BASE_ADDR, &mut mmio)
             .unwrap();
@@ -216,19 +216,38 @@ mod test {
             assert_eq!(val, test_values[i], "M2 E8 mismatch at index {}", i);
         }
 
-        // --------------- M1, E8 ---------------
-        vector_regfile.config.vlmul = Vlmul::M1;
+        // --------------- M4, E32, Seg=4 ---------------
+        vector_regfile.config.vlmul = Vlmul::M4;
         vector_regfile.config.vl = VLEN_BYTE as u16;
-        let test_values_m1: Vec<u8> = (0..VLEN_BYTE)
-            .map(|i| (i.wrapping_mul(5).wrapping_add(7)) as u8)
+        let total_elements = VLEN_BYTE * 4; // 4 segments × VLEN_BYTE elements each
+        let test_values_m4: Vec<u32> = (0..total_elements)
+            .map(|i| (i.wrapping_add(1)) as u32)
             .collect();
-        vector_regfile.write_as_type::<u8>(Vlmul::M1.get_lmul(), 4, &test_values_m1);
+        // Write 4 M4 register groups: v0-v3, v4-v7, v8-v11, v12-v15
+        for seg_idx in 0..4 {
+            let start = seg_idx * VLEN_BYTE;
+            let end = start + VLEN_BYTE;
+            vector_regfile.write_as_type::<u32>(
+                Vlmul::M4.get_lmul(),
+                (4 * seg_idx) as u8,
+                &test_values_m4[start..end],
+            );
+        }
         vector_regfile
-            .unit_stride_store(4, Vsew::E8, 1, store_addr, &mut mmio)
+            .unit_stride_store(0, Vsew::E32, 4, store_addr, &mut mmio)
             .unwrap();
-        for i in 0..VLEN_BYTE {
-            let val = mmio.read_u8(store_addr + i as WordType).unwrap();
-            assert_eq!(val, test_values_m1[i], "M1 E8 mismatch at index {}", i);
+        // Verify: segment-interleaved layout in memory
+        for pos in 0..(VLEN_BYTE * (Vlmul::M4 as usize) / size_of::<u32>()) {
+            for seg_idx in 0..4 {
+                let idx = seg_idx * VLEN_BYTE + pos;
+                let addr = store_addr + (pos * 16 + seg_idx * 4) as WordType;
+                let val = mmio.read_u32(addr).unwrap();
+                assert_eq!(
+                    val, test_values_m4[idx],
+                    "M4 E32 Seg=4 mismatch at pos {}, seg {}",
+                    pos, seg_idx
+                );
+            }
         }
 
         // --------------- verify that store didn't leak into BASE_ADDR ---------------
