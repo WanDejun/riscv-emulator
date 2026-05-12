@@ -19,17 +19,18 @@ pub(super) struct Vector {
 }
 
 pub(super) trait VectorGetAddrTrait {
-    fn exec(&self, base: WordType, index: WordType) -> WordType;
+    fn exec(&self, index: WordType) -> WordType;
 }
 
-pub(super) struct VectorUnitMemLoad {
-    vsew: Vsew,
+pub(super) struct VectorMemeryCal {
+    stride: WordType,
+    base: WordType,
 }
 
-impl VectorGetAddrTrait for VectorUnitMemLoad {
+impl VectorGetAddrTrait for VectorMemeryCal {
     #[inline(always)]
-    fn exec(&self, base: WordType, index: WordType) -> WordType {
-        base + (index << self.vsew as u8)
+    fn exec(&self, index: WordType) -> WordType {
+        self.base + index * self.stride
     }
 }
 
@@ -63,15 +64,19 @@ impl Vector {
         self.vector_regfile.write(lmul, idx, value, 1).unwrap();
     }
 
-    pub(super) fn unit_stride_load(
+    pub(super) fn stride_load(
         &mut self,
         vd: u8,
         eew: Vsew,
         seg: u8,
+        stride: Option<WordType>,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
-        let f = VectorUnitMemLoad { vsew: eew };
+        let f = VectorMemeryCal {
+            base: base_addr,
+            stride: stride.unwrap_or(eew.get_sew() as WordType),
+        };
         let lmul = self.config.vlmul.get_lmul();
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, seg)?,
@@ -85,19 +90,19 @@ impl Vector {
             .enumerate()
             .filter(|v| v.0 < self.config.vl as usize * seg as usize)
             .for_each(|(index, element)| match eew {
-                Vsew::E8 => match mem.read_u8(f.exec(base_addr, index as WordType)) {
+                Vsew::E8 => match mem.read_u8(f.exec(index as WordType)) {
                     Ok(ram_value) => element.set(ram_value),
                     Err(e) => err = Err(e),
                 },
-                Vsew::E16 => match mem.read_u16(f.exec(base_addr, index as WordType)) {
+                Vsew::E16 => match mem.read_u16(f.exec(index as WordType)) {
                     Ok(ram_value) => element.set(ram_value),
                     Err(e) => err = Err(e),
                 },
-                Vsew::E32 => match mem.read_u32(f.exec(base_addr, index as WordType)) {
+                Vsew::E32 => match mem.read_u32(f.exec(index as WordType)) {
                     Ok(ram_value) => element.set(ram_value),
                     Err(e) => err = Err(e),
                 },
-                Vsew::E64 => match mem.read_u64(f.exec(base_addr, index as WordType)) {
+                Vsew::E64 => match mem.read_u64(f.exec(index as WordType)) {
                     Ok(ram_value) => element.set(ram_value),
                     Err(e) => err = Err(e),
                 },
@@ -108,15 +113,19 @@ impl Vector {
         }
     }
 
-    pub(super) fn unit_stride_store(
+    pub(super) fn stride_store(
         &mut self,
         vs: u8,
         eew: Vsew,
         seg: u8,
+        stride: Option<WordType>,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
-        let f = VectorUnitMemLoad { vsew: eew };
+        let f = VectorMemeryCal {
+            base: base_addr,
+            stride: stride.unwrap_or(eew.get_sew() as WordType),
+        };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
             self.vector_regfile.read(lmul, vs)?,
@@ -131,16 +140,16 @@ impl Vector {
             .filter(|v| v.0 < self.config.vl as usize * seg as usize)
             .for_each(|(index, element)| match eew {
                 Vsew::E8 => mem
-                    .write_u8(f.exec(base_addr, index as WordType), element.get())
+                    .write_u8(f.exec(index as WordType), element.get())
                     .unwrap_or_else(|e| err = Err(e.into())),
                 Vsew::E16 => mem
-                    .write_u16(f.exec(base_addr, index as WordType), element.get())
+                    .write_u16(f.exec(index as WordType), element.get())
                     .unwrap_or_else(|e| err = Err(e.into())),
                 Vsew::E32 => mem
-                    .write_u32(f.exec(base_addr, index as WordType), element.get())
+                    .write_u32(f.exec(index as WordType), element.get())
                     .unwrap_or_else(|e| err = Err(e.into())),
                 Vsew::E64 => mem
-                    .write_u64(f.exec(base_addr, index as WordType), element.get())
+                    .write_u64(f.exec(index as WordType), element.get())
                     .unwrap_or_else(|e| err = Err(e.into())),
             });
         err
@@ -167,7 +176,7 @@ mod test {
         vector_regfile.config.vlmul = Vlmul::M2;
         vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16;
         vector_regfile
-            .unit_stride_load(2, Vsew::E8, 1, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 1, None, BASE_ADDR, &mut mmio)
             .unwrap();
         // read as m1, e8
         let vector_ref = vector_regfile
@@ -182,7 +191,7 @@ mod test {
         vector_regfile.config.vlmul = Vlmul::M1;
         vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16;
         vector_regfile
-            .unit_stride_load(2, Vsew::E8, 2, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 2, None, BASE_ADDR, &mut mmio)
             .unwrap();
         // read as m1, e8
         let vector_ref = vector_regfile
@@ -208,7 +217,7 @@ mod test {
         vector_regfile.write_as_type::<u8>(Vlmul::M2.get_lmul(), 2, &test_values);
         // store v2 to memory at an offset from BASE_ADDR
         vector_regfile
-            .unit_stride_store(2, Vsew::E8, 1, store_addr, &mut mmio)
+            .stride_store(2, Vsew::E8, 1, None, store_addr, &mut mmio)
             .unwrap();
         // read back from memory and verify
         for i in 0..(VLEN_BYTE * 2) {
@@ -234,7 +243,7 @@ mod test {
             );
         }
         vector_regfile
-            .unit_stride_store(0, Vsew::E32, 4, store_addr, &mut mmio)
+            .stride_store(0, Vsew::E32, 4, None, store_addr, &mut mmio)
             .unwrap();
         // Verify: segment-interleaved layout in memory
         for pos in 0..(VLEN_BYTE * (Vlmul::M4 as usize) / size_of::<u32>()) {
