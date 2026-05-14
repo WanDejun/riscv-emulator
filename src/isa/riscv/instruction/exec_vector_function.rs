@@ -218,10 +218,38 @@ fn do_vector_constant_stride_load<const EEW: u8>(
 }
 
 fn do_vector_indexed_ordered_load<const EEW: u8>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
-    unimplemented!()
+    if let RVInstrInfo::V {
+        rs1: base_addr,
+        rs2: index_arr_base,
+        rd: vd,
+        vm: _vm,
+        func6,
+    } = info
+    {
+        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
+        debug_assert_eq!(mop, 0b11);
+        let vector = &mut cpu.vector;
+
+        let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
+        let res = vector.indexed_ordered_load(
+            vd,
+            EEW.into(),
+            nf + 1,
+            index_arr_base,
+            base_addr,
+            &mut cpu.memory.mmio,
+        );
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err),
+        }
+    } else {
+        unreachable!()
+    }
 }
 
 pub(super) fn vector_store<const EEW: u8>(
@@ -328,10 +356,38 @@ fn do_vector_constant_stride_store<const EEW: u8>(
 }
 
 fn do_vector_indexed_ordered_store<const EEW: u8>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
-    unimplemented!()
+    if let RVInstrInfo::V {
+        rs1: base_addr,
+        rs2: index_arr_base,
+        rd: vs3,
+        vm: _vm,
+        func6,
+    } = info
+    {
+        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
+        debug_assert_eq!(mop, 0b11);
+        let vector = &mut cpu.vector;
+
+        let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
+        let res = vector.indexed_ordered_store(
+            vs3,
+            EEW.into(),
+            nf + 1,
+            index_arr_base,
+            base_addr,
+            &mut cpu.memory.mmio,
+        );
+
+        match res {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err),
+        }
+    } else {
+        unreachable!()
+    }
 }
 
 #[cfg(test)]
@@ -476,6 +532,76 @@ mod test {
     }
 
     #[test]
+    fn indexed_ordered_load_test() {
+        const TEST_VSEW: Vsew = Vsew::E32;
+        const TEST_VLMUL: Vlmul = Vlmul::M4;
+        const TEST_SEG: usize = 2;
+        type ElemType = u32;
+
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        let index_base = TEST_DATA_BASE;
+        let data_base = TEST_DATA_BASE + 0x4000;
+
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
+        cpu.vector.set_config((
+            TEST_VLMUL,
+            TEST_VSEW,
+            false,
+            false,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+        ));
+
+        let vl = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
+        let elem_cnt = vl * TEST_SEG;
+        let mut expected = vec![0 as ElemType; elem_cnt];
+
+        // 非线性索引，避免退化成 unit-stride；为 seg=2 准备总计 vl*2 个索引
+        for i in 0..elem_cnt {
+            let idx_addr = index_base + (i * size_of::<ElemType>()) as WordType;
+            let data_index = ((i * 5 + 3) % elem_cnt) as WordType;
+            let data_off = data_index * size_of::<ElemType>() as WordType;
+            let data_addr = data_base + data_off;
+            let val = ((i as ElemType) * 17 + 101) ^ 0x5A5A_1234;
+
+            cpu.memory
+                .write::<ElemType>(idx_addr, data_off as ElemType, &mut cpu.csr)
+                .unwrap();
+            cpu.memory
+                .write::<ElemType>(data_addr, val, &mut cpu.csr)
+                .unwrap();
+            expected[i] = val;
+        }
+
+        let instr_info = RVInstrInfo::V {
+            rs1: 1,
+            rs2: 2,
+            rd: 0,
+            vm: false,
+            // nf=1(seg=2), mop=0b11(indexed ordered), mew=0
+            func6: 0b001011,
+        };
+        cpu.reg_file.write(1, data_base);
+        cpu.reg_file.write(2, index_base);
+        do_vector_indexed_ordered_load::<2>(instr_info, &mut cpu).unwrap();
+
+        let vreg = cpu
+            .vector
+            .read_with_seg(0, TEST_VSEW, TEST_SEG as u8)
+            .unwrap();
+        let actual: Vec<ElemType> = vreg.iter().map(|e| e.get::<ElemType>()).collect();
+        assert_eq!(actual.len(), elem_cnt, "vreg len mismatch for seg=2");
+        for i in 0..elem_cnt {
+            assert_eq!(
+                actual[i], expected[i],
+                "Load mismatch at flattened index {}",
+                i
+            );
+        }
+    }
+
+    #[test]
     fn unit_stride_store_test() {
         const TOTAL_DATA_LEN: WordType = 128;
         const TEST_VSEW: Vsew = Vsew::E32;
@@ -583,6 +709,58 @@ mod test {
             let expected = data[i];
             let read: ElemType = cpu.memory.read::<ElemType>(addr, &mut cpu.csr).unwrap();
             assert_eq!(read, expected, "Memory mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn indexed_ordered_store_test() {
+        const TEST_VSEW: Vsew = Vsew::E32;
+        const TEST_VLMUL: Vlmul = Vlmul::M1;
+        type ElemType = u32;
+
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        let index_base = TEST_DATA_BASE;
+        let data_base = TEST_DATA_BASE + 0x1000;
+
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
+        cpu.vector.set_config((
+            TEST_VLMUL,
+            TEST_VSEW,
+            false,
+            false,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+        ));
+
+        let elem_cnt = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
+        let data: Vec<ElemType> = (0..elem_cnt).map(|i| (i as ElemType) * 3 + 7).collect();
+        cpu.vector
+            .write_as_type::<ElemType>(TEST_VLMUL.get_lmul(), 0, &data);
+
+        for i in 0..elem_cnt {
+            let idx_addr = index_base + (i * size_of::<ElemType>()) as WordType;
+            let data_off = (i * size_of::<ElemType>()) as WordType;
+            cpu.memory
+                .write::<ElemType>(idx_addr, data_off as u32, &mut cpu.csr)
+                .unwrap();
+        }
+
+        let instr_info = RVInstrInfo::V {
+            rs1: 1,
+            rs2: 2,
+            rd: 0,
+            vm: false,
+            func6: 0b000011,
+        };
+        cpu.reg_file.write(1, data_base);
+        cpu.reg_file.write(2, index_base);
+        do_vector_indexed_ordered_store::<2>(instr_info, &mut cpu).unwrap();
+
+        for (i, expected) in data.iter().enumerate() {
+            let addr = data_base + (i * size_of::<ElemType>()) as WordType;
+            let read: ElemType = cpu.memory.read::<ElemType>(addr, &mut cpu.csr).unwrap();
+            assert_eq!(read, *expected, "Store mismatch at index {}", i);
         }
     }
 }

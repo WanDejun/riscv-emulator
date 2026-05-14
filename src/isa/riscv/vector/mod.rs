@@ -1,7 +1,7 @@
 use crate::{
     config::arch_config::WordType,
     cpu::VectorRegFile,
-    device::{DeviceTrait, mmio::MemoryMapIO},
+    device::{DeviceTrait, MemError, mmio::MemoryMapIO},
     isa::riscv::{
         trap::Exception,
         vector::types::{VGFRef, VGFRefMut, VectorConfig, Vlmul, Vsew},
@@ -18,19 +18,35 @@ pub(super) struct Vector {
     vector_regfile: VectorRegFile,
 }
 
-pub(super) trait VectorGetAddrTrait {
-    fn exec(&self, index: WordType) -> WordType;
-}
-
-pub(super) struct VectorMemeryCal {
+struct VectorStrideAddrCal {
     stride: WordType,
     base: WordType,
 }
 
-impl VectorGetAddrTrait for VectorMemeryCal {
+impl VectorStrideAddrCal {
     #[inline(always)]
-    fn exec(&self, index: WordType) -> WordType {
-        self.base + index * self.stride
+    fn exec(&self, index: WordType) -> Result<WordType, MemError> {
+        Ok(self.base + index * self.stride)
+    }
+}
+
+struct VectorIndexedAddrCal {
+    index_arr_base: WordType,
+    index_width: u8,
+    base: WordType,
+}
+
+impl VectorIndexedAddrCal {
+    #[inline(always)]
+    fn exec<R>(&self, index: WordType, mem_reader: R) -> Result<WordType, MemError>
+    where
+        R: FnOnce(WordType, u32) -> Result<WordType, MemError>,
+    {
+        Ok(self.base
+            + mem_reader(
+                self.index_arr_base + self.index_width as WordType * index,
+                self.index_width as u32,
+            )?)
     }
 }
 
@@ -53,15 +69,29 @@ impl Vector {
         ) = vlmul_vsew_ta_ma_vl;
     }
 
+    // This method will ignore segment argument, so DO NOT use this in load/store instruction.
     #[inline]
     pub(super) fn read_as_type<T>(&self, idx: u8) -> Result<&[T], Exception> {
         self.vector_regfile
             .read_as_type(self.config.vlmul.get_lmul(), idx)
     }
 
+    // This method will ignore segment argument, so DO NOT use this in load/store instruction.
     #[inline]
     pub(super) fn write_as_type<T>(&mut self, lmul: u8, idx: u8, value: &[T]) {
         self.vector_regfile.write(lmul, idx, value, 1).unwrap();
+    }
+
+    #[inline]
+    pub(super) fn read_with_seg(
+        &self,
+        idx: u8,
+        eew: Vsew,
+        seg: u8,
+    ) -> Result<VGFRef<'_>, Exception> {
+        let lmul = self.config.vlmul.get_lmul();
+        let raw = self.vector_regfile.read(lmul, idx)?;
+        Ok(VGFRef::new(raw, eew.get_sew(), lmul, seg))
     }
 
     pub(super) fn stride_load(
@@ -73,7 +103,7 @@ impl Vector {
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
-        let f = VectorMemeryCal {
+        let f = VectorStrideAddrCal {
             base: base_addr,
             stride: stride.unwrap_or(eew.get_sew() as WordType),
         };
@@ -89,23 +119,88 @@ impl Vector {
             .iter_mut()
             .enumerate()
             .filter(|v| v.0 < self.config.vl as usize * seg as usize)
-            .for_each(|(index, element)| match eew {
-                Vsew::E8 => match mem.read_u8(f.exec(index as WordType)) {
-                    Ok(ram_value) => element.set(ram_value),
-                    Err(e) => err = Err(e),
-                },
-                Vsew::E16 => match mem.read_u16(f.exec(index as WordType)) {
-                    Ok(ram_value) => element.set(ram_value),
-                    Err(e) => err = Err(e),
-                },
-                Vsew::E32 => match mem.read_u32(f.exec(index as WordType)) {
-                    Ok(ram_value) => element.set(ram_value),
-                    Err(e) => err = Err(e),
-                },
-                Vsew::E64 => match mem.read_u64(f.exec(index as WordType)) {
-                    Ok(ram_value) => element.set(ram_value),
-                    Err(e) => err = Err(e),
-                },
+            .for_each(|(index, element)| {
+                let addr = match f.exec(index as WordType) {
+                    Ok(addr) => addr,
+                    Err(_) => unreachable!(),
+                };
+                match eew {
+                    Vsew::E8 => match mem.read_u8(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E16 => match mem.read_u16(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E32 => match mem.read_u32(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E64 => match mem.read_u64(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                }
+            });
+        match err {
+            Err(err) => Err(err.into()),
+            Ok(()) => Ok(()),
+        }
+    }
+
+    pub(super) fn indexed_ordered_load(
+        &mut self,
+        vd: u8,
+        eew: Vsew,
+        seg: u8,
+        index_arr_base: WordType,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), Exception> {
+        let f = VectorIndexedAddrCal {
+            base: base_addr,
+            index_arr_base,
+            index_width: eew.get_sew(),
+        };
+        let lmul = self.config.vlmul.get_lmul();
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, seg)?,
+            self.config.vsew.get_sew(),
+            lmul,
+            seg,
+        );
+        let mut err = Ok(());
+        vd_ref
+            .iter_mut()
+            .enumerate()
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .for_each(|(index, element)| {
+                let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        err = Err(e);
+                        return;
+                    }
+                };
+                match self.config.vsew {
+                    Vsew::E8 => match mem.read_u8(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E16 => match mem.read_u16(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E32 => match mem.read_u32(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                    Vsew::E64 => match mem.read_u64(addr) {
+                        Ok(ram_value) => element.set(ram_value),
+                        Err(e) => err = Err(e),
+                    },
+                }
             });
         match err {
             Err(err) => Err(err.into()),
@@ -122,7 +217,7 @@ impl Vector {
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
-        let f = VectorMemeryCal {
+        let f = VectorStrideAddrCal {
             base: base_addr,
             stride: stride.unwrap_or(eew.get_sew() as WordType),
         };
@@ -138,21 +233,88 @@ impl Vector {
             .iter()
             .enumerate()
             .filter(|v| v.0 < self.config.vl as usize * seg as usize)
-            .for_each(|(index, element)| match eew {
-                Vsew::E8 => mem
-                    .write_u8(f.exec(index as WordType), element.get())
-                    .unwrap_or_else(|e| err = Err(e.into())),
-                Vsew::E16 => mem
-                    .write_u16(f.exec(index as WordType), element.get())
-                    .unwrap_or_else(|e| err = Err(e.into())),
-                Vsew::E32 => mem
-                    .write_u32(f.exec(index as WordType), element.get())
-                    .unwrap_or_else(|e| err = Err(e.into())),
-                Vsew::E64 => mem
-                    .write_u64(f.exec(index as WordType), element.get())
-                    .unwrap_or_else(|e| err = Err(e.into())),
+            .for_each(|(index, element)| {
+                let addr = match f.exec(index as WordType) {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        err = Err(e);
+                        return;
+                    }
+                };
+                match eew {
+                    Vsew::E8 => mem
+                        .write_u8(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E16 => mem
+                        .write_u16(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E32 => mem
+                        .write_u32(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E64 => mem
+                        .write_u64(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                }
             });
-        err
+        match err {
+            Err(err) => Err(err.into()),
+            Ok(()) => Ok(()),
+        }
+    }
+
+    pub(super) fn indexed_ordered_store(
+        &mut self,
+        vs: u8,
+        eew: Vsew,
+        seg: u8,
+        index_arr_base: WordType,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), Exception> {
+        let f = VectorIndexedAddrCal {
+            base: base_addr,
+            index_arr_base,
+            index_width: eew.get_sew(),
+        };
+        let lmul = self.config.vlmul.get_lmul();
+        let vd_ref = VGFRef::new(
+            self.vector_regfile.read(lmul, vs)?,
+            self.config.vsew.get_sew(),
+            lmul,
+            seg,
+        );
+        let mut err = Ok(());
+        vd_ref
+            .iter()
+            .enumerate()
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .for_each(|(index, element)| {
+                let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        err = Err(e);
+                        return;
+                    }
+                };
+                match self.config.vsew {
+                    Vsew::E8 => mem
+                        .write_u8(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E16 => mem
+                        .write_u16(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E32 => mem
+                        .write_u32(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                    Vsew::E64 => mem
+                        .write_u64(addr, element.get())
+                        .unwrap_or_else(|e| err = Err(e.into())),
+                }
+            });
+        match err {
+            Err(err) => Err(err.into()),
+            Ok(()) => Ok(()),
+        }
     }
 }
 
@@ -262,5 +424,83 @@ mod test {
         // --------------- verify that store didn't leak into BASE_ADDR ---------------
         let val_at_base = mmio.read_u8(BASE_ADDR).unwrap();
         assert_eq!(val_at_base, 0, "BASE_ADDR should remain untouched (0)");
+    }
+
+    #[test]
+    fn test_indexed_ordered_load() {
+        let mut vector_regfile = Vector::new();
+        let mut ram = Ram::new();
+        let index_arr_base = BASE_ADDR + 0x1000;
+        let data_base = BASE_ADDR + 0x2000;
+
+        // 索引数组（u32）: [0, 4, 8, ...]
+        for i in 0..VLEN_BYTE {
+            ram.write(0x1000 + (i * size_of::<u32>()) as WordType, (i * 4) as u32)
+                .unwrap();
+        }
+        // 数据区（u32）: value = i + 100
+        for i in 0..VLEN_BYTE {
+            ram.write(0x2000 + (i * 4) as WordType, (i as u32) + 100)
+                .unwrap();
+        }
+
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+
+        vector_regfile.config.vlmul = Vlmul::M1;
+        vector_regfile.config.vsew = Vsew::E32;
+        vector_regfile.config.vl = (VLEN_BYTE / size_of::<u32>()) as u16;
+
+        vector_regfile
+            .indexed_ordered_load(0, Vsew::E32, 1, index_arr_base, data_base, &mut mmio)
+            .unwrap();
+
+        let vector_ref = vector_regfile
+            .vector_regfile
+            .read_as_type::<u32>(Vlmul::M1.get_lmul(), 0)
+            .unwrap();
+        for i in 0..(VLEN_BYTE / size_of::<u32>()) {
+            assert_eq!(
+                vector_ref[i],
+                i as u32 + 100,
+                "indexed load mismatch at {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_indexed_ordered_store() {
+        let mut vector_regfile = Vector::new();
+        let ram = Ram::new();
+        let index_arr_base = BASE_ADDR + 0x1000;
+        let data_base = BASE_ADDR + 0x2000;
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+
+        // 索引数组（u32）: [0, 4, 8, ...]
+        for i in 0..VLEN_BYTE {
+            mmio.write_u32(
+                index_arr_base + (i * size_of::<u32>()) as WordType,
+                (i * 4) as u32,
+            )
+            .unwrap();
+        }
+
+        vector_regfile.config.vlmul = Vlmul::M1;
+        vector_regfile.config.vsew = Vsew::E32;
+        vector_regfile.config.vl = (VLEN_BYTE / size_of::<u32>()) as u16;
+
+        let element_count = VLEN_BYTE / size_of::<u32>();
+        let test_values: Vec<u32> = (0..element_count).map(|i| (i as u32) * 7 + 11).collect();
+        vector_regfile.write_as_type::<u32>(Vlmul::M1.get_lmul(), 0, &test_values);
+
+        vector_regfile
+            .indexed_ordered_store(0, Vsew::E32, 1, index_arr_base, data_base, &mut mmio)
+            .unwrap();
+
+        for i in 0..element_count {
+            let addr = data_base + (i * 4) as WordType;
+            let val = mmio.read_u32(addr).unwrap();
+            assert_eq!(val, test_values[i], "indexed store mismatch at index {}", i);
+        }
     }
 }
