@@ -153,6 +153,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
         let base_addr = cpu.reg_file.read(rs1, 0).0;
         let res;
         match lumop {
+            // unit-stride load
             0b000 => {
                 res = vector.stride_load(
                     vd,
@@ -163,7 +164,13 @@ fn do_vector_unit_stride_load<const EEW: u8>(
                     &mut cpu.memory.mmio,
                 );
             }
-            _ => todo!(),
+            // unit-stride, whole register load
+            0b01000 => unimplemented!(),
+            // unit-stride, mask load, EEW=8
+            0b01011 => unimplemented!(),
+            // unit-stride fault-only-first
+            0b10000 => unimplemented!(),
+            _ => return Err(Exception::IllegalInstruction),
         }
 
         match res {
@@ -291,7 +298,7 @@ fn do_vector_unit_stride_store<const EEW: u8>(
         let base_addr = cpu.reg_file.read(rs1, 0).0;
         let res;
         match sumop {
-            0b000 => {
+            0b00000 => {
                 res = vector.stride_store(
                     vs3,
                     EEW.into(),
@@ -301,7 +308,11 @@ fn do_vector_unit_stride_store<const EEW: u8>(
                     &mut cpu.memory.mmio,
                 );
             }
-            _ => todo!(),
+            // unit-stride, whole register store
+            0b01000 => unimplemented!(),
+            // unit-stride, mask store, EEW=8
+            0b01011 => unimplemented!(),
+            _ => return Err(Exception::IllegalInstruction),
         }
 
         match res {
