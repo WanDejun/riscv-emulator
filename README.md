@@ -2,27 +2,25 @@
 
 ## About
 
-`RISC-V Emulator` is a educational full-system emulator for the RISC-V architecture, developed in Rust :fire:.
+`RISC-V Emulator` is an educational full-system emulator for the RISC-V architecture, written in Rust :fire:.
 
 The main features of `RISC-V Emulator` include:
 
 - Supported ISA:
-  - riscv64: rv64-imf + Zicsr
-- A tiny debugger monitor:
-  - Single step execution
-  - Register / memory examination
-  - Breakpoint
-  - Basic disassembly
-- Memory / Memory Mapped I/O
-- MMU
+  - RV64G (RV64IMAFD, Zicsr, Zifencei)
+- Supported privilege modes:
+  - M, S, and U modes
+- A simple debugger monitor called rvdb
+- GDB support
+- Virtual memory
 - Devices:
-  - Serial, VirtIO-blk, Timer
-- CLINT and interrupt handling
-- Free-standing ELF
+  - CLINT, PLIC, serial, and VirtIO-blk (VirtIO atomicity is currently broken)
+
+An online version with the emulator's core functionality is also available: [rvemu-web](https://blog.satori-march.top/rvemu-web).
 
 ## Build
 
-Install Rust nightly, for example, in Arch Linux:
+Install Rust nightly, for example, on Arch Linux:
 
 ```sh
 sudo pacman -S rustup
@@ -37,16 +35,18 @@ cargo build
 
 ## Testing
 
-We use [riscv-tests](https://github.com/riscv-software-src/riscv-tests) as our test suite. To compile the tests, you'll need [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) and follow the instructions in riscv-tests' README.
+We use [riscv-tests](https://github.com/riscv-software-src/riscv-tests) as our test suite. To build the tests, install [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) and follow the instructions in the riscv-tests README.
 
-Then, run `cargo test -F riscv-tests`.
+Then, run `cargo test --features riscv-tests`.
+
+Test support for `riscv-arch-test` also exists, but it is not integrated into CI. Unfortunately, the test suite stabilized at 4.x a few months after we implemented support for 3.x, so the suite we use is not up to date at present.
 
 ## Usage
 
 ### Quick Start
 
 ```sh
-# Build demo, make sure you have compiler for RISC-V
+# Build the demo; make sure you have a RISC-V compiler
 cd ./test_resources && make
 
 # Run a simple program
@@ -56,14 +56,15 @@ cargo run -- ./bin/main.elf
 cargo run -- ./bin/main.elf -g
 ```
 
-### Command Line Options
+### Useful Command Line Options
 
-- `-h, --help`: Show help messages
-- `-g`: Enable tiny debugger (default: false)
-- `--loglevel <LEVEL>`: Set log level
-- `--device <TYPE:PATH>`: Configure device
+- `-h`: Show help
+- `-g`: Enable rvdb, the simple debugger (use the `help` command in rvdb for details)
+- `-G`: Enable the GDB stub (listens on localhost:1234)
+- `--device <TYPE:PATH>`: Configure a device
   - Example: `--device=virtio-block:/path/to/image`
-- `<EXECUTABLE>`: Path to the ELF executable file
+- `<EXECUTABLE>`: Path to the binary/ELF executable file
+- `--loglevel <LEVEL>`: Set log level
 
 ### Example Usage
 
@@ -71,13 +72,17 @@ cargo run -- ./bin/main.elf -g
 cargo run -- ./test_resources/bin/virtio_blk_test.elf --device=virtio-block:./tmp/img_blk -g --loglevel=debug
 ```
 
+### Running Linux
+
+At present, the emulator can boot the Linux 6.18.2 kernel with BusyBox v1.37.0 in an initramfs via OpenSBI. You need to compile OpenSBI, the kernel, and BusyBox yourself, and adjust some configuration because RV64C is not yet supported. The `Makefile` in the repository root may be helpful.
+
 ## Virt Board
 
 ### MMIO Address Map
 
 | Device | Address Base | Address Length |
 | :-: | :-: | :-: |
-| `power-manager`   | 0x0010_0000   | 0x02      |
+| `power-manager`   | 0x0010_0000   | 0x1000    |
 | `uart`            | 0x1000_0000   | 0x08      |
 | `clint`           | 0x0200_0000   | 0x10000   |
 | `virtio`          | 0x1000_1000   | 0x1000    |

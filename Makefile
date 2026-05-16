@@ -15,7 +15,7 @@ DTB_FILE ?= $(EMU_DIR)/dts/virt.dtb
 LINUX_IMAGE ?= $(LINUX_DIR)/arch/riscv/boot/Image
 FW_BIN ?= $(OPENSBI_DIR)/build/platform/generic/firmware/fw_payload.bin
 
-.PHONY: check build-dtb build-linux build-opensbi linux-qemu linux linux-debug
+.PHONY: check build-dtb build-linux build-opensbi linux-qemu linux-qemu-gdb linux linux-debug linux-gdb
 
 check:
 	@test -n "$(LINUX_DIR)" || (echo "error: LINUX_DIR is empty. set env LINUX_DIR=... or run make LINUX_DIR=..."; exit 1)
@@ -38,19 +38,19 @@ build-opensbi: build-dtb build-linux
 		FW_PAYLOAD_PATH="$(LINUX_IMAGE)" \
 		FW_FDT_PATH="$(DTB_FILE)" \
 		FW_PAYLOAD_FDT_ADDR="$(FW_PAYLOAD_FDT_ADDR)"
+	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 
 linux-qemu: build-opensbi
-	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 	qemu-system-riscv64 -M virt -m 8G -nographic -bios "$(FW_BIN)"
 
 linux-qemu-gdb: build-opensbi
-	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 	qemu-system-riscv64 -M virt -m 8G -nographic -bios "$(FW_BIN)" -s -S
 
 linux: build-opensbi
-	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 	cargo run --release -- "$(FW_BIN)" $(RVEMU_ARGS)
 
 linux-debug: build-opensbi
-	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 	cargo run --release -- "$(FW_BIN)" -g $(RVEMU_ARGS)
+
+linux-gdb: build-opensbi
+	cargo run --release -- "$(FW_BIN)" -G $(RVEMU_ARGS)
