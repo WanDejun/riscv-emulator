@@ -13,21 +13,30 @@ impl VectorRegFile {
         }
     }
 
-    pub fn read(&self, lmul: u8, idx: u8) -> Result<&[u8], Exception> {
-        self.read_as_type::<u8>(lmul, idx)
+    pub fn read(&self, group_multiplier: u8, idx: u8) -> Result<&[u8], Exception> {
+        self.read_as_type::<u8>(group_multiplier, idx)
     }
 
     #[inline]
-    pub fn read_as_type<T>(&self, lmul: u8, idx: u8) -> Result<&[T], Exception> {
+    pub fn read_as_type<T>(&self, group_multiplier: u8, idx: u8) -> Result<&[T], Exception> {
         debug_assert!(idx < 32);
-        debug_assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
+        debug_assert!(
+            group_multiplier == 1
+                || group_multiplier == 2
+                || group_multiplier == 4
+                || group_multiplier == 8
+        );
 
-        if idx % lmul != 0 {
+        if idx % group_multiplier != 0 {
             Err(Exception::IllegalInstruction)
         } else {
             let base = &self.reg[idx as usize] as *const u8 as *const T;
-            let slides =
-                unsafe { from_raw_parts(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
+            let slides = unsafe {
+                from_raw_parts(
+                    base,
+                    VLEN_BYTE * (group_multiplier as usize) / size_of::<T>(),
+                )
+            };
             Ok(slides)
         }
     }

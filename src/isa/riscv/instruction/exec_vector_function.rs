@@ -142,7 +142,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
         rs1,
         rs2: lumop,
         rd: vd,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -160,6 +160,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
                     EEW.into(),
                     nf + 1,
                     None,
+                    vm,
                     base_addr,
                     &mut cpu.memory.mmio,
                 );
@@ -197,7 +198,7 @@ fn do_vector_constant_stride_load<const EEW: u8>(
         rs1,
         rs2,
         rd: vd,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -211,6 +212,7 @@ fn do_vector_constant_stride_load<const EEW: u8>(
             EEW.into(),
             nf + 1,
             Some(stride),
+            vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -232,7 +234,7 @@ fn do_vector_indexed_ordered_load<const EEW: u8>(
         rs1: base_addr,
         rs2: index_arr_base,
         rd: vd,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -246,6 +248,7 @@ fn do_vector_indexed_ordered_load<const EEW: u8>(
             EEW.into(),
             nf + 1,
             index_arr_base,
+            vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -287,7 +290,7 @@ fn do_vector_unit_stride_store<const EEW: u8>(
         rs1,
         rs2: sumop,
         rd: vs3,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -304,6 +307,7 @@ fn do_vector_unit_stride_store<const EEW: u8>(
                     EEW.into(),
                     nf + 1,
                     None,
+                    vm,
                     base_addr,
                     &mut cpu.memory.mmio,
                 );
@@ -339,7 +343,7 @@ fn do_vector_constant_stride_store<const EEW: u8>(
         rs1,
         rs2,
         rd: vs3,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -353,6 +357,7 @@ fn do_vector_constant_stride_store<const EEW: u8>(
             EEW.into(),
             nf + 1,
             Some(stride),
+            vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -374,7 +379,7 @@ fn do_vector_indexed_ordered_store<const EEW: u8>(
         rs1: base_addr,
         rs2: index_arr_base,
         rd: vs3,
-        vm: _vm,
+        vm,
         func6,
     } = info
     {
@@ -388,6 +393,7 @@ fn do_vector_indexed_ordered_store<const EEW: u8>(
             EEW.into(),
             nf + 1,
             index_arr_base,
+            vm,
             base_addr,
             &mut cpu.memory.mmio,
         );

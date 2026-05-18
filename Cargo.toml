@@ -39,6 +39,7 @@ bitflags = { version = "2.9.3" }
 rustc_apfloat = "0.2.3"
 num_enum = { version = "0.7.4" }
 bit-set = { version = "0.8.0" }
+bit-vec = {version = "0.9.1"}
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flexi_logger = { version = "0.31.2", optional = true }

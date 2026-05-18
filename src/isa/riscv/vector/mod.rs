@@ -18,6 +18,7 @@ pub(super) struct Vector {
     vector_regfile: VectorRegFile,
 }
 
+// ============= Address Calculator =============
 struct VectorStrideAddrCal {
     stride: WordType,
     base: WordType,
@@ -47,6 +48,97 @@ impl VectorIndexedAddrCal {
                 self.index_arr_base + self.index_width as WordType * index,
                 self.index_width as u32,
             )?)
+    }
+}
+
+struct VecLSMask {
+    data: Vec<u8>,
+    length: u16,
+    enable_mask: bool,
+    mask_agnostic: bool,
+    tail_agnostic: bool,
+}
+
+impl VecLSMask {
+    pub fn new(
+        vgr: &VectorRegFile,
+        length: u16,
+        enable_mask: bool,
+        mask_agnostic: bool,
+        tail_agnostic: bool,
+    ) -> Self {
+        let data = vgr
+            .read_as_type::<u8>(1, 0)
+            .unwrap()
+            .iter()
+            .map(|v| *v)
+            .collect();
+        Self {
+            data,
+            length,
+            enable_mask,
+            mask_agnostic,
+            tail_agnostic,
+        }
+    }
+
+    #[inline(always)]
+    fn bit(&self, index: usize) -> bool {
+        let offset = index / 8;
+        let inner_bit = 1 << (index % 8);
+        let bit = (self.data[offset] & inner_bit) == inner_bit;
+        (!self.enable_mask) || bit
+    }
+
+    #[inline(always)]
+    fn mask<T>(&self, value: T, index: usize) -> Option<T>
+    where
+        T: Default,
+    {
+        let (mask, tail) = (self.bit(index), index >= self.length as usize);
+        if mask && !tail {
+            Some(value)
+        } else if mask {
+            if self.mask_agnostic {
+                Some(T::default())
+            } else {
+                None
+            }
+        } else {
+            if self.tail_agnostic {
+                Some(T::default())
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline]
+    pub fn element_load<T>(&self, element: types::RVVElemMutTy, ram_value: T, index: usize)
+    where
+        T: Default,
+    {
+        match self.mask(ram_value, index) {
+            Some(v) => element.set(v),
+            None => (),
+        }
+    }
+
+    pub fn element_store<T, F>(
+        &self,
+        store_fn: F,
+        elem_value: types::RVVElemTy,
+        index: usize,
+    ) -> Result<(), MemError>
+    where
+        T: Default,
+        F: FnOnce(T) -> Result<(), MemError>,
+    {
+        let value = elem_value.get::<T>();
+        match self.mask(value, index) {
+            Some(v) => store_fn(v),
+            None => Ok(()),
+        }
     }
 }
 
@@ -100,6 +192,7 @@ impl Vector {
         eew: Vsew,
         seg: u8,
         stride: Option<WordType>,
+        enable_mask: bool,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
@@ -114,31 +207,41 @@ impl Vector {
             lmul,
             seg,
         );
+        let mask = VecLSMask::new(
+            &self.vector_regfile,
+            self.config.vl as u16 * seg as u16,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+
         let mut err = Ok(());
+        // if set tail undisturbed, jump tail element
         vd_ref
             .iter_mut()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
             .for_each(|(index, element)| {
                 let addr = match f.exec(index as WordType) {
                     Ok(addr) => addr,
                     Err(_) => unreachable!(),
                 };
+
                 match eew {
                     Vsew::E8 => match mem.read_u8(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E16 => match mem.read_u16(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E32 => match mem.read_u32(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E64 => match mem.read_u64(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                 }
@@ -155,6 +258,7 @@ impl Vector {
         eew: Vsew,
         seg: u8,
         index_arr_base: WordType,
+        enable_mask: bool,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
@@ -170,11 +274,20 @@ impl Vector {
             lmul,
             seg,
         );
+        let mask = VecLSMask::new(
+            &self.vector_regfile,
+            self.config.vl as u16 * seg as u16,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+
         let mut err = Ok(());
+        // if set tail undisturbed, jump tail element
         vd_ref
             .iter_mut()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
             .for_each(|(index, element)| {
                 let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
                     Ok(addr) => addr,
@@ -183,21 +296,22 @@ impl Vector {
                         return;
                     }
                 };
+
                 match self.config.vsew {
                     Vsew::E8 => match mem.read_u8(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E16 => match mem.read_u16(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E32 => match mem.read_u32(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                     Vsew::E64 => match mem.read_u64(addr) {
-                        Ok(ram_value) => element.set(ram_value),
+                        Ok(ram_value) => mask.element_load(element, ram_value, index),
                         Err(e) => err = Err(e),
                     },
                 }
@@ -214,6 +328,7 @@ impl Vector {
         eew: Vsew,
         seg: u8,
         stride: Option<WordType>,
+        enable_mask: bool,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
@@ -228,11 +343,20 @@ impl Vector {
             lmul,
             seg,
         );
+        let mask = VecLSMask::new(
+            &self.vector_regfile,
+            self.config.vl as u16 * seg as u16,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+
         let mut err = Ok(());
+        // if set tail undisturbed, jump tail element
         vd_ref
             .iter()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
             .for_each(|(index, element)| {
                 let addr = match f.exec(index as WordType) {
                     Ok(addr) => addr,
@@ -242,17 +366,17 @@ impl Vector {
                     }
                 };
                 match eew {
-                    Vsew::E8 => mem
-                        .write_u8(addr, element.get())
+                    Vsew::E8 => mask
+                        .element_store(|v| mem.write_u8(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E16 => mem
-                        .write_u16(addr, element.get())
+                    Vsew::E16 => mask
+                        .element_store(|v| mem.write_u16(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E32 => mem
-                        .write_u32(addr, element.get())
+                    Vsew::E32 => mask
+                        .element_store(|v| mem.write_u32(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E64 => mem
-                        .write_u64(addr, element.get())
+                    Vsew::E64 => mask
+                        .element_store(|v| mem.write_u64(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
                 }
             });
@@ -268,6 +392,7 @@ impl Vector {
         eew: Vsew,
         seg: u8,
         index_arr_base: WordType,
+        enable_mask: bool,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
     ) -> Result<(), Exception> {
@@ -283,11 +408,20 @@ impl Vector {
             lmul,
             seg,
         );
+        let mask = VecLSMask::new(
+            &self.vector_regfile,
+            self.config.vl as u16 * seg as u16,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+
         let mut err = Ok(());
+        // if set tail undisturbed, jump tail element
         vd_ref
             .iter()
             .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize)
+            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
             .for_each(|(index, element)| {
                 let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
                     Ok(addr) => addr,
@@ -297,17 +431,17 @@ impl Vector {
                     }
                 };
                 match self.config.vsew {
-                    Vsew::E8 => mem
-                        .write_u8(addr, element.get())
+                    Vsew::E8 => mask
+                        .element_store(|v| mem.write_u8(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E16 => mem
-                        .write_u16(addr, element.get())
+                    Vsew::E16 => mask
+                        .element_store(|v| mem.write_u16(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E32 => mem
-                        .write_u32(addr, element.get())
+                    Vsew::E32 => mask
+                        .element_store(|v| mem.write_u32(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E64 => mem
-                        .write_u64(addr, element.get())
+                    Vsew::E64 => mask
+                        .element_store(|v| mem.write_u64(addr, v), element, index)
                         .unwrap_or_else(|e| err = Err(e.into())),
                 }
             });
@@ -338,7 +472,7 @@ mod test {
         vector_regfile.config.vlmul = Vlmul::M2;
         vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16;
         vector_regfile
-            .stride_load(2, Vsew::E8, 1, None, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 1, None, false, BASE_ADDR, &mut mmio)
             .unwrap();
         // read as m1, e8
         let vector_ref = vector_regfile
@@ -353,7 +487,7 @@ mod test {
         vector_regfile.config.vlmul = Vlmul::M1;
         vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16;
         vector_regfile
-            .stride_load(2, Vsew::E8, 2, None, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 2, None, false, BASE_ADDR, &mut mmio)
             .unwrap();
         // read as m1, e8
         let vector_ref = vector_regfile
@@ -379,7 +513,7 @@ mod test {
         vector_regfile.write_as_type::<u8>(Vlmul::M2.get_lmul(), 2, &test_values);
         // store v2 to memory at an offset from BASE_ADDR
         vector_regfile
-            .stride_store(2, Vsew::E8, 1, None, store_addr, &mut mmio)
+            .stride_store(2, Vsew::E8, 1, None, false, store_addr, &mut mmio)
             .unwrap();
         // read back from memory and verify
         for i in 0..(VLEN_BYTE * 2) {
@@ -405,7 +539,7 @@ mod test {
             );
         }
         vector_regfile
-            .stride_store(0, Vsew::E32, 4, None, store_addr, &mut mmio)
+            .stride_store(0, Vsew::E32, 4, None, false, store_addr, &mut mmio)
             .unwrap();
         // Verify: segment-interleaved layout in memory
         for pos in 0..(VLEN_BYTE * (Vlmul::M4 as usize) / size_of::<u32>()) {
@@ -451,7 +585,7 @@ mod test {
         vector_regfile.config.vl = (VLEN_BYTE / size_of::<u32>()) as u16;
 
         vector_regfile
-            .indexed_ordered_load(0, Vsew::E32, 1, index_arr_base, data_base, &mut mmio)
+            .indexed_ordered_load(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
             .unwrap();
 
         let vector_ref = vector_regfile
@@ -494,13 +628,111 @@ mod test {
         vector_regfile.write_as_type::<u32>(Vlmul::M1.get_lmul(), 0, &test_values);
 
         vector_regfile
-            .indexed_ordered_store(0, Vsew::E32, 1, index_arr_base, data_base, &mut mmio)
+            .indexed_ordered_store(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
             .unwrap();
 
         for i in 0..element_count {
             let addr = data_base + (i * 4) as WordType;
             let val = mmio.read_u32(addr).unwrap();
             assert_eq!(val, test_values[i], "indexed store mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_mask_unit_stride_load() {
+        let mut vector_regfile = Vector::new();
+        let mut ram = Ram::new();
+        let addr_offset = 0x2000;
+        let base_addr = BASE_ADDR + addr_offset;
+
+        type ElemType = u32;
+        const LMUL: Vlmul = Vlmul::M4;
+        const SEW: Vsew = Vsew::E32;
+        let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
+
+        for i in 0..elem_cnt {
+            ram.write(
+                addr_offset + (i * size_of::<ElemType>()) as WordType,
+                (i as u32) + 100,
+            )
+            .unwrap();
+        }
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+
+        vector_regfile.set_config((LMUL, SEW, false, false, elem_cnt as u16));
+
+        // mask register v0: bit=1 时生效。这里设置偶数位为 1、奇数位为 0。
+        let mut mask_bytes = [0u8; VLEN_BYTE];
+        for i in 0..elem_cnt {
+            if i % 2 == 0 {
+                mask_bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        vector_regfile.write_as_type::<u8>(1, 0, &mask_bytes);
+
+        let init = vec![0xDEAD_BEEF_u32; elem_cnt];
+        vector_regfile.write_as_type::<ElemType>(LMUL.get_lmul(), 8, &init);
+
+        vector_regfile
+            .stride_load(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .unwrap();
+
+        let got = vector_regfile
+            .vector_regfile
+            .read_as_type::<ElemType>(LMUL.get_lmul(), 8)
+            .unwrap();
+        for i in 0..elem_cnt {
+            let expected = if i % 2 == 0 {
+                (i as u32) + 100
+            } else {
+                0xDEAD_BEEF_u32
+            };
+            assert_eq!(got[i], expected, "mask load mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_mask_unit_stride_store() {
+        let mut vector_regfile = Vector::new();
+        let mut ram = Ram::new();
+        let addr_offset = 0x2000;
+        let base_addr = BASE_ADDR + 0x2000;
+
+        type ElemType = u32;
+        const LMUL: Vlmul = Vlmul::M4;
+        const SEW: Vsew = Vsew::E32;
+        let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
+
+        // 预置内存为 0，便于检查被 mask 掉的元素不会被写入。
+        for i in 0..elem_cnt {
+            ram.write(addr_offset + (i * size_of::<ElemType>()) as WordType, 0u32)
+                .unwrap();
+        }
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+
+        vector_regfile.set_config((LMUL, SEW, false, false, elem_cnt as u16));
+
+        // mask register v0: 仅偶数位写入
+        let mut mask_bytes = [0u8; VLEN_BYTE];
+        for i in 0..elem_cnt {
+            if i % 2 == 0 {
+                mask_bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        vector_regfile.write_as_type::<u8>(1, 0, &mask_bytes);
+
+        let src: Vec<ElemType> = (0..elem_cnt).map(|i| (i as u32) * 11 + 7).collect();
+        vector_regfile.write_as_type::<ElemType>(LMUL.get_lmul(), 8, &src);
+
+        vector_regfile
+            .stride_store(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .unwrap();
+
+        for i in 0..elem_cnt {
+            let addr = base_addr + (i * size_of::<ElemType>()) as WordType;
+            let got = mmio.read_u32(addr).unwrap();
+            let expected = if i % 2 == 0 { src[i] } else { 0u32 };
+            assert_eq!(got, expected, "mask store mismatch at index {}", i);
         }
     }
 }
