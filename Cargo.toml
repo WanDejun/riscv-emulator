@@ -88,10 +88,6 @@ lto = "off"
 codegen-units = 16
 incremental = true
 
-[profile.release-with-debug]
-inherits = "release"
-debug = true
-
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false                                         # Disable features which are enabled by default

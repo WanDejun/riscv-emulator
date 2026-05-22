@@ -1,4 +1,7 @@
-#![cfg_attr(debug_assertions, allow(dead_code))]
+// TODO: Always allow dead code for now, as we want to release the crate while many dead code exists.
+#![allow(dead_code)]
+// Only Allow dead code in debug mode
+// #![cfg_attr(debug_assertions, allow(dead_code))]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
