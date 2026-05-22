@@ -182,6 +182,7 @@ pub fn event_loop(board: &mut impl Board, cfg: Config) -> DynResult<()> {
 
     let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = match cfg {
         Config::Tcp(port) => Box::new(wait_for_tcp(port)?),
+        #[cfg(unix)]
         Config::Uds(path) => Box::new(wait_for_uds(&path)?),
     };
     let stub = GdbStub::new(conn);
