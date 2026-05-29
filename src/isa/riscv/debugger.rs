@@ -1,4 +1,9 @@
-use std::{collections::VecDeque, fmt::Debug, ops::Add, u64};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    fmt::Debug,
+    ops::Add,
+    u64,
+};
 
 use crate::{
     board::Board,
@@ -8,7 +13,7 @@ use crate::{
         DebugTarget, DecoderTrait, ISATypes,
         riscv::{
             RawInstrType, RiscvTypes,
-            csr_reg::PrivilegeLevel,
+            csr_reg::{NamedCsrReg, PrivilegeLevel, csr_macro::Mcycle},
             decoder::DecodeInstr,
             executor::{ExcuteInstrInfo, RVCPU},
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
@@ -163,14 +168,135 @@ pub enum FuncTrace {
     Return { name: Option<String>, addr: u64 },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FuncTraceStatEntry {
+    pub calls: u64,
+    pub returns: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FtraceStatsSnapshot {
+    pub enabled: bool,
+    pub queue_len: usize,
+    pub call_count: u64,
+    pub return_count: u64,
+    pub unknown_calls: u64,
+    pub unknown_returns: u64,
+    pub per_func: Vec<(String, FuncTraceStatEntry)>,
+}
+
+#[derive(Debug, Default)]
+struct FtraceStats {
+    call_count: u64,
+    return_count: u64,
+    unknown_calls: u64,
+    unknown_returns: u64,
+    per_func: BTreeMap<String, FuncTraceStatEntry>,
+}
+
+impl FtraceStats {
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    fn record(&mut self, trace: &FuncTrace) {
+        match trace {
+            FuncTrace::Call { name, .. } => {
+                self.call_count += 1;
+                if let Some(name) = name {
+                    self.per_func.entry(name.clone()).or_default().calls += 1;
+                } else {
+                    self.unknown_calls += 1;
+                }
+            }
+            FuncTrace::Return { name, .. } => {
+                self.return_count += 1;
+                if let Some(name) = name {
+                    self.per_func.entry(name.clone()).or_default().returns += 1;
+                } else {
+                    self.unknown_returns += 1;
+                }
+            }
+        }
+    }
+
+    fn snapshot(&self, enabled: bool, queue_len: usize) -> FtraceStatsSnapshot {
+        FtraceStatsSnapshot {
+            enabled,
+            queue_len,
+            call_count: self.call_count,
+            return_count: self.return_count,
+            unknown_calls: self.unknown_calls,
+            unknown_returns: self.unknown_returns,
+            per_func: self
+                .per_func
+                .iter()
+                .map(|(name, entry)| (name.clone(), entry.clone()))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct FtraceState {
+    enabled: bool,
+    queue: VecDeque<FuncTrace>,
+    stats: FtraceStats,
+}
+
+pub const MAX_FTRACE: usize = 1024;
+
+impl FtraceState {
+    fn new() -> Self {
+        Self {
+            enabled: false,
+            queue: VecDeque::with_capacity(MAX_FTRACE),
+            stats: FtraceStats::default(),
+        }
+    }
+
+    fn start(&mut self) {
+        self.enabled = true;
+        self.queue.clear();
+        self.stats.clear();
+    }
+
+    fn stop(&mut self) {
+        self.enabled = false;
+    }
+
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn record(&mut self, trace: FuncTrace) {
+        if !self.enabled {
+            return;
+        }
+
+        self.stats.record(&trace);
+        self.queue.push_back(trace);
+        if self.queue.len() > MAX_FTRACE {
+            self.queue.pop_front();
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = FuncTrace> + '_ {
+        self.queue.iter().cloned()
+    }
+
+    fn snapshot(&self) -> FtraceStatsSnapshot {
+        self.stats.snapshot(self.enabled, self.queue.len())
+    }
+}
+
 const MAX_HISTORY: usize = 1024;
-const MAX_FTRACE: usize = MAX_HISTORY;
 
 pub struct Debugger<'a, B: Board> {
     breakpoints: Vec<Breakpoint>,
     board: &'a mut B,
     history: VecDeque<(WordType, Option<RawInstrType>)>,
-    ftrace: VecDeque<FuncTrace>,
+    ftrace: FtraceState,
     symtab: Option<SymTab>,
 }
 
@@ -183,7 +309,7 @@ impl<'a, B: Board> Debugger<'a, B> {
             breakpoints: Vec::new(),
             board,
             history: VecDeque::with_capacity(MAX_HISTORY),
-            ftrace: VecDeque::with_capacity(MAX_FTRACE),
+            ftrace: FtraceState::new(),
             symtab: symtab,
         }
     }
@@ -252,8 +378,24 @@ impl<'a, B: Board> Debugger<'a, B> {
         None
     }
 
-    pub fn ftrace(&self) -> impl Iterator<Item = FuncTrace> {
-        self.ftrace.iter().cloned()
+    pub fn ftrace_start(&mut self) {
+        self.ftrace.start();
+    }
+
+    pub fn ftrace_stop(&mut self) {
+        self.ftrace.stop();
+    }
+
+    pub fn ftrace_enabled(&self) -> bool {
+        self.ftrace.enabled()
+    }
+
+    pub fn ftrace_show(&self) -> impl Iterator<Item = FuncTrace> + '_ {
+        self.ftrace.iter()
+    }
+
+    pub fn ftrace_stat(&self) -> FtraceStatsSnapshot {
+        self.ftrace.snapshot()
     }
 
     pub fn breakpoints(&self) -> &Vec<Breakpoint> {
@@ -344,14 +486,35 @@ impl<'a, B: Board> Debugger<'a, B> {
             .step()
             .map_err(|e| DebugError::TargetException(e));
 
-        if let Some(ftrace) = self.curr_ftrace() {
-            self.ftrace.push_back(ftrace);
-            if self.ftrace.len() > MAX_FTRACE {
-                self.ftrace.pop_front();
+        if self.ftrace_enabled() {
+            if let Some(ftrace) = self.curr_ftrace() {
+                self.ftrace.record(ftrace);
             }
         }
 
         rst
+    }
+
+    /// Return `Ok(None)` if the condition is met, otherwise return `Ok(Some(DebugEvent))` for the event that causes the stop.
+    pub fn continue_until(
+        &mut self,
+        mut cond: impl FnMut(&mut Self) -> bool,
+    ) -> Result<Option<DebugEvent>, DebugError> {
+        loop {
+            if self.board.status() == crate::board::BoardStatus::Halt {
+                return Ok(Some(DebugEvent::BoardHalted));
+            }
+
+            if cond(self) {
+                return Ok(None);
+            }
+
+            self.cpu_step_internal()?;
+
+            if self.on_breakpoint() {
+                return Ok(Some(DebugEvent::BreakpointHit));
+            }
+        }
     }
 
     /// Continue running until a breakpoint is hit, `max_steps` steps are executed or the board is halted.
@@ -401,6 +564,7 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     // re-export methods from `DebugTarget`
 
+    // TODO: Add checks here.
     pub fn read_reg(&self, idx: u8) -> WordType {
         self.board.cpu().read_reg(idx)
     }
@@ -419,6 +583,10 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     pub fn read_float_reg(&self, idx: u8) -> (f32, f64) {
         self.board.cpu().read_float_reg(idx)
+    }
+
+    pub fn write_float_reg(&mut self, idx: u8, value: f64) {
+        self.board.cpu_mut().fpu.store(idx, value);
     }
 
     pub fn read_instr(&mut self, addr: WordType) -> Option<RawInstrType> {
@@ -453,6 +621,10 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu_mut().get_current_privilege()
     }
 
+    pub fn set_current_privilege(&mut self, priv_level: PrivilegeLevel) {
+        self.board.cpu_mut().csr.set_current_privileged(priv_level);
+    }
+
     pub fn decoded_info(&self, raw: RawInstrType) -> Option<<RiscvTypes as ISATypes>::DecodeRst> {
         self.board.cpu().decoded_instr(raw)
     }
@@ -463,6 +635,14 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     pub fn translate(&mut self, addr: u64, access: AccessType) -> Result<u64, PageTableError> {
         self.board.cpu_mut().debug_translate(addr, access)
+    }
+
+    pub fn cycle(&mut self) -> WordType {
+        self.board
+            .cpu_mut()
+            .csr
+            .get_by_type_existing::<Mcycle>()
+            .data()
     }
 }
 
@@ -568,5 +748,292 @@ mod test {
         debugger.step().unwrap();
 
         assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+    }
+
+    #[test]
+    fn test_ftrace_jal_call_and_ret_with_symbols() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0x00000013, // nop
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[
+            ("caller".to_string(), BASE_ADDR),
+            ("callee".to_string(), BASE_ADDR + 8),
+        ]));
+        debugger.ftrace_start();
+
+        debugger.step().unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+        assert_eq!(
+            debugger.ftrace_show().collect::<Vec<_>>(),
+            vec![FuncTrace::Call {
+                name: Some("callee".to_string()),
+                addr: BASE_ADDR + 8,
+            }]
+        );
+
+        debugger.step().unwrap();
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 4);
+        assert_eq!(
+            debugger.ftrace_show().collect::<Vec<_>>(),
+            vec![
+                FuncTrace::Call {
+                    name: Some("callee".to_string()),
+                    addr: BASE_ADDR + 8,
+                },
+                FuncTrace::Return {
+                    name: Some("caller".to_string()),
+                    addr: BASE_ADDR + 4,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ftrace_tail_call_uses_symbol_range() {
+        let mut cpu = TestCPUBuilder::new()
+            .program(&[
+                0x00030067, // jalr zero, 0(x6)
+                0x00000013, // nop
+                0x00000013, // nop
+            ])
+            .build();
+        cpu.write_reg(6, BASE_ADDR + 8);
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[("tail_target".to_string(), BASE_ADDR + 8)]));
+        debugger.ftrace_start();
+
+        debugger.step().unwrap();
+
+        assert_eq!(debugger.read_pc(), BASE_ADDR + 8);
+        assert_eq!(
+            debugger.ftrace_show().collect::<Vec<_>>(),
+            vec![FuncTrace::Call {
+                name: Some("tail_target".to_string()),
+                addr: BASE_ADDR + 8,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_ftrace_keeps_latest_entries() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0xffdff06f, // jal zero, -4
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[
+            ("caller".to_string(), BASE_ADDR),
+            ("callee".to_string(), BASE_ADDR + 8),
+        ]));
+        debugger.ftrace_start();
+
+        debugger
+            .continue_until_step((MAX_FTRACE as u64 + 1) * 3)
+            .unwrap();
+
+        let traces = debugger.ftrace_show().collect::<Vec<_>>();
+        assert_eq!(traces.len(), MAX_FTRACE);
+        assert_eq!(
+            traces.first(),
+            Some(&FuncTrace::Call {
+                name: Some("callee".to_string()),
+                addr: BASE_ADDR + 8,
+            })
+        );
+        assert_eq!(
+            traces.last(),
+            Some(&FuncTrace::Return {
+                name: Some("caller".to_string()),
+                addr: BASE_ADDR + 4,
+            })
+        );
+    }
+
+    #[test]
+    fn test_ftrace_disabled_until_started() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0x00000013, // nop
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[("callee".to_string(), BASE_ADDR + 8)]));
+
+        debugger.continue_until_step(2).unwrap();
+
+        assert!(!debugger.ftrace_enabled());
+        assert!(debugger.ftrace_show().collect::<Vec<_>>().is_empty());
+        assert_eq!(
+            debugger.ftrace_stat(),
+            FtraceStatsSnapshot {
+                enabled: false,
+                queue_len: 0,
+                call_count: 0,
+                return_count: 0,
+                unknown_calls: 0,
+                unknown_returns: 0,
+                per_func: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ftrace_start_clears_queue_and_stats() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0x00000013, // nop
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[
+            ("caller".to_string(), BASE_ADDR),
+            ("callee".to_string(), BASE_ADDR + 8),
+        ]));
+
+        debugger.ftrace_start();
+        debugger.continue_until_step(2).unwrap();
+        assert_eq!(debugger.ftrace_stat().call_count, 1);
+        assert_eq!(debugger.ftrace_stat().return_count, 1);
+
+        debugger.ftrace_start();
+
+        assert!(debugger.ftrace_enabled());
+        assert!(debugger.ftrace_show().collect::<Vec<_>>().is_empty());
+        assert_eq!(
+            debugger.ftrace_stat(),
+            FtraceStatsSnapshot {
+                enabled: true,
+                queue_len: 0,
+                call_count: 0,
+                return_count: 0,
+                unknown_calls: 0,
+                unknown_returns: 0,
+                per_func: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ftrace_stop_preserves_data_and_halts_recording() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0x00000013, // nop
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[
+            ("caller".to_string(), BASE_ADDR),
+            ("callee".to_string(), BASE_ADDR + 8),
+        ]));
+
+        debugger.ftrace_start();
+        debugger.step().unwrap();
+        debugger.ftrace_stop();
+
+        let before = debugger.ftrace_stat();
+        debugger.step().unwrap();
+
+        assert!(!debugger.ftrace_enabled());
+        assert_eq!(debugger.ftrace_stat(), before);
+        assert_eq!(
+            debugger.ftrace_show().collect::<Vec<_>>(),
+            vec![FuncTrace::Call {
+                name: Some("callee".to_string()),
+                addr: BASE_ADDR + 8,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_ftrace_stats_keep_full_window_after_queue_truncation() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0xffdff06f, // jal zero, -4
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.set_symbol_table(SymTab::from(&[
+            ("caller".to_string(), BASE_ADDR),
+            ("callee".to_string(), BASE_ADDR + 8),
+        ]));
+        debugger.ftrace_start();
+
+        let loops = MAX_FTRACE as u64 + 1;
+        debugger.continue_until_step(loops * 3).unwrap();
+
+        let stats = debugger.ftrace_stat();
+        assert_eq!(stats.queue_len, MAX_FTRACE);
+        assert_eq!(stats.call_count, loops);
+        assert_eq!(stats.return_count, loops);
+        assert_eq!(
+            stats.per_func,
+            vec![
+                (
+                    "callee".to_string(),
+                    FuncTraceStatEntry {
+                        calls: loops,
+                        returns: 0,
+                    },
+                ),
+                (
+                    "caller".to_string(),
+                    FuncTraceStatEntry {
+                        calls: 0,
+                        returns: loops,
+                    },
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ftrace_unknown_stats_without_symbols() {
+        let cpu = TestCPUBuilder::new()
+            .program(&[
+                0x008000ef, // jal ra, 8
+                0x00000013, // nop
+                0x00008067, // ret
+            ])
+            .build();
+
+        let mut debugger = create_debugger(cpu);
+        debugger.ftrace_start();
+        debugger.continue_until_step(2).unwrap();
+
+        assert_eq!(
+            debugger.ftrace_stat(),
+            FtraceStatsSnapshot {
+                enabled: true,
+                queue_len: 2,
+                call_count: 1,
+                return_count: 1,
+                unknown_calls: 1,
+                unknown_returns: 1,
+                per_func: Vec::new(),
+            }
+        );
     }
 }

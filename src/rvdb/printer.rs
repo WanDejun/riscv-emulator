@@ -172,7 +172,7 @@ impl Printer {
                 }
             }
 
-            CommandOutput::FTrace(traces) => {
+            CommandOutput::FTraceShow(traces) => {
                 for trace in traces {
                     match trace {
                         debugger::FuncTrace::Call { name, addr } => {
@@ -193,6 +193,34 @@ impl Printer {
                         }
                     }
                 }
+            }
+            CommandOutput::FTraceStat(stats) => {
+                println!(
+                    "ftrace: {}",
+                    if stats.enabled { "running" } else { "stopped" }
+                );
+                println!("queue: {} / {}", stats.queue_len, debugger::MAX_FTRACE);
+                println!("calls: {}", stats.call_count);
+                println!("returns: {}", stats.return_count);
+                println!("unknown calls: {}", stats.unknown_calls);
+                println!("unknown returns: {}", stats.unknown_returns);
+
+                if !stats.per_func.is_empty() {
+                    println!("function stats:");
+                    let mut per_func = stats.per_func.clone().into_iter().collect::<Vec<_>>();
+                    per_func.sort_by_key(|(_, e)| e.calls + e.returns);
+                    for (name, entry) in per_func.into_iter().rev() {
+                        println!(
+                            "{} calls={:<5} returns={:<5}",
+                            palette.identifier(&format!("{:<32}", name)),
+                            entry.calls,
+                            entry.returns,
+                        );
+                    }
+                }
+            }
+            CommandOutput::FTraceStatus { enabled } => {
+                println!("ftrace {}", if *enabled { "started" } else { "stopped" });
             }
 
             CommandOutput::ContinueDone {

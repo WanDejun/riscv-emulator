@@ -37,7 +37,7 @@ impl<'a, B: Board> Handler<'a, B> {
             Cli::Translate { addr, access } => self.handle_translate(addr, access.into()),
             Cli::List => self.handle_list(),
             Cli::History { count } => self.handle_history(count),
-            Cli::FTrace { count } => self.handle_ftrace(count),
+            Cli::FTrace(cmd) => self.handle_ftrace(cmd),
             Cli::Si => self.handle_step(),
             Cli::Continue { steps } => self.handle_continue(steps),
             Cli::Breakpoint {
@@ -78,10 +78,21 @@ impl<'a, B: Board> Handler<'a, B> {
         }
     }
 
-    fn handle_ftrace(&mut self, count: usize) -> Result<CommandOutput, String> {
-        Ok(CommandOutput::FTrace(
-            self.dbg.ftrace().take(count).collect(),
-        ))
+    fn handle_ftrace(&mut self, cmd: FTraceCmd) -> Result<CommandOutput, String> {
+        match cmd {
+            FTraceCmd::Start => {
+                self.dbg.ftrace_start();
+                Ok(CommandOutput::FTraceStatus { enabled: true })
+            }
+            FTraceCmd::Stop => {
+                self.dbg.ftrace_stop();
+                Ok(CommandOutput::FTraceStatus { enabled: false })
+            }
+            FTraceCmd::Show { count } => Ok(CommandOutput::FTraceShow(
+                self.dbg.ftrace_show().take(count).collect(),
+            )),
+            FTraceCmd::Stat => Ok(CommandOutput::FTraceStat(self.dbg.ftrace_stat())),
+        }
     }
 
     fn handle_print(&mut self, cmd: PrintCmd) -> Result<CommandOutput, String> {
@@ -480,6 +491,40 @@ mod tests {
                 addr: Address::Phys(ADDR),
                 symbol: None
             }
+        );
+    }
+
+    #[test]
+    fn test_ftrace_start_stop_show_and_stat() {
+        let mut board = create_board();
+        let mut handler = Handler::new(&mut board);
+
+        assert_eq!(
+            handler.handle(Cli::FTrace(FTraceCmd::Stat)).unwrap(),
+            CommandOutput::FTraceStat(riscv_emulator::isa::riscv::debugger::FtraceStatsSnapshot {
+                enabled: false,
+                queue_len: 0,
+                call_count: 0,
+                return_count: 0,
+                unknown_calls: 0,
+                unknown_returns: 0,
+                per_func: Vec::new(),
+            })
+        );
+
+        assert_eq!(
+            handler.handle(Cli::FTrace(FTraceCmd::Start)).unwrap(),
+            CommandOutput::FTraceStatus { enabled: true }
+        );
+        assert_eq!(
+            handler.handle(Cli::FTrace(FTraceCmd::Stop)).unwrap(),
+            CommandOutput::FTraceStatus { enabled: false }
+        );
+        assert_eq!(
+            handler
+                .handle(Cli::FTrace(FTraceCmd::Show { count: 5 }))
+                .unwrap(),
+            CommandOutput::FTraceShow(Vec::new())
         );
     }
 }

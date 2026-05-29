@@ -72,11 +72,8 @@ enum Cli {
     },
 
     /// Show function call trace.
-    #[command(aliases = ["ft", "ftrace"])]
-    FTrace {
-        #[arg(default_value_t = 20)]
-        count: usize,
-    },
+    #[command(aliases = ["ft", "ftrace"], subcommand)]
+    FTrace(FTraceCmd),
 
     /// Load an ELF symbol file.
     #[command(aliases = ["symbol", "file"])]
@@ -159,6 +156,17 @@ pub enum InfoCmd {
     Symbols,
 }
 
+#[derive(Debug, Subcommand)]
+pub enum FTraceCmd {
+    Start,
+    Stop,
+    Show {
+        #[arg(default_value_t = 20)]
+        count: usize,
+    },
+    Stat,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintObject {
     Pc,
@@ -215,7 +223,11 @@ pub enum CommandOutput {
     CodeList(Vec<DbgInstrLine>),
     Breakpoints(Vec<debugger::Breakpoint>),
     Symbols(Vec<(String, WordType)>),
-    FTrace(Vec<debugger::FuncTrace>),
+    FTraceShow(Vec<debugger::FuncTrace>),
+    FTraceStat(debugger::FtraceStatsSnapshot),
+    FTraceStatus {
+        enabled: bool,
+    },
 
     ContinueDone {
         instr: DbgInstrLine,

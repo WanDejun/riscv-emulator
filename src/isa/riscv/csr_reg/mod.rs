@@ -103,14 +103,16 @@ const CSR_PRIVILEGE_TABLE: &[(WordType, PrivilegeLevel)] = &[
     (0xFC0, PrivilegeLevel::M), // 0xFFF (Custom)
 ];
 
-impl From<u8> for PrivilegeLevel {
-    fn from(value: u8) -> PrivilegeLevel {
+impl TryFrom<u8> for PrivilegeLevel {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => PrivilegeLevel::U,
-            1 => PrivilegeLevel::S,
-            2 => PrivilegeLevel::V,
-            3 => PrivilegeLevel::M,
-            _ => unreachable!("Invalid privilege level: {}", value),
+            0 => Ok(PrivilegeLevel::U),
+            1 => Ok(PrivilegeLevel::S),
+            2 => Ok(PrivilegeLevel::V),
+            3 => Ok(PrivilegeLevel::M),
+            _ => Err("Invalid privilege level"),
         }
     }
 }

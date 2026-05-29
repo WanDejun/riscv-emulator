@@ -1,3 +1,6 @@
+# allow setting rustflags in profiles
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "riscv-emulator"
 version = "0.1.0"
@@ -40,12 +43,14 @@ rustc_apfloat = "0.2.3"
 num_enum = { version = "0.7.4" }
 bit-set = { version = "0.8.0" }
 bit-vec = {version = "0.9.1"}
+gdbstub_arch = "0.3.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flexi_logger = { version = "0.31.2", optional = true }
 crossterm = { version = "0.28", optional = true }
 clap = { version = "4.5.43", features = ["derive"], optional = true }
 rustyline = { version = "17.0.1", optional = true }
+gdbstub = "0.7.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
@@ -65,8 +70,16 @@ name = "riscv-emulator"
 path = "src/main.rs"
 required-features = ["native-cli"]
 
+# For `cargo flamegraph`.
+# > Note: If you're using lld (which is the default since Rust 1.90.0) or mold on Linux, you must use the --no-rosegment flag.
+# > Otherwise perf will not be able to generate accurate stack traces (explanation).
+# See: https://github.com/flamegraph-rs/flamegraph
+[profile.dev]
+rustflags = ["-Clink-arg=-Wl,--no-rosegment"]
+
 [profile.fast-debug]
 inherits = "dev"
+rustflags = ["-Clink-arg=-Wl,--no-rosegment"]
 
 opt-level = 2
 debug = true
@@ -76,10 +89,6 @@ overflow-checks = false
 lto = "off"
 codegen-units = 16
 incremental = true
-
-[profile.release-with-debug]
-inherits = "release"
-debug = true
 
 [dev-dependencies.cargo-husky]
 version = "1"
