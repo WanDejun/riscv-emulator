@@ -13,12 +13,20 @@ pub mod types;
 pub const VLEN: usize = 128;
 pub const VLEN_BYTE: usize = VLEN >> 3;
 
+/// Core structure of the RISC-V vector extension, managing vector configuration and the vector register file.
+///
+/// Provides execution capabilities for vector load/store instructions (stride, indexed, masked, etc.),
+/// as well as configuration for vector length, SEW, LMUL, and agnostic policies.
 pub(super) struct Vector {
     config: VectorConfig,
     vector_regfile: VectorRegFile,
 }
 
 // ============= Address Calculator =============
+
+/// Stride address calculator for vector stride load/store instruction address generation.
+///
+/// Address formula: `base + index × stride`, where `stride` is fixed to the value specified by the instruction.
 struct VectorStrideAddrCal {
     stride: WordType,
     base: WordType,
@@ -31,6 +39,10 @@ impl VectorStrideAddrCal {
     }
 }
 
+/// Indexed address calculator for vector indexed load/store instruction address generation.
+///
+/// Address formula: `base + mem[index_arr_base + index × index_width]`,
+/// i.e., the index array element is read from memory and used as the offset.
 struct VectorIndexedAddrCal {
     index_arr_base: WordType,
     index_width: u8,
@@ -51,6 +63,11 @@ impl VectorIndexedAddrCal {
     }
 }
 
+/// Mask handler for vector load/store operations, managing mask, tail, and inactive element agnostic policies.
+///
+/// Based on the mask bits in the `v0` register and the `tail_agnostic` / `mask_agnostic` configuration,
+/// determines whether each element actually performs memory access and whether unoperated elements
+/// are written with the default value (agnostic).
 struct VecLSMask {
     data: Vec<u8>,
     length: u16,
@@ -163,6 +180,7 @@ impl Vector {
 
     // This method will ignore segment argument, so DO NOT use this in load/store instruction.
     #[inline]
+    #[cfg(test)]
     pub(super) fn read_as_type<T>(&self, idx: u8) -> Result<&[T], Exception> {
         self.vector_regfile
             .read_as_type(self.config.vlmul.get_lmul(), idx)
@@ -170,11 +188,13 @@ impl Vector {
 
     // This method will ignore segment argument, so DO NOT use this in load/store instruction.
     #[inline]
+    #[cfg(test)]
     pub(super) fn write_as_type<T>(&mut self, lmul: u8, idx: u8, value: &[T]) {
         self.vector_regfile.write(lmul, idx, value, 1).unwrap();
     }
 
     #[inline]
+    #[cfg(test)]
     pub(super) fn read_with_seg(
         &self,
         idx: u8,
@@ -186,6 +206,7 @@ impl Vector {
         Ok(VGFRef::new(raw, eew.get_sew(), lmul, seg))
     }
 
+    // ================= LOAD =================
     pub(super) fn stride_load(
         &mut self,
         vd: u8,
@@ -322,6 +343,7 @@ impl Vector {
         }
     }
 
+    // ================= STORE =================
     pub(super) fn stride_store(
         &mut self,
         vs: u8,
