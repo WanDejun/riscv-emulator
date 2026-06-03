@@ -214,7 +214,7 @@ impl Vector {
         seg: u8,
     ) -> Result<VGFRef<'_>, Exception> {
         let lmul = self.config.vlmul.get_lmul();
-        let raw = self.vector_regfile.read(lmul, idx)?;
+        let raw = self.vector_regfile.get_ref(lmul, seg, idx)?;
         Ok(VGFRef::new(raw, eew.get_sew(), lmul, seg))
     }
 
@@ -421,7 +421,7 @@ impl Vector {
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
-            self.vector_regfile.read(lmul, vs)?,
+            self.vector_regfile.get_ref(lmul, seg, vs)?,
             eew.get_sew(),
             lmul,
             seg,
@@ -486,7 +486,7 @@ impl Vector {
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
-            self.vector_regfile.read(lmul, vs)?,
+            self.vector_regfile.get_ref(lmul, seg, vs)?,
             self.config.vsew.get_sew(),
             lmul,
             seg,
@@ -557,7 +557,12 @@ impl Vector {
             stride: eew.get_sew() as WordType,
         };
         let lmul = decode_whole_register_count(nf)?;
-        let vs_ref = VGFRef::new(self.vector_regfile.read(lmul, vs)?, eew.get_sew(), lmul, 1);
+        let vs_ref = VGFRef::new(
+            self.vector_regfile.get_ref(lmul, 1, vs)?,
+            eew.get_sew(),
+            lmul,
+            1,
+        );
 
         let mut err = Ok(());
         vs_ref.iter().enumerate().for_each(|(index, element)| {
@@ -646,36 +651,40 @@ mod test {
             assert_eq!(val, test_values[i], "M2 E8 mismatch at index {}", i);
         }
 
-        // --------------- M4, E32, Seg=4 ---------------
-        vector_regfile.config.vlmul = Vlmul::M4;
+        // --------------- M2, E32, Seg=4 ---------------
+        const SEG_SIZE: u8 = 4;
+        const LMUL: Vlmul = Vlmul::M2;
+        vector_regfile.config.vlmul = LMUL;
         vector_regfile.config.vl = VLEN_BYTE as u16;
-        let total_elements = VLEN_BYTE * 4; // 4 segments × VLEN_BYTE elements each
-        let test_values_m4: Vec<u32> = (0..total_elements)
+        let elems_per_seg = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+        let total_elements = elems_per_seg * SEG_SIZE as usize;
+        let test_values_seg: Vec<u32> = (0..total_elements)
             .map(|i| (i.wrapping_add(1)) as u32)
             .collect();
-        // Write 4 M4 register groups: v0-v3, v4-v7, v8-v11, v12-v15
-        for seg_idx in 0..4 {
-            let start = seg_idx * VLEN_BYTE;
-            let end = start + VLEN_BYTE;
+        // Write 4 M2 register groups: v0-v1, v2-v3, v4-v5, v6-v7
+        for seg_idx in 0..SEG_SIZE as usize {
+            let start = seg_idx * elems_per_seg;
+            let end = start + elems_per_seg;
             vector_regfile.write_as_type::<u32>(
-                Vlmul::M4.get_lmul(),
-                (4 * seg_idx) as u8,
-                &test_values_m4[start..end],
+                LMUL.get_lmul(),
+                (LMUL.get_lmul() as usize * seg_idx) as u8,
+                &test_values_seg[start..end],
             );
         }
         vector_regfile
-            .stride_store(0, Vsew::E32, 4, None, false, store_addr, &mut mmio)
+            .stride_store(0, Vsew::E32, SEG_SIZE, None, false, store_addr, &mut mmio)
             .unwrap();
         // Verify: segment-interleaved layout in memory
-        for pos in 0..(VLEN_BYTE * (Vlmul::M4 as usize) / size_of::<u32>()) {
-            for seg_idx in 0..4 {
-                let idx = seg_idx * VLEN_BYTE + pos;
-                let addr = store_addr + (pos * 16 + seg_idx * 4) as WordType;
+        for pos in 0..elems_per_seg {
+            for seg_idx in 0..SEG_SIZE as usize {
+                let idx = seg_idx * elems_per_seg + pos;
+                let addr = store_addr
+                    + ((pos * SEG_SIZE as usize + seg_idx) * size_of::<u32>()) as WordType;
                 let val = mmio.read_u32(addr).unwrap();
                 assert_eq!(
-                    val, test_values_m4[idx],
-                    "M4 E32 Seg=4 mismatch at pos {}, seg {}",
-                    pos, seg_idx
+                    val, test_values_seg[idx],
+                    "M2 E32 Seg={} mismatch at pos {}, seg {}",
+                    SEG_SIZE, pos, seg_idx
                 );
             }
         }

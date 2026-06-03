@@ -13,8 +13,8 @@ impl VectorRegFile {
         }
     }
 
-    pub fn read(&self, group_multiplier: u8, idx: u8) -> Result<&[u8], Exception> {
-        self.read_as_type::<u8>(group_multiplier, idx)
+    pub fn get_ref(&self, lmul: u8, seg: u8, idx: u8) -> Result<&[u8], Exception> {
+        self.read_as_type::<u8>(lmul * seg, idx)
     }
 
     #[inline]
