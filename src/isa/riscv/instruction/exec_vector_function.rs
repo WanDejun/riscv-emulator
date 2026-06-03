@@ -160,7 +160,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
                     EEW.into(),
                     nf + 1,
                     None,
-                    vm,
+                    !vm,
                     base_addr,
                     &mut cpu.memory.mmio,
                 );
@@ -212,7 +212,7 @@ fn do_vector_constant_stride_load<const EEW: u8>(
             EEW.into(),
             nf + 1,
             Some(stride),
-            vm,
+            !vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -248,7 +248,7 @@ fn do_vector_indexed_ordered_load<const EEW: u8>(
             EEW.into(),
             nf + 1,
             index_arr_base,
-            vm,
+            !vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -307,7 +307,7 @@ fn do_vector_unit_stride_store<const EEW: u8>(
                     EEW.into(),
                     nf + 1,
                     None,
-                    vm,
+                    !vm,
                     base_addr,
                     &mut cpu.memory.mmio,
                 );
@@ -357,7 +357,7 @@ fn do_vector_constant_stride_store<const EEW: u8>(
             EEW.into(),
             nf + 1,
             Some(stride),
-            vm,
+            !vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -393,7 +393,7 @@ fn do_vector_indexed_ordered_store<const EEW: u8>(
             EEW.into(),
             nf + 1,
             index_arr_base,
-            vm,
+            !vm,
             base_addr,
             &mut cpu.memory.mmio,
         );
@@ -462,7 +462,7 @@ mod test {
             rs1: 1,
             rs2: 0, // lumop
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             func6: 0b000000,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
@@ -483,7 +483,7 @@ mod test {
             .map(|i| (i + 1000) as u16)
             .collect();
         run_test_exec_decode(
-            0b000_0_00_0_00000_00001_101_00000_0000111,
+            0b000_0_00_1_00000_00001_101_00000_0000111,
             |builder| {
                 builder
                     .vector_status(Vlmul::M1, Vsew::E16, false, false)
@@ -532,7 +532,7 @@ mod test {
             rs1: 1,
             rs2: 2,
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             func6: 0b000010,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
@@ -595,7 +595,7 @@ mod test {
             rs1: 1,
             rs2: 2,
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             // nf=1(seg=2), mop=0b11(indexed ordered), mew=0
             func6: 0b001011,
         };
@@ -645,7 +645,7 @@ mod test {
             rs1: 1,
             rs2: 0,
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             func6: 0b000000,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
@@ -666,7 +666,7 @@ mod test {
             .collect();
         let byte_data: Vec<u8> = data.iter().flat_map(|x| x.to_le_bytes()).collect();
 
-        let raw_instr = 0b000_0_00_0_00000_00001_101_00000_0100111;
+        let raw_instr = 0b000_0_00_1_00000_00001_101_00000_0100111;
         run_test_exec_decode(
             raw_instr,
             |builder| {
@@ -714,7 +714,7 @@ mod test {
             rs1: 1,
             rs2: 2,
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             func6: 0b000010,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
@@ -767,7 +767,7 @@ mod test {
             rs1: 1,
             rs2: 2,
             rd: 0,
-            vm: false,
+            vm: !false, // disable mask
             func6: 0b000011,
         };
         cpu.reg_file.write(1, data_base);
