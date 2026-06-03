@@ -141,6 +141,7 @@ impl VecLSMask {
         }
     }
 
+    #[inline]
     pub fn element_store<T, F>(
         &self,
         store_fn: F,
@@ -156,6 +157,17 @@ impl VecLSMask {
             Some(v) => store_fn(v),
             None => Ok(()),
         }
+    }
+}
+
+#[inline(always)]
+fn decode_whole_register_count(nf: u8) -> Result<u8, Exception> {
+    match nf {
+        0 => Ok(1),
+        1 => Ok(2),
+        3 => Ok(4),
+        7 => Ok(8),
+        _ => Err(Exception::IllegalInstruction),
     }
 }
 
@@ -267,6 +279,55 @@ impl Vector {
                     },
                 }
             });
+        match err {
+            Err(err) => Err(err.into()),
+            Ok(()) => Ok(()),
+        }
+    }
+
+    /// Execute vl[nf]r.v — whole vector register load, always unmasked.
+    ///
+    /// The raw `nf` field encodes the register count as:
+    /// - nf=0 → vl1r.v (1 register)
+    /// - nf=1 → vl2r.v (2 registers)
+    /// - nf=3 → vl4r.v (4 registers)
+    /// - nf=7 → vl8r.v (8 registers)
+    ///
+    /// The instruction always uses EEW=64, unit stride, ignores `vl` and `vtype`,
+    /// and is always unmasked.
+    pub(super) fn load_whole_register(
+        &mut self,
+        vd: u8,
+        nf: u8,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), Exception> {
+        let eew = Vsew::E64;
+        let f = VectorStrideAddrCal {
+            base: base_addr,
+            stride: eew.get_sew() as WordType,
+        };
+        let lmul = decode_whole_register_count(nf)?;
+
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, 1)?,
+            eew.get_sew(),
+            lmul,
+            1,
+        );
+
+        let mut err = Ok(());
+        vd_ref.iter_mut().enumerate().for_each(|(index, element)| {
+            let addr = match f.exec(index as WordType) {
+                Ok(addr) => addr,
+                Err(_) => unreachable!(),
+            };
+
+            match mem.read_u64(addr) {
+                Ok(ram_value) => element.set(ram_value),
+                Err(e) => err = Err(e),
+            };
+        });
         match err {
             Err(err) => Err(err.into()),
             Ok(()) => Ok(()),
@@ -467,6 +528,48 @@ impl Vector {
                         .unwrap_or_else(|e| err = Err(e.into())),
                 }
             });
+        match err {
+            Err(err) => Err(err.into()),
+            Ok(()) => Ok(()),
+        }
+    }
+
+    /// Execute vs[nf]r.v — whole vector register store, always unmasked.
+    ///
+    /// The raw `nf` field encodes the register count as:
+    /// - nf=0 → vs1r.v (1 register)
+    /// - nf=1 → vs2r.v (2 registers)
+    /// - nf=3 → vs4r.v (4 registers)
+    /// - nf=7 → vs8r.v (8 registers)
+    ///
+    /// The instruction always uses EEW=64, unit stride, ignores `vl` and `vtype`,
+    /// and is always unmasked.
+    pub(super) fn store_whole_register(
+        &mut self,
+        vs: u8,
+        nf: u8,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), Exception> {
+        let eew = Vsew::E64;
+        let f = VectorStrideAddrCal {
+            base: base_addr,
+            stride: eew.get_sew() as WordType,
+        };
+        let lmul = decode_whole_register_count(nf)?;
+        let vs_ref = VGFRef::new(self.vector_regfile.read(lmul, vs)?, eew.get_sew(), lmul, 1);
+
+        let mut err = Ok(());
+        vs_ref.iter().enumerate().for_each(|(index, element)| {
+            let addr = match f.exec(index as WordType) {
+                Ok(addr) => addr,
+                Err(_) => unreachable!(),
+            };
+
+            if let Err(e) = mem.write_u64(addr, element.get::<u64>()) {
+                err = Err(e);
+            }
+        });
         match err {
             Err(err) => Err(err.into()),
             Ok(()) => Ok(()),
@@ -755,6 +858,66 @@ mod test {
             let got = mmio.read_u32(addr).unwrap();
             let expected = if i % 2 == 0 { src[i] } else { 0u32 };
             assert_eq!(got, expected, "mask store mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_load_whole_register() {
+        let mut vector_regfile = Vector::new();
+        let mut ram = Ram::new();
+        let base_addr = BASE_ADDR + 0x3000;
+        let test_values: Vec<u64> = (0..(VLEN_BYTE * 8 / size_of::<u64>()))
+            .map(|i| 0x1000_0000_0000_0000u64 + i as u64)
+            .collect();
+
+        for (i, value) in test_values.iter().copied().enumerate() {
+            ram.write(
+                base_addr - BASE_ADDR + (i * size_of::<u64>()) as WordType,
+                value,
+            )
+            .unwrap();
+        }
+
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+        vector_regfile.set_config((Vlmul::M1, Vsew::E8, true, true, 1));
+
+        vector_regfile
+            .load_whole_register(8, 7, base_addr, &mut mmio)
+            .unwrap();
+
+        let vector_ref = vector_regfile
+            .vector_regfile
+            .read_as_type::<u64>(8, 8)
+            .unwrap();
+        assert_eq!(vector_ref, test_values.as_slice());
+    }
+
+    #[test]
+    fn test_store_whole_register() {
+        let mut vector_regfile = Vector::new();
+        let ram = Ram::new();
+        let base_addr = BASE_ADDR + 0x4000;
+        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+        let test_values: Vec<u64> = (0..(VLEN_BYTE * 8 / size_of::<u64>()))
+            .map(|i| 0x2000_0000_0000_0000u64 + (i as u64) * 3)
+            .collect();
+
+        vector_regfile.set_config((Vlmul::M1, Vsew::E8, true, true, 1));
+        vector_regfile.write_as_type::<u64>(8, 8, &test_values);
+
+        vector_regfile
+            .store_whole_register(8, 7, base_addr, &mut mmio)
+            .unwrap();
+
+        for (i, expected) in test_values.iter().copied().enumerate() {
+            let got = mmio
+                .read_u64(base_addr + (i * size_of::<u64>()) as WordType)
+                .unwrap();
+            assert_eq!(
+                got, expected,
+                "whole register store mismatch at index {}",
+                i
+            );
         }
     }
 }

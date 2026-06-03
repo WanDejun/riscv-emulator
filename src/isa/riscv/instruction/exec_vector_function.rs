@@ -166,7 +166,12 @@ fn do_vector_unit_stride_load<const EEW: u8>(
                 );
             }
             // unit-stride, whole register load
-            0b01000 => unimplemented!(),
+            0b01000 => {
+                if (mop, vm) != (0b00, true) {
+                    return Err(Exception::IllegalInstruction);
+                }
+                res = vector.load_whole_register(vd, nf, base_addr, &mut cpu.memory.mmio);
+            }
             // unit-stride, mask load, EEW=8
             0b01011 => unimplemented!(),
             // unit-stride fault-only-first
@@ -294,7 +299,7 @@ fn do_vector_unit_stride_store<const EEW: u8>(
         func6,
     } = info
     {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_docode(func6);
+        let Func6Uop { nf, mew, mop } = load_store_func6_docode(func6);
         debug_assert_eq!(mop, 0b00);
         let vector = &mut cpu.vector;
 
@@ -313,7 +318,12 @@ fn do_vector_unit_stride_store<const EEW: u8>(
                 );
             }
             // unit-stride, whole register store
-            0b01000 => unimplemented!(),
+            0b01000 => {
+                if (mew, mop, vm) != (0, 0b00, true) {
+                    return Err(Exception::IllegalInstruction);
+                }
+                res = vector.store_whole_register(vs3, nf, base_addr, &mut cpu.memory.mmio);
+            }
             // unit-stride, mask store, EEW=8
             0b01011 => unimplemented!(),
             _ => return Err(Exception::IllegalInstruction),

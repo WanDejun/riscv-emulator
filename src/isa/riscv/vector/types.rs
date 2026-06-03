@@ -55,10 +55,10 @@ impl Vlmul {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Vsew {
-    E8 = 0,
-    E16 = 1,
-    E32 = 2,
-    E64 = 3,
+    E8,
+    E16,
+    E32,
+    E64,
 }
 
 impl From<u8> for Vsew {
@@ -81,6 +81,20 @@ impl Vsew {
             Self::E32 => 4,
             Self::E64 => 8,
         }
+    }
+}
+
+pub(super) struct NFIELDS {
+    nf: u8,
+}
+
+impl NFIELDS {
+    pub(super) fn new(nf: u8) -> Self {
+        Self { nf }
+    }
+
+    pub(super) fn encode(self) -> u8 {
+        self.nf + 1
     }
 }
 
