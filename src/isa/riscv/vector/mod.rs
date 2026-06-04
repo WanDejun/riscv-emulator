@@ -68,7 +68,7 @@ impl VectorIndexedAddrCal {
 /// Based on the mask bits in the `v0` register and the `tail_agnostic` / `mask_agnostic` configuration,
 /// determines whether each element actually performs memory access and whether unoperated elements
 /// are written with the default value (agnostic).
-struct VecLSMask {
+struct VecOpMask {
     data: Vec<u8>,
     length: u16,
     enable_mask: bool,
@@ -76,7 +76,7 @@ struct VecLSMask {
     tail_agnostic: bool,
 }
 
-impl VecLSMask {
+impl VecOpMask {
     pub fn new(
         vgr: &VectorRegFile,
         length: u16,
@@ -131,11 +131,11 @@ impl VecLSMask {
     }
 
     #[inline]
-    pub fn element_load<T>(&self, element: types::RVVElemMutTy, ram_value: T, index: usize)
+    pub fn element_load<T>(&self, element: types::RVVElemMutTy, value: T, index: usize)
     where
         T: Default,
     {
-        match self.mask(ram_value, index) {
+        match self.mask(value, index) {
             Some(v) => element.set(v),
             None => (),
         }
@@ -240,7 +240,7 @@ impl Vector {
             lmul,
             seg,
         );
-        let mask = VecLSMask::new(
+        let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,
@@ -356,7 +356,7 @@ impl Vector {
             lmul,
             seg,
         );
-        let mask = VecLSMask::new(
+        let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,
@@ -426,7 +426,7 @@ impl Vector {
             lmul,
             seg,
         );
-        let mask = VecLSMask::new(
+        let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,
@@ -491,7 +491,7 @@ impl Vector {
             lmul,
             seg,
         );
-        let mask = VecLSMask::new(
+        let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,

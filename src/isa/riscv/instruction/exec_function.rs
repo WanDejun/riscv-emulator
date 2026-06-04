@@ -7,7 +7,7 @@ pub(super) use super::exec_float_function::*;
 use super::normal_exec;
 
 use crate::{
-    config::arch_config::{SignedWordType, WordType},
+    config::arch_config::WordType,
     device::MemError,
     isa::riscv::{
         csr_reg::{NamedCsrReg, csr_macro::Minstret},
@@ -16,16 +16,16 @@ use crate::{
         trap::Exception,
     },
     utils::{
-        TruncateFrom, TruncateToBits, UnsignedInteger, sign_extend, sign_extend_u32,
-        wrapping_add_as_signed,
+        TruncateToBits, UnsignedInteger, as_signed_i128, from_signed_i128, shift_amount,
+        sign_extend, sign_extend_u32, wrapping_add_as_signed,
     },
 };
 
 /// ExecTrait will generate operation result to `exec_xxx` function.
 /// ExecTrait::exec only do calculate.
 /// `exec_xxx` function interact with other mod in CPU.
-pub(super) trait ExecTrait<T> {
-    fn exec(a: WordType, b: WordType) -> T;
+pub(in super::super) trait ExecTrait<OUT, IN = WordType> {
+    fn exec(a: IN, b: IN) -> OUT;
 }
 
 // XXX: Remeber that `imm` has been sign_extended in decoder.
@@ -235,54 +235,63 @@ pub(super) fn exec_nop(_info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Except
 //                  ExecTrait
 // =============================================
 // Arith
-pub(super) struct ExecAdd {}
-impl ExecTrait<Result<WordType, Exception>> for ExecAdd {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_add(b))
+pub(in super::super) struct ExecAdd<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecAdd<T>
+where
+    T: num_traits::WrappingAdd,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_add(&b))
     }
 }
 
-pub(super) struct ExecSub {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSub {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_sub(b))
+pub(in super::super) struct ExecSub<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecSub<T>
+where
+    T: num_traits::WrappingSub,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_sub(&b))
     }
 }
 
-pub(super) struct ExecMulLow {}
-impl ExecTrait<Result<WordType, Exception>> for ExecMulLow {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_mul(b))
+pub(in super::super) struct ExecMulLow<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMulLow<T>
+where
+    T: num_traits::WrappingMul,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_mul(&b))
     }
 }
 
-pub(super) struct ExecMulHighUnsigned<U> {
-    phantom: PhantomData<U>,
+pub(in super::super) struct ExecMulHighUnsigned<T = WordType> {
+    phantom: PhantomData<T>,
 }
 
-#[cfg(feature = "riscv32")]
-impl ExecTrait<Result<u32, Exception>> for ExecMulHighUnsigned<u32> {
-    fn exec(a: u32, b: u32) -> Result<u32, Exception> {
-        let a = a as u64;
-        let b = b as u64;
-
-        return Ok((a.wrapping_mul(b) >> 32) as u32);
-    }
-}
-
-#[cfg(feature = "riscv64")]
-impl ExecTrait<Result<u64, Exception>> for ExecMulHighUnsigned<u64> {
-    fn exec(a: u64, b: u64) -> Result<u64, Exception> {
-        let a = a as u128;
-        let b = b as u128;
-
-        return Ok((a.wrapping_mul(b) >> 64) as u64);
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMulHighUnsigned<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        let product: u128 = a.into();
+        let rhs: u128 = b.into();
+        Ok(T::truncate_from((product * rhs) >> T::BITS))
     }
 }
 
 // NOTE: This version is slow and deprecated.
 
-// pub(super) struct ExecMulHighUnsigned {}
+// pub(in super::super) struct ExecMulHighUnsigned {}
 // impl ExecTrait<Result<WordType, Exception>> for ExecMulHighUnsigned {
 //     fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
 //         const XLEN: WordType = (size_of::<WordType>() << 3) as WordType;
@@ -308,82 +317,99 @@ impl ExecTrait<Result<u64, Exception>> for ExecMulHighUnsigned<u64> {
 //     }
 // }
 
-pub(super) struct ExecMulHighSigned<U> {
-    phantom: PhantomData<U>,
+pub(in super::super) struct ExecMulHighSigned<T = WordType> {
+    phantom: PhantomData<T>,
 }
 
-#[cfg(feature = "riscv32")]
-impl ExecTrait<Result<u32, Exception>> for ExecMulHighSigned<u32> {
-    fn exec(a: u32, b: u32) -> Result<u32, Exception> {
-        let a = a as i32 as i64;
-        let b = b as i32 as i64;
-
-        return Ok((a.wrapping_mul(b) >> 32) as u32);
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMulHighSigned<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        let product = as_signed_i128(a) * as_signed_i128(b);
+        Ok(from_signed_i128(product >> T::BITS))
     }
 }
 
-#[cfg(feature = "riscv64")]
-impl ExecTrait<Result<u64, Exception>> for ExecMulHighSigned<u64> {
-    fn exec(a: u64, b: u64) -> Result<u64, Exception> {
-        let a = a as i64 as i128;
-        let b = b as i64 as i128;
+pub(in super::super) struct ExecMulHighSignedUnsigned<T = WordType> {
+    phantom: PhantomData<T>,
+}
 
-        return Ok((a.wrapping_mul(b) >> 64) as u64);
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMulHighSignedUnsigned<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        let rhs: u128 = b.into();
+        let product = as_signed_i128(a) * (rhs as i128);
+        Ok(from_signed_i128(product >> T::BITS))
     }
 }
 
-pub(super) struct ExecMulHighSignedUnsigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecMulHighSignedUnsigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let lhs_neg = (a as SignedWordType) < 0;
+pub(in super::super) struct ExecDivSigned<T = WordType> {
+    phantom: PhantomData<T>,
+}
 
-        let high = ExecMulHighUnsigned::exec(a, b)?;
-
-        if lhs_neg {
-            // Let M = 1 << XLEN, given a *negative* integer `a` bewteen [-M/2, 0).
-            // Then a * b = (a + M) * b - M * b.
-            // Here, a + M equals to the unsigned reinterpretation of `a`.
-            Ok(high.wrapping_sub(b))
-        } else {
-            Ok(high)
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecDivSigned<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if unlikely(b == T::from(0u8)) {
+            return Ok(T::MAX);
         }
+
+        Ok(from_signed_i128(
+            as_signed_i128(a).wrapping_div(as_signed_i128(b)),
+        ))
     }
 }
 
-pub(super) struct ExecDivSigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecDivSigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
-            return Ok(WordType::MAX);
+pub(in super::super) struct ExecDivUnsigned<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecDivUnsigned<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if unlikely(b == T::from(0u8)) {
+            return Ok(T::MAX);
         }
-        Ok((a.cast_signed().wrapping_div(b.cast_signed())) as WordType)
+        Ok(a / b)
     }
 }
 
-pub(super) struct ExecDivUnsigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecDivUnsigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
-            return Ok(WordType::MAX);
-        }
-        Ok(a.wrapping_div(b))
-    }
+pub(in super::super) struct ExecRemSigned<T = WordType> {
+    phantom: PhantomData<T>,
 }
 
-pub(super) struct ExecRemSigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecRemSigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecRemSigned<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if unlikely(b == T::from(0u8)) {
             return Ok(a);
         }
-        Ok((a.cast_signed().wrapping_rem(b.cast_signed())) as WordType)
+
+        Ok(from_signed_i128(
+            as_signed_i128(a).wrapping_rem(as_signed_i128(b)),
+        ))
     }
 }
 
-pub(super) struct ExecRemUnsigned {}
-impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        if unlikely(b == 0) {
+pub(in super::super) struct ExecRemUnsigned<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecRemUnsigned<T>
+where
+    T: UnsignedInteger + std::ops::Rem<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if unlikely(b == T::from(0u8)) {
             return Ok(a);
         }
         Ok(a % b)
@@ -391,31 +417,59 @@ impl ExecTrait<Result<WordType, Exception>> for ExecRemUnsigned {
 }
 
 // Arith word
-pub(super) struct ExecAddw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecAddw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend(a.wrapping_add(b).truncate_to_bits(32), 32))
+pub(in super::super) struct ExecAddw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecAddw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [a, b]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
+        Ok(sign_extend_u32(a.wrapping_add(b)))
     }
 }
 
-pub(super) struct ExecSubw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSubw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend(a.wrapping_sub(b).truncate_to_bits(32), 32))
+pub(in super::super) struct ExecSubw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecSubw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [a, b]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
+        Ok(sign_extend_u32(a.wrapping_sub(b)))
     }
 }
 
-pub(super) struct ExecMulw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecMulw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend((a.wrapping_mul(b)).truncate_to_bits(32), 32))
+pub(in super::super) struct ExecMulw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecMulw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [a, b]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
+        Ok(sign_extend_u32(a.wrapping_mul(b)))
     }
 }
 
-pub(super) struct ExecDivw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x).cast_signed());
+pub(in super::super) struct ExecDivw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecDivw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [sa, sb]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
+        let [sa, sb] = [sa as i32, sb as i32];
         if unlikely(sb == 0) {
             return Ok(WordType::MAX);
         }
@@ -424,155 +478,275 @@ impl ExecTrait<Result<WordType, Exception>> for ExecDivw {
     }
 }
 
-pub(super) struct ExecRemw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecRemw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x).cast_signed());
+pub(in super::super) struct ExecRemw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecRemw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [sa, sb]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
+        let [sa, sb] = [sa as i32, sb as i32];
         if unlikely(sb == 0) {
-            return Ok(sign_extend_u32(sa.cast_unsigned()));
+            return Ok(sign_extend_u32(sa as u32));
         }
 
-        Ok(sign_extend_u32((sa.wrapping_rem(sb)).cast_unsigned()))
+        Ok(sign_extend_u32(sa.wrapping_rem(sb) as u32))
     }
 }
 
-pub(super) struct ExecDivuw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecDivuw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| x.truncate_to_bits(32));
+pub(in super::super) struct ExecDivuw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecDivuw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [sa, sb]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
         if unlikely(sb == 0) {
             return Ok(WordType::MAX);
         }
-        Ok(sign_extend((sa / sb) as WordType, 32))
+        Ok(sign_extend_u32(sa / sb))
     }
 }
 
-pub(super) struct ExecRemuw {}
-impl ExecTrait<Result<WordType, Exception>> for ExecRemuw {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        let [sa, sb] = [a, b].map(|x| u32::truncate_from(x));
+pub(in super::super) struct ExecRemuw<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecRemuw<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let [sa, sb]: [u32; 2] = [a.truncate_to(), b.truncate_to()];
         if unlikely(sb == 0) {
             return Ok(sign_extend_u32(sa));
         }
-        Ok(sign_extend((sa % sb) as WordType, 32))
+        Ok(sign_extend_u32(sa % sb))
     }
 }
 
 // Bit
-pub(super) struct ExecSLL {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSLL {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_shl(b as u32))
+pub(in super::super) struct ExecSLL<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecSLL<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a << shift_amount(b))
     }
 }
 
-pub(super) struct ExecSRL {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSRL {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(a.wrapping_shr(b as u32))
+pub(in super::super) struct ExecSRL<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecSRL<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a >> shift_amount(b))
     }
 }
 
-pub(super) struct ExecSRA {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSRA {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a.cast_signed().wrapping_shr(b.cast_signed() as u32)).cast_unsigned())
+pub(in super::super) struct ExecSRA<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecSRA<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(from_signed_i128(as_signed_i128(a) >> shift_amount(b)))
     }
 }
 
-pub(super) struct ExecSLLW {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSLLW {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend_u32((a as u32).wrapping_shl((b & 0x1F) as u32)))
+pub(in super::super) struct ExecSLLW<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecSLLW<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let a: u32 = a.truncate_to();
+        Ok(sign_extend_u32(a.wrapping_shl((b.into() as u32) & 0x1F)))
     }
 }
 
-pub(super) struct ExecSRLW {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSRLW {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend_u32((a as u32).wrapping_shr(b as u32)))
+pub(in super::super) struct ExecSRLW<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecSRLW<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let a: u32 = a.truncate_to();
+        Ok(sign_extend_u32(a.wrapping_shr((b.into() as u32) & 0x1F)))
     }
 }
 
-pub(super) struct ExecSRAW {}
-impl ExecTrait<Result<WordType, Exception>> for ExecSRAW {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok(sign_extend_u32(
-            (a.cast_signed() as i32).wrapping_shr(b as u32) as u32,
-        ))
+pub(in super::super) struct ExecSRAW<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<WordType, Exception>, T> for ExecSRAW<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<WordType, Exception> {
+        let a: u32 = a.truncate_to();
+        let a = as_signed_i128(a);
+        let shamt = (Into::<u64>::into(b) as u32) & 0x1F;
+        Ok(sign_extend_u32((a >> shamt) as u32))
     }
 }
 
-pub(super) struct ExecAnd {}
-impl ExecTrait<Result<WordType, Exception>> for ExecAnd {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+pub(in super::super) struct ExecAnd<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecAnd<T>
+where
+    T: std::ops::BitAnd<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
         Ok(a & b)
     }
 }
 
-pub(super) struct ExecOr {}
-impl ExecTrait<Result<WordType, Exception>> for ExecOr {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+pub(in super::super) struct ExecOr<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecOr<T>
+where
+    T: std::ops::BitOr<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
         Ok(a | b)
     }
 }
 
-pub(super) struct ExecXor {}
-impl ExecTrait<Result<WordType, Exception>> for ExecXor {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
+pub(in super::super) struct ExecXor<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecXor<T>
+where
+    T: std::ops::BitXor<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
         Ok(a ^ b)
     }
 }
 
 // Compare
-pub(super) struct ExecSignedLess {}
-impl ExecTrait<bool> for ExecSignedLess {
-    fn exec(a: WordType, b: WordType) -> bool {
-        a.cast_signed() < b.cast_signed()
-    }
+pub(in super::super) struct ExecSignedLess<T = WordType> {
+    phantom: PhantomData<T>,
 }
-impl ExecTrait<Result<WordType, Exception>> for ExecSignedLess {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a.cast_signed() < b.cast_signed()) as WordType)
+
+impl<T> ExecTrait<bool, T> for ExecSignedLess<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(a) < as_signed_i128(b)
     }
 }
 
-pub(super) struct ExecUnsignedLess {}
-impl ExecTrait<bool> for ExecUnsignedLess {
-    fn exec(a: WordType, b: WordType) -> bool {
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecSignedLess<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(T::from((as_signed_i128(a) < as_signed_i128(b)) as u8))
+    }
+}
+
+pub(in super::super) struct ExecUnsignedLess<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<bool, T> for ExecUnsignedLess<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> bool {
         a < b
     }
 }
-impl ExecTrait<Result<WordType, Exception>> for ExecUnsignedLess {
-    fn exec(a: WordType, b: WordType) -> Result<WordType, Exception> {
-        Ok((a < b) as WordType)
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecUnsignedLess<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(T::from((a < b) as u8))
     }
 }
 
-pub(super) struct ExecEqual {}
-impl ExecTrait<bool> for ExecEqual {
-    fn exec(a: WordType, b: WordType) -> bool {
+pub(in super::super) struct ExecEqual<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<bool, T> for ExecEqual<T>
+where
+    T: PartialEq,
+{
+    fn exec(a: T, b: T) -> bool {
         a == b
     }
 }
 
-pub(super) struct ExecNotEqual {}
-impl ExecTrait<bool> for ExecNotEqual {
-    fn exec(a: WordType, b: WordType) -> bool {
+pub(in super::super) struct ExecNotEqual<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<bool, T> for ExecNotEqual<T>
+where
+    T: PartialEq,
+{
+    fn exec(a: T, b: T) -> bool {
         a != b
     }
 }
 
-pub(super) struct ExecSignedGreatEqual {}
-impl ExecTrait<bool> for ExecSignedGreatEqual {
-    fn exec(a: WordType, b: WordType) -> bool {
-        a.cast_signed() >= b.cast_signed()
+pub(in super::super) struct ExecSignedGreatEqual<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<bool, T> for ExecSignedGreatEqual<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(a) >= as_signed_i128(b)
     }
 }
 
-pub(super) struct ExecUnsignedGreatEqual {}
-impl ExecTrait<bool> for ExecUnsignedGreatEqual {
-    fn exec(a: WordType, b: WordType) -> bool {
+pub(in super::super) struct ExecUnsignedGreatEqual<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<bool, T> for ExecUnsignedGreatEqual<T>
+where
+    T: PartialOrd,
+{
+    fn exec(a: T, b: T) -> bool {
         a >= b
     }
 }

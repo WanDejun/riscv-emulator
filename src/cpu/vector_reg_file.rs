@@ -1,4 +1,7 @@
-use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::{
+    hint::unlikely,
+    slice::{from_raw_parts, from_raw_parts_mut},
+};
 
 use crate::isa::riscv::{trap::Exception, vector::VLEN_BYTE};
 
@@ -20,12 +23,14 @@ impl VectorRegFile {
     #[inline]
     pub fn read_as_type<T>(&self, group_multiplier: u8, idx: u8) -> Result<&[T], Exception> {
         debug_assert!(idx < 32);
-        debug_assert!(
-            group_multiplier == 1
+        if unlikely(
+            !(group_multiplier == 1
                 || group_multiplier == 2
                 || group_multiplier == 4
-                || group_multiplier == 8
-        );
+                || group_multiplier == 8),
+        ) {
+            return Err(Exception::IllegalInstruction);
+        }
 
         if idx % group_multiplier != 0 {
             Err(Exception::IllegalInstruction)

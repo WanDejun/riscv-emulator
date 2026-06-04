@@ -98,23 +98,34 @@ impl NFIELDS {
     }
 }
 
-pub(crate) struct RVVElemTy(*const u8);
+pub(crate) struct RVVElemTy {
+    ptr: *const u8,
+    size: u8,
+}
+
 impl RVVElemTy {
     pub(crate) fn get<T>(&self) -> T {
-        unsafe { (self.0 as *const T).read() }
+        debug_assert!(self.size as usize == size_of::<T>());
+        unsafe { (self.ptr as *const T).read() }
     }
 }
 
-pub(crate) struct RVVElemMutTy(*mut u8);
+pub(crate) struct RVVElemMutTy {
+    ptr: *mut u8,
+    size: u8,
+}
+
 impl RVVElemMutTy {
     pub(crate) fn set<T>(&self, val: T) {
+        debug_assert!(self.size as usize == size_of::<T>());
         unsafe {
-            (self.0 as *mut T).write(val);
+            (self.ptr as *mut T).write(val);
         }
     }
 
     pub(crate) fn get<T>(&self) -> T {
-        unsafe { (self.0 as *const T).read() }
+        debug_assert!(self.size as usize == size_of::<T>());
+        unsafe { (self.ptr as *const T).read() }
     }
 }
 
@@ -144,7 +155,7 @@ impl VectorConfig {
 
 pub(crate) struct VGFRef<'a> {
     value: &'a [u8],
-    sew: u8,
+    pub(super) sew: u8,
     lmul: u8,
     seg: u8,
 }
@@ -214,7 +225,10 @@ impl<'a> Iterator for VGFRefIterator<'a> {
             } else {
                 self.current_seg_index += 1;
             }
-            Some(RVVElemTy(current_ptr))
+            Some(RVVElemTy {
+                ptr: current_ptr,
+                size: self.sew,
+            })
         } else {
             None
         }
@@ -223,7 +237,7 @@ impl<'a> Iterator for VGFRefIterator<'a> {
 
 pub(crate) struct VGFRefMut<'a> {
     value: &'a mut [u8],
-    sew: u8,
+    pub(super) sew: u8,
     lmul: u8,
     seg: u8,
 }
@@ -313,7 +327,10 @@ impl<'a> Iterator for VGFRefIteratorMut<'a> {
             } else {
                 self.current_seg_index += 1;
             }
-            Some(RVVElemMutTy(current_ptr))
+            Some(RVVElemMutTy {
+                ptr: current_ptr,
+                size: self.sew,
+            })
         } else {
             None
         }
@@ -345,7 +362,9 @@ mod test {
         v.set::<u16>(3, 3);
         assert_eq!(v.get::<u16>(3), 3);
 
-        v.iter_mut().enumerate().for_each(|(i, val)| val.set(i * 4));
+        v.iter_mut()
+            .enumerate()
+            .for_each(|(i, val)| val.set::<u16>(i as u16 * 4));
         v.iter_mut()
             .enumerate()
             .for_each(|(i, val)| assert_eq!(val.get::<u16>(), i as u16 * 4));

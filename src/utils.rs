@@ -61,6 +61,39 @@ where
 }
 
 #[inline(always)]
+pub(crate) fn shift_amount<T>(value: T) -> u32
+where
+    T: UnsignedInteger,
+{
+    let value: u64 = value.into();
+    (value as u32) & ((T::BITS as u32) - 1)
+}
+
+#[inline(always)]
+pub(crate) fn as_signed_i128<T>(value: T) -> i128
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    let value: u128 = value.into();
+    let bits = T::BITS as u32;
+    let sign_mask = 1u128 << (bits - 1);
+
+    if value & sign_mask == 0 {
+        value as i128
+    } else {
+        (value as i128) - ((1u128 << bits) as i128)
+    }
+}
+
+#[inline(always)]
+pub(crate) fn from_signed_i128<T>(value: i128) -> T
+where
+    T: UnsignedInteger,
+{
+    T::truncate_from(value as u128)
+}
+
+#[inline(always)]
 pub fn sign_extend(value: WordType, from_bits: u32) -> WordType {
     let sign_bit = XLEN as u32 - from_bits;
     ((value << sign_bit) as SignedWordType >> sign_bit) as WordType
