@@ -16,8 +16,8 @@ use crate::{
         trap::Exception,
     },
     utils::{
-        TruncateToBits, UnsignedInteger, as_signed_i128, from_signed_i128, shift_amount,
-        sign_extend, sign_extend_u32, wrapping_add_as_signed,
+        TruncateFrom, TruncateToBits, UnsignedInteger, as_signed_i128, from_signed_i128,
+        shift_amount, sign_extend, sign_extend_u32, wrapping_add_as_signed,
     },
 };
 
@@ -26,6 +26,10 @@ use crate::{
 /// `exec_xxx` function interact with other mod in CPU.
 pub(in super::super) trait ExecTrait<OUT, IN = WordType> {
     fn exec(a: IN, b: IN) -> OUT;
+}
+
+pub(in super::super) trait ExecUnaryTrait<OUT, IN = WordType> {
+    fn exec(a: IN) -> OUT;
 }
 
 // XXX: Remeber that `imm` has been sign_extended in decoder.
@@ -248,6 +252,8 @@ where
     }
 }
 
+pub(in super::super) type ExecAddu<T = WordType> = ExecAdd<T>;
+
 pub(in super::super) struct ExecSub<T = WordType> {
     phantom: PhantomData<T>,
 }
@@ -260,6 +266,8 @@ where
         Ok(a.wrapping_sub(&b))
     }
 }
+
+pub(in super::super) type ExecSubu<T = WordType> = ExecSub<T>;
 
 pub(in super::super) struct ExecMulLow<T = WordType> {
     phantom: PhantomData<T>,
@@ -612,6 +620,62 @@ where
         let a = as_signed_i128(a);
         let shamt = (Into::<u64>::into(b) as u32) & 0x1F;
         Ok(sign_extend_u32((a >> shamt) as u32))
+    }
+}
+
+pub(in super::super) struct ExecZext<TOut = WordType, TIn = WordType> {
+    phantom: PhantomData<(TOut, TIn)>,
+}
+
+impl<TOut, TIn> ExecUnaryTrait<Result<TOut, Exception>, TIn> for ExecZext<TOut, TIn>
+where
+    TOut: UnsignedInteger + TruncateFrom<TIn>,
+    TIn: UnsignedInteger,
+{
+    fn exec(a: TIn) -> Result<TOut, Exception> {
+        Ok(TOut::truncate_from(a))
+    }
+}
+
+pub(in super::super) struct ExecSext<TOut = WordType, TIn = WordType> {
+    phantom: PhantomData<(TOut, TIn)>,
+}
+
+impl<TOut, TIn> ExecUnaryTrait<Result<TOut, Exception>, TIn> for ExecSext<TOut, TIn>
+where
+    TOut: UnsignedInteger,
+    TIn: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: TIn) -> Result<TOut, Exception> {
+        Ok(from_signed_i128(as_signed_i128(a)))
+    }
+}
+
+pub(in super::super) struct ExecNsrl<TOut = WordType, TIn = WordType> {
+    phantom: PhantomData<(TOut, TIn)>,
+}
+
+impl<TOut, TIn> ExecTrait<Result<TOut, Exception>, TIn> for ExecNsrl<TOut, TIn>
+where
+    TOut: UnsignedInteger + TruncateFrom<TIn>,
+    TIn: UnsignedInteger,
+{
+    fn exec(a: TIn, b: TIn) -> Result<TOut, Exception> {
+        Ok(TOut::truncate_from(a >> shift_amount(b)))
+    }
+}
+
+pub(in super::super) struct ExecNsra<TOut = WordType, TIn = WordType> {
+    phantom: PhantomData<(TOut, TIn)>,
+}
+
+impl<TOut, TIn> ExecTrait<Result<TOut, Exception>, TIn> for ExecNsra<TOut, TIn>
+where
+    TOut: UnsignedInteger,
+    TIn: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: TIn, b: TIn) -> Result<TOut, Exception> {
+        Ok(from_signed_i128(as_signed_i128(a) >> shift_amount(b)))
     }
 }
 
