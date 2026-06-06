@@ -310,14 +310,13 @@ impl CsrRegFile {
     ///
     /// [`RVCPU::write_csr`]: crate::isa::riscv::executor::RVCPU::write_csr
     ///
-    /// TODO: Why use `Option<()>` instead of a simple `bool`? Fix `write_directly` below as well.
     #[must_use]
-    pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> Option<()> {
+    pub(crate) fn write(&mut self, addr: WordType, data: WordType) -> bool {
         if !self.is_write_priv_legal(addr) {
-            return None;
+            return false;
         }
         self.write_uncheck_privilege(addr, data);
-        Some(())
+        true
     }
 
     /// ONLY used in debugger. Read & write without side-effect.
@@ -333,17 +332,16 @@ impl CsrRegFile {
     }
 
     /// Write directly without any check or validation and have no other side effects.
-    /// TODO: Some old code uses `write_uncheck_privilege` may need to be changed to use this function.
     #[must_use]
-    pub fn write_directly(&mut self, addr: WordType, data: WordType) -> Option<()> {
+    pub fn write_directly(&mut self, addr: WordType, data: WordType) -> bool {
         if addr >= CSR_SIZE as WordType {
-            return None;
+            return false;
         }
         if let Some(reg) = self.table[addr as usize].as_mut() {
             reg.write_directly(data);
-            Some(())
+            true
         } else {
-            None
+            false
         }
     }
 
@@ -459,8 +457,8 @@ mod test {
     #[test]
     fn test_rw_by_addr() {
         let mut reg = CsrRegFile::new();
-        reg.write(csr_index::mcause, 3).unwrap();
-        reg.write(csr_index::mepc, 0x1234_5678).unwrap();
+        assert!(reg.write(csr_index::mcause, 3));
+        assert!(reg.write(csr_index::mepc, 0x1234_5678));
 
         let mcause = reg.read(csr_index::mcause).unwrap();
         let mepc = reg.read(csr_index::mepc).unwrap();
@@ -486,7 +484,7 @@ mod test {
         assert_eq!(mstatus.get_mpp(), 0b10);
 
         let mtvec = reg.get_by_type::<Mtvec>().unwrap();
-        reg.write(csr_index::mtvec, 0x114514).unwrap();
+        assert!(reg.write(csr_index::mtvec, 0x114514));
         assert_eq!(mtvec.get_base(), 0x114514 >> 2);
     }
 
@@ -494,14 +492,14 @@ mod test {
     fn test_read_privilege() {
         let mut reg = CsrRegFile::new();
         reg.set_current_privileged(PrivilegeLevel::M);
-        assert!(reg.write(csr_index::mcause, 0xFEFE).is_some());
+        assert!(reg.write(csr_index::mcause, 0xFEFE));
         assert_eq!(
             reg.read_uncheck_privilege(csr_index::mcause).unwrap(),
             0xFEFE
         );
 
         reg.set_current_privileged(PrivilegeLevel::S);
-        assert!(reg.write(csr_index::mcause, 0xFEFE).is_none());
+        assert!(!reg.write(csr_index::mcause, 0xFEFE));
         assert_eq!(
             reg.read_uncheck_privilege(csr_index::mcause).unwrap(),
             0xFEFE

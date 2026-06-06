@@ -127,7 +127,7 @@ impl VirtQueueDescHandle<'_> {
 //           VirtQueueAvail
 // =====================================
 #[repr(u16)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VirtQueueAvailFlag {
     Default = 0,     // Interrupt the device when a `UsedRing` is consumed.
     NoInterrupt = 1, // Driver will polling the `UsedRing`. Do not need to interrupt the device.

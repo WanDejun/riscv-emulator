@@ -189,7 +189,7 @@ impl RVCPU {
     ///
     /// You may need [`CsrRegFile::write_directly`] in some cases.
     pub fn write_csr(&mut self, addr: WordType, data: WordType) -> Result<(), Exception> {
-        if let None = self.csr.write(addr, data) {
+        if !self.csr.write(addr, data) {
             log::warn!("Failed to write CSR {:#x} with data {:#x}", addr, data);
             return Err(Exception::IllegalInstruction);
         }
@@ -443,11 +443,16 @@ mod tests {
 
     #[test]
     fn test_u_types_decode() {
-        // TODO: Test signed extend of `auipc`
         run_test_exec_decode(
             0x12233097, // auipc x1, 0x112233
             |builder| builder.reg(1, 3).pc(0x1000),
             |checker| checker.reg(1, 0x12234000).pc(0x1004),
+        );
+
+        run_test_exec_decode(
+            0x80000097, // auipc x1, 0x80000
+            |builder| builder.pc(0x1000),
+            |checker| checker.reg(1, 0xffffffff80001000).pc(0x1004),
         );
 
         run_test_exec_decode(

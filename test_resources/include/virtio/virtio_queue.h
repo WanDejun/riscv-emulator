@@ -38,9 +38,7 @@ enum VirtQueueAvailFlag: uint16_t {
 
 typedef struct  {
     enum VirtQueueAvailFlag flags;  // Written by Driver. (u16)
-    // TODO!
-    // atomic_char16_t idx;            // Written by Driver.
-    uint16_t idx;
+    _Atomic uint16_t idx;            // Written by Driver.
     uint16_t ring[];
     /* ring1 ... */
     /* Only if VIRTIO_F_EVENT_IDX: used_event: u16; */

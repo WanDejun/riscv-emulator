@@ -159,7 +159,6 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::DeviceId => vdev.get_device_id() as u32,
                     VirtIO_MMIO_Offset::VendorId => VIRT_VENDOR,
                     VirtIO_MMIO_Offset::DeviceFeatures => {
-                        // TODO!
                         (vdev.get_host_feature() >> (self.host_features_sel * 32)) as u32
                     }
                     VirtIO_MMIO_Offset::QueueNumMax => VIRTQUEUE_MAX_SIZE,
@@ -255,7 +254,7 @@ impl VirtIOMMIO {
                 }
                 VirtIO_MMIO_Offset::InterruptAck => {
                     vdev.isr()
-                        .fetch_and(value as u8, std::sync::atomic::Ordering::AcqRel);
+                        .fetch_and(!(value as u8), std::sync::atomic::Ordering::AcqRel);
                     vdev.update_irq();
                 }
                 VirtIO_MMIO_Offset::Status => {
@@ -582,6 +581,14 @@ mod test {
 
         // manage request.
         virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::QueueNotify as u64, 0x00);
+
+        let interrupt_status =
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::InterruptStatus as u64);
+        assert_eq!(interrupt_status, 1);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::InterruptAck as u64, 1);
+        let interrupt_status =
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::InterruptStatus as u64);
+        assert_eq!(interrupt_status, 0);
 
         assert_eq!(desc_status.status, VirtIOBlkReqStatus::Ok as u8);
         assert_eq!(desc_buf[0], 0);

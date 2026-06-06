@@ -290,10 +290,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     fn isr(&mut self) -> &mut AtomicU8 {
         &mut self.isr
     }
-    fn update_irq(&mut self) {
-        // TODO!
-        todo!()
-    }
+    fn update_irq(&mut self) {}
 
     fn get_host_feature(&self) -> u64 {
         self.host_feature
@@ -390,10 +387,20 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 
     fn notify(&mut self, _idx: u32) {
+        let mut used = false;
         loop {
             if !self.manage_one_request() {
                 break;
             }
+            used = true;
+        }
+
+        if used
+            && self.queue.get_avail_flag()
+                == crate::device::virtio::virtio_queue::VirtQueueAvailFlag::Default
+        {
+            self.isr.fetch_or(1, std::sync::atomic::Ordering::Release);
+            self.update_irq();
         }
     }
 

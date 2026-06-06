@@ -104,7 +104,8 @@ int main() {
     virtio_blk1->queue_ready = 1;
 
     avail->flags = 0;
-    avail->idx = 0;
+    uint16_t avail_idx = 0;
+    avail->idx = avail_idx;
     used->flags = 0;
     used->idx = 0;
 
@@ -139,7 +140,7 @@ int main() {
     desc2->next = 0;
 
     avail->ring[0] = 0; // desc index
-    avail->idx += 1;
+    avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
     // TODO!
@@ -179,7 +180,7 @@ int main() {
     desc2->next = 0;
 
     avail->ring[0] = 0; // desc index
-    avail->idx += 1;
+    avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
 

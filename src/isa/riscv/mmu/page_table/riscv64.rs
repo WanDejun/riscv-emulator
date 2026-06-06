@@ -292,23 +292,6 @@ impl PageTableWalker {
         }
     }
 
-    /// Walk page tables and return the matched leaf PTE.
-    /// Return `(leaf_pte, leaf_level)` where level counts down from top to bottom.
-    /// For example, in Sv39, the root level is 2, and the leaf level is 0.
-    ///
-    /// TODO: This function can be substituted by `walk_pte`, only tests are using it now.
-    fn find_pte<'a>(
-        &self,
-        mem: &'a mut Ram,
-        vpn: VirtualPageNum,
-    ) -> Result<(&'a mut PageTableEntry, usize), PageTableError> {
-        let walk_info = self.walk_pte(mem, vpn)?;
-        Ok((
-            Self::pte_at(mem, walk_info.leaf_pte_addr),
-            walk_info.leaf_level,
-        ))
-    }
-
     fn walk_pte(&self, mem: &mut Ram, vpn: VirtualPageNum) -> Result<WalkInfo, PageTableError> {
         match self.mode {
             VirtualMemoryMode::Page39bit => self.walk_pte_with_mode::<Sv39>(mem, vpn),
@@ -422,10 +405,11 @@ mod test_sv39 {
             .unwrap();
         assert_eq!(paddr.0, DATA_PAGE | 0x123);
 
-        let (leaf_pte, level) = page_table
-            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
+        let walk_info = page_table
+            .walk_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
             .unwrap();
-        assert_eq!(level, 0);
+        let leaf_pte = PageTableWalker::pte_at(&mut ram, walk_info.leaf_pte_addr);
+        assert_eq!(walk_info.leaf_level, 0);
         assert_eq!(leaf_pte.flags(), leaf_flags | PTEFlags::A);
     }
 
@@ -442,10 +426,11 @@ mod test_sv39 {
         setup_pte(&mut ram, pt1, data_page, leaf_flags);
 
         let mut page_table = PageTableWalker::new(pt0.into(), VirtualMemoryMode::Page39bit);
-        let (leaf_pte, level) = page_table
-            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_8000))
+        let walk_info = page_table
+            .walk_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_8000))
             .unwrap();
-        assert_eq!(level, 1);
+        let leaf_pte = PageTableWalker::pte_at(&mut ram, walk_info.leaf_pte_addr);
+        assert_eq!(walk_info.leaf_level, 1);
         assert_eq!(leaf_pte.flags(), leaf_flags);
 
         let paddr = page_table
@@ -536,9 +521,10 @@ mod test_sv39 {
             .unwrap();
         assert_eq!(paddr.0, DATA_PAGE | 0x123);
 
-        let (leaf_pte, _) = page_table
-            .find_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
+        let walk_info = page_table
+            .walk_pte(&mut ram, VirtualPageNum::from_vaddr(0x0000_0010))
             .unwrap();
+        let leaf_pte = PageTableWalker::pte_at(&mut ram, walk_info.leaf_pte_addr);
         assert_eq!(leaf_pte.flags(), leaf_flags);
     }
 
