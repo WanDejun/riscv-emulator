@@ -110,21 +110,26 @@ impl VecOpMask {
     }
 
     #[inline(always)]
-    fn mask<T>(&self, value: T, index: usize) -> Option<T>
+    fn is_active_body(&self, index: usize) -> bool {
+        self.bit(index) && index < self.length as usize
+    }
+
+    #[inline(always)]
+    fn load_value<T>(&self, value: T, index: usize) -> Option<T>
     where
         T: Default,
     {
         let (mask, tail) = (self.bit(index), index >= self.length as usize);
-        if mask && !tail {
-            Some(value)
-        } else if mask {
-            if self.mask_agnostic {
+        if tail {
+            if self.tail_agnostic {
                 Some(T::default())
             } else {
                 None
             }
+        } else if mask {
+            Some(value)
         } else {
-            if self.tail_agnostic {
+            if self.mask_agnostic {
                 Some(T::default())
             } else {
                 None
@@ -137,7 +142,7 @@ impl VecOpMask {
     where
         T: Default,
     {
-        match self.mask(value, index) {
+        match self.load_value(value, index) {
             Some(v) => element.set(v),
             None => (),
         }
@@ -151,13 +156,12 @@ impl VecOpMask {
         index: usize,
     ) -> Result<(), MemError>
     where
-        T: Default,
         F: FnOnce(T) -> Result<(), MemError>,
     {
-        let value = elem_value.get::<T>();
-        match self.mask(value, index) {
-            Some(v) => store_fn(v),
-            None => Ok(()),
+        if self.is_active_body(index) {
+            store_fn(elem_value.get::<T>())
+        } else {
+            Ok(())
         }
     }
 }
@@ -217,7 +221,7 @@ impl Vector {
     ) -> Result<VGFRef<'_>, Exception> {
         let lmul = self.config.vlmul.get_lmul();
         let raw = self.vector_regfile.get_ref(lmul, seg, idx)?;
-        Ok(VGFRef::new(raw, eew.get_sew(), lmul, seg))
+        Ok(VGFRef::new(raw, eew.byte_width(), lmul, seg))
     }
 
     // ================= LOAD =================
@@ -233,21 +237,21 @@ impl Vector {
     ) -> Result<(), Exception> {
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: stride.unwrap_or(eew.get_sew() as WordType),
+            stride: stride.unwrap_or(eew.byte_width() as WordType),
         };
         let lmul = self.config.vlmul.get_lmul();
-        let mut vd_ref = VGFRefMut::new(
-            self.vector_regfile.get_mut(lmul, vd, seg)?,
-            eew.get_sew(),
-            lmul,
-            seg,
-        );
         let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+        );
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, seg)?,
+            eew.byte_width(),
+            lmul,
+            seg,
         );
 
         let mut err = Ok(());
@@ -307,13 +311,13 @@ impl Vector {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: eew.get_sew() as WordType,
+            stride: eew.byte_width() as WordType,
         };
         let lmul = decode_whole_register_count(nf)?;
 
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, 1)?,
-            eew.get_sew(),
+            eew.byte_width(),
             lmul,
             1,
         );
@@ -349,21 +353,21 @@ impl Vector {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
-            index_width: eew.get_sew(),
+            index_width: eew.byte_width(),
         };
         let lmul = self.config.vlmul.get_lmul();
-        let mut vd_ref = VGFRefMut::new(
-            self.vector_regfile.get_mut(lmul, vd, seg)?,
-            self.config.vsew.get_sew(),
-            lmul,
-            seg,
-        );
         let mask = VecOpMask::new(
             &self.vector_regfile,
             self.config.vl as u16 * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+        );
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, seg)?,
+            self.config.vsew.byte_width(),
+            lmul,
+            seg,
         );
 
         let mut err = Ok(());
@@ -419,12 +423,12 @@ impl Vector {
     ) -> Result<(), Exception> {
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: stride.unwrap_or(eew.get_sew() as WordType),
+            stride: stride.unwrap_or(eew.byte_width() as WordType),
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, seg, vs)?,
-            eew.get_sew(),
+            eew.byte_width(),
             lmul,
             seg,
         );
@@ -484,12 +488,12 @@ impl Vector {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
-            index_width: eew.get_sew(),
+            index_width: eew.byte_width(),
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, seg, vs)?,
-            self.config.vsew.get_sew(),
+            self.config.vsew.byte_width(),
             lmul,
             seg,
         );
@@ -556,12 +560,12 @@ impl Vector {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: eew.get_sew() as WordType,
+            stride: eew.byte_width() as WordType,
         };
         let lmul = decode_whole_register_count(nf)?;
         let vs_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, 1, vs)?,
-            eew.get_sew(),
+            eew.byte_width(),
             lmul,
             1,
         );
@@ -825,6 +829,43 @@ mod test {
     }
 
     #[test]
+    fn test_tail_agnostic_unit_stride_load() {
+        let base_addr = BASE_ADDR + 0x2400;
+
+        type ElemType = u32;
+        const LMUL: Vlmul = Vlmul::M1;
+        const SEW: Vsew = Vsew::E32;
+        let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
+        let active_elem_cnt = elem_cnt / 2;
+        let init = vec![0xDEAD_BEEF_u32; elem_cnt];
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(LMUL, SEW, false, true, active_elem_cnt as u16)
+            .mem_range(0..elem_cnt, |i| {
+                (
+                    base_addr + (i * size_of::<ElemType>()) as WordType,
+                    (i as u32) + 100,
+                )
+            })
+            .reg(LMUL.get_lmul(), 8, &init)
+            .build();
+
+        vector
+            .stride_load(8, SEW, 1, None, false, base_addr, &mut mmio)
+            .unwrap();
+
+        let expected: Vec<ElemType> = (0..elem_cnt)
+            .map(|i| {
+                if i < active_elem_cnt {
+                    (i as u32) + 100
+                } else {
+                    0u32
+                }
+            })
+            .collect();
+        VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 8, &expected);
+    }
+
+    #[test]
     fn test_mask_unit_stride_store() {
         let addr_offset = 0x2000;
         let base_addr = BASE_ADDR + 0x2000;
@@ -863,6 +904,49 @@ mod test {
                 let got = checker.mmio.read_u32(addr).unwrap();
                 let expected = if i % 2 == 0 { src[i] } else { 0u32 };
                 assert_eq!(got, expected, "mask store mismatch at index {}", i);
+            }
+            checker
+        });
+    }
+
+    #[test]
+    fn test_mask_agnostic_unit_stride_store_does_not_touch_masked_elements() {
+        let base_addr = BASE_ADDR + 0x2800;
+
+        type ElemType = u32;
+        const LMUL: Vlmul = Vlmul::M1;
+        const SEW: Vsew = Vsew::E32;
+        let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
+
+        let mut mask_bytes = [0u8; VLEN_BYTE];
+        for i in 0..elem_cnt {
+            if i % 2 == 0 {
+                mask_bytes[i / 8] |= 1 << (i % 8);
+            }
+        }
+        let src: Vec<ElemType> = (0..elem_cnt).map(|i| (i as u32) * 11 + 7).collect();
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(LMUL, SEW, true, false, elem_cnt as u16)
+            .mem_range(0..elem_cnt, |i| {
+                (
+                    base_addr + (i * size_of::<ElemType>()) as WordType,
+                    0xCAFE_BABEu32,
+                )
+            })
+            .reg(1, 0, &mask_bytes)
+            .reg(LMUL.get_lmul(), 8, &src)
+            .build();
+
+        vector
+            .stride_store(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .unwrap();
+
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            for i in 0..elem_cnt {
+                let addr = base_addr + (i * size_of::<ElemType>()) as WordType;
+                let got = checker.mmio.read_u32(addr).unwrap();
+                let expected = if i % 2 == 0 { src[i] } else { 0xCAFE_BABEu32 };
+                assert_eq!(got, expected, "mask agnostic store mismatch at index {}", i);
             }
             checker
         });

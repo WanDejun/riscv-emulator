@@ -1,10 +1,8 @@
-use std::{
-    hint::unlikely,
-    slice::{from_raw_parts, from_raw_parts_mut},
-};
+use std::{hint::unlikely, mem::align_of, slice::from_raw_parts};
 
 use crate::isa::riscv::{trap::Exception, vector::VLEN_BYTE};
 
+#[repr(align(8))]
 pub struct VectorRegFile {
     reg: [[u8; VLEN_BYTE]; 32],
 }
@@ -23,6 +21,7 @@ impl VectorRegFile {
     #[inline]
     pub fn read_as_type<T>(&self, group_multiplier: u8, idx: u8) -> Result<&[T], Exception> {
         debug_assert!(idx < 32);
+        debug_assert!(align_of::<T>() <= align_of::<VectorRegFile>());
         if unlikely(
             !(group_multiplier == 1
                 || group_multiplier == 2
@@ -47,17 +46,19 @@ impl VectorRegFile {
     }
 
     #[inline]
-    pub fn get_mut<T>(&self, lmul: u8, idx: u8, seg: u8) -> Result<&mut [T], Exception> {
+    pub fn get_mut<T>(&mut self, lmul: u8, idx: u8, seg: u8) -> Result<&mut [T], Exception> {
         let lmul = lmul * seg;
         debug_assert!(idx < 32);
+        debug_assert!(align_of::<T>() <= align_of::<VectorRegFile>());
         assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
 
         if idx % lmul != 0 {
             Err(Exception::IllegalInstruction)
         } else {
-            let base = &self.reg[idx as usize] as *const u8 as *mut T;
-            let slides =
-                unsafe { from_raw_parts_mut(base, VLEN_BYTE * (lmul as usize) / size_of::<T>()) };
+            let base = &mut self.reg[idx as usize] as *mut u8 as *mut T;
+            let slides = unsafe {
+                std::slice::from_raw_parts_mut(base, VLEN_BYTE * (lmul as usize) / size_of::<T>())
+            };
             Ok(slides)
         }
     }

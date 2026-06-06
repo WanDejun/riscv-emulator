@@ -465,7 +465,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let instr_info = RVInstrInfo::V {
@@ -535,7 +535,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let instr_info = RVInstrInfo::V {
@@ -577,7 +577,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let vl = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -643,7 +643,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let vreg_len = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -712,7 +712,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let vreg_len = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -757,7 +757,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.get_sew() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
         ));
 
         let elem_cnt = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();

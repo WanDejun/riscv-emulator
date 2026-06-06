@@ -8,7 +8,7 @@ use crate::{
         trap::Exception,
         vector::{
             VecOpMask, Vector,
-            types::{VGFRef, VGFRefMut},
+            types::{VGFRef, VGFRefMut, Vsew},
         },
     },
 };
@@ -252,8 +252,8 @@ impl_vector_op_integer_v_unary_ext!(
 impl_vector_op_integer_v_unary_ext!(VectorOpSextVf8, ExecSext, 8, [(1, 8, u8, u64)]);
 
 impl Vector {
-    fn exec_integer_vv<'a, OpIVV>(
-        &'a self,
+    fn exec_integer_vv<OpIVV>(
+        &mut self,
         vs1: u8,
         vs2: u8,
         vd: u8,
@@ -263,24 +263,24 @@ impl Vector {
         OpIVV: VectorOpIntegerVV,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let vrf = &self.vector_regfile;
-        let (sew, lmul) = (vsew.get_sew(), self.config.vlmul.get_lmul());
-        let vs1_ref = VGFRef::new(vrf.get_ref(vlmul.get_lmul(), vs1, 1).unwrap(), sew, lmul, 1);
-        let vs2_ref = VGFRef::new(vrf.get_ref(vlmul.get_lmul(), vs2, 1).unwrap(), sew, lmul, 1);
-        let mut vd_ref =
-            VGFRefMut::new(vrf.get_mut(vlmul.get_lmul(), vd, 1).unwrap(), sew, lmul, 1);
+        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new(
-            vrf,
+            &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
         );
+        let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
     }
 
-    fn exec_integer_vx<'a, OpIVX>(
-        &'a self,
+    fn exec_integer_vx<OpIVX>(
+        &mut self,
         x1: WordType,
         vs2: u8,
         vd: u8,
@@ -290,18 +290,190 @@ impl Vector {
         OpIVX: VectorOpIntegerVX,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let vrf = &self.vector_regfile;
-        let (sew, lmul) = (vsew.get_sew(), self.config.vlmul.get_lmul());
-        let vs2_ref = VGFRef::new(vrf.get_ref(vlmul.get_lmul(), vs2, 1).unwrap(), sew, lmul, 1);
-        let mut vd_ref =
-            VGFRefMut::new(vrf.get_mut(vlmul.get_lmul(), vd, 1).unwrap(), sew, lmul, 1);
+        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new(
-            vrf,
+            &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
         );
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVX::exec(x1, &vs2_ref, &mut vd_ref, &mask)
+    }
+
+    fn exec_integer_v<OpIV>(
+        &mut self,
+        vs2: u8,
+        vd: u8,
+        src_eew: Vsew,
+        dst_eew: Vsew,
+        enable_mask: bool,
+    ) -> Result<(), Exception>
+    where
+        OpIV: VectorOpIntegerV,
+    {
+        let lmul = self.config.vlmul.get_lmul();
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, src_eew.byte_width(), lmul, 1);
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, 1)?,
+            dst_eew.byte_width(),
+            lmul,
+            1,
+        );
+        OpIV::exec(&vs2_ref, &mut vd_ref, &mask)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::isa::riscv::vector::{
+        VLEN_BYTE,
+        tester::{VectorBuilder, VectorChecker},
+        types::Vlmul,
+    };
+
+    fn run_test_integer_vv<OpIVV, F, G>(build: F, check: G)
+    where
+        OpIVV: VectorOpIntegerVV,
+        F: FnOnce(VectorBuilder) -> VectorBuilder,
+        G: FnOnce(VectorChecker) -> VectorChecker,
+    {
+        const VS1: u8 = 8;
+        const VS2: u8 = 10;
+        const VD: u8 = 12;
+
+        let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+        vector
+            .exec_integer_vv::<OpIVV>(VS1, VS2, VD, false)
+            .unwrap();
+        check(VectorChecker::new(&mut vector, &mut mmio));
+    }
+
+    fn run_test_integer_vx<OpIVX, F, G>(x1: WordType, build: F, check: G)
+    where
+        OpIVX: VectorOpIntegerVX,
+        F: FnOnce(VectorBuilder) -> VectorBuilder,
+        G: FnOnce(VectorChecker) -> VectorChecker,
+    {
+        const VS2: u8 = 8;
+        const VD: u8 = 10;
+
+        let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+        vector.exec_integer_vx::<OpIVX>(x1, VS2, VD, false).unwrap();
+        check(VectorChecker::new(&mut vector, &mut mmio));
+    }
+
+    fn run_test_integer_v<OpIV, F, G>(src_eew: Vsew, dst_eew: Vsew, build: F, check: G)
+    where
+        OpIV: VectorOpIntegerV,
+        F: FnOnce(VectorBuilder) -> VectorBuilder,
+        G: FnOnce(VectorChecker) -> VectorChecker,
+    {
+        const VS2: u8 = 8;
+        const VD: u8 = 10;
+
+        let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+        vector
+            .exec_integer_v::<OpIV>(VS2, VD, src_eew, dst_eew, false)
+            .unwrap();
+        check(VectorChecker::new(&mut vector, &mut mmio));
+    }
+
+    #[test]
+    fn test_vector_op_add_vv() {
+        const LMUL: Vlmul = Vlmul::M2;
+        const SEW: Vsew = Vsew::E32;
+        const VS1: u8 = 8;
+        const VS2: u8 = 10;
+        const VD: u8 = 12;
+
+        let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+        let vs1: Vec<u32> = (0..elem_count).map(|i| (i as u32) * 7 + 3).collect();
+        let vs2: Vec<u32> = (0..elem_count)
+            .map(|i| u32::MAX.wrapping_sub((i as u32) * 5))
+            .collect();
+        let expected: Vec<u32> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| lhs.wrapping_add(*rhs))
+            .collect();
+
+        run_test_integer_vv::<VectorOpAdd, _, _>(
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, false, elem_count as u16)
+                    .reg(LMUL.get_lmul(), VS1, &vs1)
+                    .reg(LMUL.get_lmul(), VS2, &vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), VD, &expected),
+        );
+    }
+
+    #[test]
+    fn test_vector_op_add_vx() {
+        const LMUL: Vlmul = Vlmul::M2;
+        const SEW: Vsew = Vsew::E16;
+        const VS2: u8 = 8;
+        const VD: u8 = 10;
+        const SCALAR: WordType = 0x12f0;
+
+        let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+        let vs2: Vec<u16> = (0..elem_count)
+            .map(|i| u16::MAX.wrapping_sub((i as u16) * 17))
+            .collect();
+        let scalar = SCALAR as u16;
+        let expected: Vec<u16> = vs2.iter().map(|value| value.wrapping_add(scalar)).collect();
+
+        run_test_integer_vx::<VectorOpAdd, _, _>(
+            SCALAR,
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, false, elem_count as u16)
+                    .reg(LMUL.get_lmul(), VS2, &vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), VD, &expected),
+        );
+    }
+
+    #[test]
+    fn test_vector_op_zext_vf2() {
+        const LMUL: Vlmul = Vlmul::M1;
+        const SRC_SEW: Vsew = Vsew::E8;
+        const DST_SEW: Vsew = Vsew::E16;
+        const VS2: u8 = 8;
+        const VD: u8 = 10;
+
+        let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+        let vs2: Vec<u8> = (0..VLEN_BYTE * LMUL.get_lmul() as usize)
+            .map(|i| 0x80u8.wrapping_add(i as u8))
+            .collect();
+        let expected: Vec<u16> = vs2
+            .iter()
+            .take(elem_count)
+            .map(|value| *value as u16)
+            .collect();
+
+        run_test_integer_v::<VectorOpZextVf2, _, _>(
+            SRC_SEW,
+            DST_SEW,
+            |builder| {
+                builder
+                    .config(LMUL, DST_SEW, false, false, elem_count as u16)
+                    .reg(LMUL.get_lmul(), VS2, &vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), VD, &expected),
+        );
     }
 }
