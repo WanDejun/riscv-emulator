@@ -47,46 +47,52 @@ macro_rules! impl_vector_op_integer_vv_binary {
                 assert!(vs1.sew == vs2.sew && vs1.sew == vd.sew);
                 let sew = vd.sew;
 
-                for (index, element) in vd.iter_mut().enumerate() {
-                    match sew {
-                        1 => {
-                            let v1_value = vs1.get::<u8>(index);
-                            let v2_value = vs2.get::<u8>(index);
+                match sew {
+                    1 => {
+                        let vs1 = vs1.as_slice::<u8>();
+                        let vs2 = vs2.as_slice::<u8>();
+                        for (index, element) in vd.iter_mut().enumerate() {
                             mask.element_load(
                                 element,
-                                $exec_ty::<u8>::exec(v1_value, v2_value)?,
+                                $exec_ty::<u8>::exec(vs1[index], vs2[index])?,
                                 index,
                             );
                         }
-                        2 => {
-                            let v1_value = vs1.get::<u16>(index);
-                            let v2_value = vs2.get::<u16>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u16>::exec(v1_value, v2_value)?,
-                                index,
-                            );
-                        }
-                        4 => {
-                            let v1_value = vs1.get::<u32>(index);
-                            let v2_value = vs2.get::<u32>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u32>::exec(v1_value, v2_value)?,
-                                index,
-                            );
-                        }
-                        8 => {
-                            let v1_value = vs1.get::<u64>(index);
-                            let v2_value = vs2.get::<u64>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u64>::exec(v1_value, v2_value)?,
-                                index,
-                            );
-                        }
-                        _ => unreachable!(),
                     }
+                    2 => {
+                        let vs1 = vs1.as_slice::<u16>();
+                        let vs2 = vs2.as_slice::<u16>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u16>::exec(vs1[index], vs2[index])?,
+                                index,
+                            );
+                        }
+                    }
+                    4 => {
+                        let vs1 = vs1.as_slice::<u32>();
+                        let vs2 = vs2.as_slice::<u32>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u32>::exec(vs1[index], vs2[index])?,
+                                index,
+                            );
+                        }
+                    }
+                    8 => {
+                        let vs1 = vs1.as_slice::<u64>();
+                        let vs2 = vs2.as_slice::<u64>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u64>::exec(vs1[index], vs2[index])?,
+                                index,
+                            );
+                        }
+                    }
+                    _ => unreachable!(),
                 }
 
                 Ok(())
@@ -107,46 +113,52 @@ macro_rules! impl_vector_op_integer_vx_binary {
                 assert!(vs2.sew == vd.sew);
                 let sew = vd.sew;
 
-                for (index, element) in vd.iter_mut().enumerate() {
-                    match sew {
-                        1 => {
-                            let scalar = x1 as u8;
-                            let v2_value = vs2.get::<u8>(index);
+                match sew {
+                    1 => {
+                        let scalar = x1 as u8;
+                        let vs2 = vs2.as_slice::<u8>();
+                        for (index, element) in vd.iter_mut().enumerate() {
                             mask.element_load(
                                 element,
-                                $exec_ty::<u8>::exec(v2_value, scalar)?,
+                                $exec_ty::<u8>::exec(vs2[index], scalar)?,
                                 index,
                             );
                         }
-                        2 => {
-                            let scalar = x1 as u16;
-                            let v2_value = vs2.get::<u16>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u16>::exec(v2_value, scalar)?,
-                                index,
-                            );
-                        }
-                        4 => {
-                            let scalar = x1 as u32;
-                            let v2_value = vs2.get::<u32>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u32>::exec(v2_value, scalar)?,
-                                index,
-                            );
-                        }
-                        8 => {
-                            let scalar = x1 as u64;
-                            let v2_value = vs2.get::<u64>(index);
-                            mask.element_load(
-                                element,
-                                $exec_ty::<u64>::exec(v2_value, scalar)?,
-                                index,
-                            );
-                        }
-                        _ => unreachable!(),
                     }
+                    2 => {
+                        let scalar = x1 as u16;
+                        let vs2 = vs2.as_slice::<u16>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u16>::exec(vs2[index], scalar)?,
+                                index,
+                            );
+                        }
+                    }
+                    4 => {
+                        let scalar = x1 as u32;
+                        let vs2 = vs2.as_slice::<u32>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u32>::exec(vs2[index], scalar)?,
+                                index,
+                            );
+                        }
+                    }
+                    8 => {
+                        let scalar = x1 as u64;
+                        let vs2 = vs2.as_slice::<u64>();
+                        for (index, element) in vd.iter_mut().enumerate() {
+                            mask.element_load(
+                                element,
+                                $exec_ty::<u64>::exec(vs2[index], scalar)?,
+                                index,
+                            );
+                        }
+                    }
+                    _ => unreachable!(),
                 }
 
                 Ok(())
@@ -163,20 +175,20 @@ macro_rules! impl_vector_op_integer_v_unary_ext {
                 let dst_sew = vd.sew;
                 assert!(dst_sew == src_sew * $factor);
 
-                for (index, element) in vd.iter_mut().enumerate() {
-                    match (src_sew, dst_sew) {
-                        $(
-                            ($src_sew, $dst_sew) => {
-                                let value = vs2.get::<$src_ty>(index);
+                match (src_sew, dst_sew) {
+                    $(
+                        ($src_sew, $dst_sew) => {
+                            let vs2 = vs2.as_slice::<$src_ty>();
+                            for (index, element) in vd.iter_mut().enumerate() {
                                 mask.element_load(
                                     element,
-                                    $exec_ty::<$dst_ty, $src_ty>::exec(value)?,
+                                    $exec_ty::<$dst_ty, $src_ty>::exec(vs2[index])?,
                                     index,
                                 );
                             }
-                        )+
-                        _ => unreachable!(),
-                    }
+                        }
+                    )+
+                    _ => unreachable!(),
                 }
 
                 Ok(())

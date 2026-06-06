@@ -174,11 +174,14 @@ impl<'a> VGFRef<'a> {
     where
         T: Clone,
     {
+        self.as_slice::<T>()[index].clone()
+    }
+
+    pub(crate) fn as_slice<T: Sized>(&self) -> &'a [T] {
         assert!(self.sew as usize == size_of::<T>());
         unsafe {
             let p = self.value.as_ptr() as *const T;
-            let s = from_raw_parts(p, self.value.len() / self.sew as usize);
-            s[index].clone()
+            from_raw_parts(p, self.value.len() / self.sew as usize)
         }
     }
 
@@ -257,11 +260,14 @@ impl<'a> VGFRefMut<'a> {
     where
         T: Clone,
     {
+        self.as_slice::<T>()[index].clone()
+    }
+
+    pub(crate) fn as_slice<T: Sized>(&self) -> &[T] {
         assert!(self.sew as usize == size_of::<T>());
         unsafe {
             let p = self.value.as_ptr() as *const T;
-            let s = from_raw_parts(p, self.value.len() / self.sew as usize);
-            s[index].clone()
+            from_raw_parts(p, self.value.len() / self.sew as usize)
         }
     }
 
@@ -269,11 +275,14 @@ impl<'a> VGFRefMut<'a> {
     where
         T: Clone,
     {
+        self.as_mut_slice::<T>()[index] = value
+    }
+
+    pub(crate) fn as_mut_slice<T: Sized>(&mut self) -> &mut [T] {
         assert!(self.sew as usize == size_of::<T>());
         unsafe {
             let p = self.value.as_mut_ptr() as *mut T;
-            let s = from_raw_parts_mut(p, self.value.len() / self.sew as usize);
-            s[index] = value
+            from_raw_parts_mut(p, self.value.len() / self.sew as usize)
         }
     }
 

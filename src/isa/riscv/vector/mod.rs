@@ -71,9 +71,8 @@ impl VectorIndexedAddrCal {
 /// determines whether each element actually performs memory access and whether unoperated elements
 /// are written with the default value (agnostic).
 struct VecOpMask {
-    data: Vec<u8>,
+    mask_bit: Option<Vec<u8>>,
     length: u16,
-    enable_mask: bool,
     mask_agnostic: bool,
     tail_agnostic: bool,
 }
@@ -86,16 +85,10 @@ impl VecOpMask {
         mask_agnostic: bool,
         tail_agnostic: bool,
     ) -> Self {
-        let data = vgr
-            .read_as_type::<u8>(1, 0)
-            .unwrap()
-            .iter()
-            .map(|v| *v)
-            .collect();
+        let mask_bit = enable_mask.then(|| vgr.read_as_type::<u8>(1, 0).unwrap().to_vec());
         Self {
-            data,
+            mask_bit,
             length,
-            enable_mask,
             mask_agnostic,
             tail_agnostic,
         }
@@ -103,10 +96,12 @@ impl VecOpMask {
 
     #[inline(always)]
     fn bit(&self, index: usize) -> bool {
+        let Some(mask_bit) = &self.mask_bit else {
+            return true;
+        };
         let offset = index / 8;
         let inner_bit = 1 << (index % 8);
-        let bit = (self.data[offset] & inner_bit) == inner_bit;
-        (!self.enable_mask) || bit
+        (mask_bit[offset] & inner_bit) == inner_bit
     }
 
     #[inline(always)]
