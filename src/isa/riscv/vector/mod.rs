@@ -9,6 +9,8 @@ use crate::{
 };
 
 pub mod integer;
+#[cfg(test)]
+mod tester;
 pub mod types;
 pub const VLEN: usize = 128;
 pub const VLEN_BYTE: usize = VLEN >> 3;
@@ -585,197 +587,201 @@ impl Vector {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{ram::Ram, ram_config::BASE_ADDR};
-    use std::{cell::UnsafeCell, rc::Rc};
+    use crate::ram_config::BASE_ADDR;
+    use tester::{VectorBuilder, VectorChecker};
 
     #[test]
     fn test_unit_stride_load() {
-        let mut vector_regfile = Vector::new();
-        let mut ram = Ram::new();
-        for i in 0..128 {
-            ram.write(i, 1 + (i as u8 * 2)).unwrap();
-        }
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(
+                Vlmul::M2,
+                Vsew::E8,
+                false,
+                false,
+                VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16,
+            )
+            .mem_range(0..128, |i| (BASE_ADDR + i as WordType, 1 + (i as u8 * 2)))
+            .build();
 
         // --------------- Seg = 1 ---------------
-        // write as m2, e8
-        vector_regfile.config.vlmul = Vlmul::M2;
-        vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16;
-        vector_regfile
+        vector
             .stride_load(2, Vsew::E8, 1, None, false, BASE_ADDR, &mut mmio)
             .unwrap();
-        // read as m1, e8
-        let vector_ref = vector_regfile
-            .vector_regfile
-            .read_as_type::<u8>(Vlmul::M1.get_lmul(), 3)
-            .unwrap();
-        // println!("{:?}", vector_ref);
-        assert_eq!(vector_ref[2], (1 + VLEN_BYTE * 2) as u8 + 2 * 2);
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            let vector_ref = checker
+                .vector
+                .vector_regfile
+                .read_as_type::<u8>(Vlmul::M1.get_lmul(), 3)
+                .unwrap();
+            assert_eq!(vector_ref[2], (1 + VLEN_BYTE * 2) as u8 + 2 * 2);
+            checker
+        });
 
         // --------------- Seg = 2 ---------------
-        // write as m1, e8
-        vector_regfile.config.vlmul = Vlmul::M1;
-        vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16;
-        vector_regfile
+        vector.set_config((
+            Vlmul::M1,
+            Vsew::E8,
+            false,
+            false,
+            VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16,
+        ));
+        vector
             .stride_load(2, Vsew::E8, 2, None, false, BASE_ADDR, &mut mmio)
             .unwrap();
-        // read as m1, e8
-        let vector_ref = vector_regfile
-            .vector_regfile
-            .read_as_type::<u8>(Vlmul::M1.get_lmul(), 3)
-            .unwrap();
-        // println!("{:?}", vector_ref);
-        assert_eq!(vector_ref[2], 3 + 2 * 4);
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            let vector_ref = checker
+                .vector
+                .vector_regfile
+                .read_as_type::<u8>(Vlmul::M1.get_lmul(), 3)
+                .unwrap();
+            assert_eq!(vector_ref[2], 3 + 2 * 4);
+            checker
+        });
     }
 
     #[test]
     fn test_unit_stride_store() {
-        let mut vector_regfile = Vector::new();
-        let ram = Ram::new();
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-
         let store_addr = BASE_ADDR + 0x1000;
         // --------------- M2, E8 ---------------
-        vector_regfile.config.vlmul = Vlmul::M2;
-        vector_regfile.config.vl = VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16;
-        // write known test pattern into v2 (M2 group: v2, v3)
         let test_values: Vec<u8> = (0..VLEN_BYTE * 2).map(|i| (i * 3 + 1) as u8).collect();
-        vector_regfile.write_as_type::<u8>(Vlmul::M2.get_lmul(), 2, &test_values);
-        // store v2 to memory at an offset from BASE_ADDR
-        vector_regfile
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(
+                Vlmul::M2,
+                Vsew::E8,
+                false,
+                false,
+                VLEN_BYTE as u16 * Vlmul::M2.get_lmul() as u16,
+            )
+            .reg(Vlmul::M2.get_lmul(), 2, &test_values)
+            .build();
+
+        vector
             .stride_store(2, Vsew::E8, 1, None, false, store_addr, &mut mmio)
             .unwrap();
-        // read back from memory and verify
-        for i in 0..(VLEN_BYTE * 2) {
-            let val = mmio.read_u8(store_addr + i as WordType).unwrap();
-            assert_eq!(val, test_values[i], "M2 E8 mismatch at index {}", i);
-        }
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            for (i, expected) in test_values.iter().copied().enumerate() {
+                checker
+                    .mmio
+                    .read_u8(store_addr + i as WordType)
+                    .map(|got| assert_eq!(got, expected, "M2 E8 mismatch at index {}", i))
+                    .unwrap();
+            }
+            checker
+        });
 
         // --------------- M2, E32, Seg=4 ---------------
         const SEG_SIZE: u8 = 4;
         const LMUL: Vlmul = Vlmul::M2;
-        vector_regfile.config.vlmul = LMUL;
-        vector_regfile.config.vl = VLEN_BYTE as u16;
         let elems_per_seg = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
         let total_elements = elems_per_seg * SEG_SIZE as usize;
         let test_values_seg: Vec<u32> = (0..total_elements)
             .map(|i| (i.wrapping_add(1)) as u32)
             .collect();
-        // Write 4 M2 register groups: v0-v1, v2-v3, v4-v5, v6-v7
+        vector.set_config((LMUL, Vsew::E32, false, false, VLEN_BYTE as u16));
         for seg_idx in 0..SEG_SIZE as usize {
             let start = seg_idx * elems_per_seg;
             let end = start + elems_per_seg;
-            vector_regfile.write_as_type::<u32>(
+            vector.write_as_type::<u32>(
                 LMUL.get_lmul(),
                 (LMUL.get_lmul() as usize * seg_idx) as u8,
                 &test_values_seg[start..end],
             );
         }
-        vector_regfile
+        vector
             .stride_store(0, Vsew::E32, SEG_SIZE, None, false, store_addr, &mut mmio)
             .unwrap();
-        // Verify: segment-interleaved layout in memory
-        for pos in 0..elems_per_seg {
-            for seg_idx in 0..SEG_SIZE as usize {
-                let idx = seg_idx * elems_per_seg + pos;
-                let addr = store_addr
-                    + ((pos * SEG_SIZE as usize + seg_idx) * size_of::<u32>()) as WordType;
-                let val = mmio.read_u32(addr).unwrap();
-                assert_eq!(
-                    val, test_values_seg[idx],
-                    "M2 E32 Seg={} mismatch at pos {}, seg {}",
-                    SEG_SIZE, pos, seg_idx
-                );
-            }
-        }
-
-        // --------------- verify that store didn't leak into BASE_ADDR ---------------
-        let val_at_base = mmio.read_u8(BASE_ADDR).unwrap();
-        assert_eq!(val_at_base, 0, "BASE_ADDR should remain untouched (0)");
+        VectorChecker::new(&mut vector, &mut mmio)
+            .customized(|checker| {
+                for pos in 0..elems_per_seg {
+                    for seg_idx in 0..SEG_SIZE as usize {
+                        let idx = seg_idx * elems_per_seg + pos;
+                        let addr = store_addr
+                            + ((pos * SEG_SIZE as usize + seg_idx) * size_of::<u32>()) as WordType;
+                        let val = checker.mmio.read_u32(addr).unwrap();
+                        assert_eq!(
+                            val, test_values_seg[idx],
+                            "M2 E32 Seg={} mismatch at pos {}, seg {}",
+                            SEG_SIZE, pos, seg_idx
+                        );
+                    }
+                }
+                checker
+            })
+            .mem::<u8>(BASE_ADDR, 0);
     }
 
     #[test]
     fn test_indexed_ordered_load() {
-        let mut vector_regfile = Vector::new();
-        let mut ram = Ram::new();
         let index_arr_base = BASE_ADDR + 0x1000;
         let data_base = BASE_ADDR + 0x2000;
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(
+                Vlmul::M1,
+                Vsew::E32,
+                false,
+                false,
+                (VLEN_BYTE / size_of::<u32>()) as u16,
+            )
+            .mem_range(0..VLEN_BYTE, |i| {
+                (
+                    index_arr_base + (i * size_of::<u32>()) as WordType,
+                    (i * 4) as u32,
+                )
+            })
+            .mem_range(0..VLEN_BYTE, |i| {
+                (data_base + (i * 4) as WordType, (i as u32) + 100)
+            })
+            .build();
 
-        // 索引数组（u32）: [0, 4, 8, ...]
-        for i in 0..VLEN_BYTE {
-            ram.write(0x1000 + (i * size_of::<u32>()) as WordType, (i * 4) as u32)
-                .unwrap();
-        }
-        // 数据区（u32）: value = i + 100
-        for i in 0..VLEN_BYTE {
-            ram.write(0x2000 + (i * 4) as WordType, (i as u32) + 100)
-                .unwrap();
-        }
-
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-
-        vector_regfile.config.vlmul = Vlmul::M1;
-        vector_regfile.config.vsew = Vsew::E32;
-        vector_regfile.config.vl = (VLEN_BYTE / size_of::<u32>()) as u16;
-
-        vector_regfile
+        vector
             .indexed_ordered_load(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
             .unwrap();
 
-        let vector_ref = vector_regfile
-            .vector_regfile
-            .read_as_type::<u32>(Vlmul::M1.get_lmul(), 0)
-            .unwrap();
-        for i in 0..(VLEN_BYTE / size_of::<u32>()) {
-            assert_eq!(
-                vector_ref[i],
-                i as u32 + 100,
-                "indexed load mismatch at {}",
-                i
-            );
-        }
+        let expected: Vec<u32> = (0..(VLEN_BYTE / size_of::<u32>()))
+            .map(|i| i as u32 + 100)
+            .collect();
+        VectorChecker::new(&mut vector, &mut mmio).reg(Vlmul::M1.get_lmul(), 0, &expected);
     }
 
     #[test]
     fn test_indexed_ordered_store() {
-        let mut vector_regfile = Vector::new();
-        let ram = Ram::new();
         let index_arr_base = BASE_ADDR + 0x1000;
         let data_base = BASE_ADDR + 0x2000;
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-
-        // 索引数组（u32）: [0, 4, 8, ...]
-        for i in 0..VLEN_BYTE {
-            mmio.write_u32(
-                index_arr_base + (i * size_of::<u32>()) as WordType,
-                (i * 4) as u32,
-            )
-            .unwrap();
-        }
-
-        vector_regfile.config.vlmul = Vlmul::M1;
-        vector_regfile.config.vsew = Vsew::E32;
-        vector_regfile.config.vl = (VLEN_BYTE / size_of::<u32>()) as u16;
-
         let element_count = VLEN_BYTE / size_of::<u32>();
         let test_values: Vec<u32> = (0..element_count).map(|i| (i as u32) * 7 + 11).collect();
-        vector_regfile.write_as_type::<u32>(Vlmul::M1.get_lmul(), 0, &test_values);
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(
+                Vlmul::M1,
+                Vsew::E32,
+                false,
+                false,
+                (VLEN_BYTE / size_of::<u32>()) as u16,
+            )
+            .mem_range(0..VLEN_BYTE, |i| {
+                (
+                    index_arr_base + (i * size_of::<u32>()) as WordType,
+                    (i * 4) as u32,
+                )
+            })
+            .reg(Vlmul::M1.get_lmul(), 0, &test_values)
+            .build();
 
-        vector_regfile
+        vector
             .indexed_ordered_store(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
             .unwrap();
 
-        for i in 0..element_count {
-            let addr = data_base + (i * 4) as WordType;
-            let val = mmio.read_u32(addr).unwrap();
-            assert_eq!(val, test_values[i], "indexed store mismatch at index {}", i);
-        }
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            for (i, expected) in test_values.iter().copied().enumerate() {
+                let addr = data_base + (i * 4) as WordType;
+                let val = checker.mmio.read_u32(addr).unwrap();
+                assert_eq!(val, expected, "indexed store mismatch at index {}", i);
+            }
+            checker
+        });
     }
 
     #[test]
     fn test_mask_unit_stride_load() {
-        let mut vector_regfile = Vector::new();
-        let mut ram = Ram::new();
         let addr_offset = 0x2000;
         let base_addr = BASE_ADDR + addr_offset;
 
@@ -783,52 +789,43 @@ mod test {
         const LMUL: Vlmul = Vlmul::M4;
         const SEW: Vsew = Vsew::E32;
         let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
-
-        for i in 0..elem_cnt {
-            ram.write(
-                addr_offset + (i * size_of::<ElemType>()) as WordType,
-                (i as u32) + 100,
-            )
-            .unwrap();
-        }
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-
-        vector_regfile.set_config((LMUL, SEW, false, false, elem_cnt as u16));
-
-        // mask register v0: bit=1 时生效。这里设置偶数位为 1、奇数位为 0。
         let mut mask_bytes = [0u8; VLEN_BYTE];
         for i in 0..elem_cnt {
             if i % 2 == 0 {
                 mask_bytes[i / 8] |= 1 << (i % 8);
             }
         }
-        vector_regfile.write_as_type::<u8>(1, 0, &mask_bytes);
-
         let init = vec![0xDEAD_BEEF_u32; elem_cnt];
-        vector_regfile.write_as_type::<ElemType>(LMUL.get_lmul(), 8, &init);
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(LMUL, SEW, false, false, elem_cnt as u16)
+            .mem_range(0..elem_cnt, |i| {
+                (
+                    base_addr + (i * size_of::<ElemType>()) as WordType,
+                    (i as u32) + 100,
+                )
+            })
+            .reg(1, 0, &mask_bytes)
+            .reg(LMUL.get_lmul(), 8, &init)
+            .build();
 
-        vector_regfile
+        vector
             .stride_load(8, SEW, 1, None, true, base_addr, &mut mmio)
             .unwrap();
 
-        let got = vector_regfile
-            .vector_regfile
-            .read_as_type::<ElemType>(LMUL.get_lmul(), 8)
-            .unwrap();
-        for i in 0..elem_cnt {
-            let expected = if i % 2 == 0 {
-                (i as u32) + 100
-            } else {
-                0xDEAD_BEEF_u32
-            };
-            assert_eq!(got[i], expected, "mask load mismatch at index {}", i);
-        }
+        let expected: Vec<ElemType> = (0..elem_cnt)
+            .map(|i| {
+                if i % 2 == 0 {
+                    (i as u32) + 100
+                } else {
+                    0xDEAD_BEEF_u32
+                }
+            })
+            .collect();
+        VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 8, &expected);
     }
 
     #[test]
     fn test_mask_unit_stride_store() {
-        let mut vector_regfile = Vector::new();
-        let mut ram = Ram::new();
         let addr_offset = 0x2000;
         let base_addr = BASE_ADDR + 0x2000;
 
@@ -837,96 +834,91 @@ mod test {
         const SEW: Vsew = Vsew::E32;
         let elem_cnt = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<ElemType>();
 
-        // 预置内存为 0，便于检查被 mask 掉的元素不会被写入。
-        for i in 0..elem_cnt {
-            ram.write(addr_offset + (i * size_of::<ElemType>()) as WordType, 0u32)
-                .unwrap();
-        }
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-
-        vector_regfile.set_config((LMUL, SEW, false, false, elem_cnt as u16));
-
-        // mask register v0: 仅偶数位写入
         let mut mask_bytes = [0u8; VLEN_BYTE];
         for i in 0..elem_cnt {
             if i % 2 == 0 {
                 mask_bytes[i / 8] |= 1 << (i % 8);
             }
         }
-        vector_regfile.write_as_type::<u8>(1, 0, &mask_bytes);
-
         let src: Vec<ElemType> = (0..elem_cnt).map(|i| (i as u32) * 11 + 7).collect();
-        vector_regfile.write_as_type::<ElemType>(LMUL.get_lmul(), 8, &src);
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(LMUL, SEW, false, false, elem_cnt as u16)
+            .mem_range(0..elem_cnt, |i| {
+                (
+                    BASE_ADDR + addr_offset + (i * size_of::<ElemType>()) as WordType,
+                    0u32,
+                )
+            })
+            .reg(1, 0, &mask_bytes)
+            .reg(LMUL.get_lmul(), 8, &src)
+            .build();
 
-        vector_regfile
+        vector
             .stride_store(8, SEW, 1, None, true, base_addr, &mut mmio)
             .unwrap();
 
-        for i in 0..elem_cnt {
-            let addr = base_addr + (i * size_of::<ElemType>()) as WordType;
-            let got = mmio.read_u32(addr).unwrap();
-            let expected = if i % 2 == 0 { src[i] } else { 0u32 };
-            assert_eq!(got, expected, "mask store mismatch at index {}", i);
-        }
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            for i in 0..elem_cnt {
+                let addr = base_addr + (i * size_of::<ElemType>()) as WordType;
+                let got = checker.mmio.read_u32(addr).unwrap();
+                let expected = if i % 2 == 0 { src[i] } else { 0u32 };
+                assert_eq!(got, expected, "mask store mismatch at index {}", i);
+            }
+            checker
+        });
     }
 
     #[test]
     fn test_load_whole_register() {
-        let mut vector_regfile = Vector::new();
-        let mut ram = Ram::new();
         let base_addr = BASE_ADDR + 0x3000;
         let test_values: Vec<u64> = (0..(VLEN_BYTE * 8 / size_of::<u64>()))
             .map(|i| 0x1000_0000_0000_0000u64 + i as u64)
             .collect();
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(Vlmul::M1, Vsew::E8, true, true, 1)
+            .mem_range(0..test_values.len(), |i| {
+                (
+                    base_addr + (i * size_of::<u64>()) as WordType,
+                    test_values[i],
+                )
+            })
+            .build();
 
-        for (i, value) in test_values.iter().copied().enumerate() {
-            ram.write(
-                base_addr - BASE_ADDR + (i * size_of::<u64>()) as WordType,
-                value,
-            )
-            .unwrap();
-        }
-
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
-        vector_regfile.set_config((Vlmul::M1, Vsew::E8, true, true, 1));
-
-        vector_regfile
+        vector
             .load_whole_register(8, 7, base_addr, &mut mmio)
             .unwrap();
 
-        let vector_ref = vector_regfile
-            .vector_regfile
-            .read_as_type::<u64>(8, 8)
-            .unwrap();
-        assert_eq!(vector_ref, test_values.as_slice());
+        VectorChecker::new(&mut vector, &mut mmio).reg(8, 8, &test_values);
     }
 
     #[test]
     fn test_store_whole_register() {
-        let mut vector_regfile = Vector::new();
-        let ram = Ram::new();
         let base_addr = BASE_ADDR + 0x4000;
-        let mut mmio = MemoryMapIO::from_mmio_items(Rc::new(UnsafeCell::new(ram)), vec![]);
         let test_values: Vec<u64> = (0..(VLEN_BYTE * 8 / size_of::<u64>()))
             .map(|i| 0x2000_0000_0000_0000u64 + (i as u64) * 3)
             .collect();
+        let (mut vector, mut mmio) = VectorBuilder::new()
+            .config(Vlmul::M1, Vsew::E8, true, true, 1)
+            .reg(8, 8, &test_values)
+            .build();
 
-        vector_regfile.set_config((Vlmul::M1, Vsew::E8, true, true, 1));
-        vector_regfile.write_as_type::<u64>(8, 8, &test_values);
-
-        vector_regfile
+        vector
             .store_whole_register(8, 7, base_addr, &mut mmio)
             .unwrap();
 
-        for (i, expected) in test_values.iter().copied().enumerate() {
-            let got = mmio
-                .read_u64(base_addr + (i * size_of::<u64>()) as WordType)
-                .unwrap();
-            assert_eq!(
-                got, expected,
-                "whole register store mismatch at index {}",
-                i
-            );
-        }
+        VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
+            for (i, expected) in test_values.iter().copied().enumerate() {
+                let got = checker
+                    .mmio
+                    .read_u64(base_addr + (i * size_of::<u64>()) as WordType)
+                    .unwrap();
+                assert_eq!(
+                    got, expected,
+                    "whole register store mismatch at index {}",
+                    i
+                );
+            }
+            checker
+        });
     }
 }
