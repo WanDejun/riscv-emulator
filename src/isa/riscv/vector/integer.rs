@@ -4,9 +4,11 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         instruction::exec_function::{
-            ExecAdd, ExecAddu, ExecAnd, ExecEqual, ExecMax, ExecMaxu, ExecMin, ExecMinu,
-            ExecNotEqual, ExecOr, ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub,
-            ExecSubu, ExecTrait, ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
+            ExecAdd, ExecAddu, ExecAnd, ExecDivSigned, ExecDivUnsigned, ExecEqual, ExecMax,
+            ExecMaxu, ExecMin, ExecMinu, ExecMulHighSigned, ExecMulHighSignedUnsigned,
+            ExecMulHighUnsigned, ExecMulLow, ExecNotEqual, ExecOr, ExecRemSigned, ExecRemUnsigned,
+            ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub, ExecSubu, ExecTrait,
+            ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
         },
         trap::Exception,
         vector::{
@@ -605,6 +607,14 @@ pub(in crate::isa::riscv) struct VectorOpMax;
 pub(in crate::isa::riscv) struct VectorOpMaxu;
 pub(in crate::isa::riscv) struct VectorOpMin;
 pub(in crate::isa::riscv) struct VectorOpMinu;
+pub(in crate::isa::riscv) struct VectorOpMul;
+pub(in crate::isa::riscv) struct VectorOpMulh;
+pub(in crate::isa::riscv) struct VectorOpMulhu;
+pub(in crate::isa::riscv) struct VectorOpMulhsu;
+pub(in crate::isa::riscv) struct VectorOpDiv;
+pub(in crate::isa::riscv) struct VectorOpDivu;
+pub(in crate::isa::riscv) struct VectorOpRem;
+pub(in crate::isa::riscv) struct VectorOpRemu;
 pub(in crate::isa::riscv) struct VectorOpZextVf2;
 pub(in crate::isa::riscv) struct VectorOpZextVf4;
 pub(in crate::isa::riscv) struct VectorOpZextVf8;
@@ -672,6 +682,22 @@ impl_vector_op_integer_vx_binary!(VectorOpMax, ExecMax);
 impl_vector_op_integer_vx_binary!(VectorOpMaxu, ExecMaxu);
 impl_vector_op_integer_vx_binary!(VectorOpMin, ExecMin);
 impl_vector_op_integer_vx_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vv_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vv_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vx_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vx_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vx_binary!(VectorOpRemu, ExecRemUnsigned);
 
 impl_vector_op_integer_v_unary_ext!(
     VectorOpZextVf2,
@@ -1051,6 +1077,22 @@ mod test {
         read_mask_bit(mask, index)
     }
 
+    fn signed_div_u64(lhs: u64, rhs: u64) -> u64 {
+        if rhs == 0 {
+            u64::MAX
+        } else {
+            as_signed_i128(lhs).wrapping_div(as_signed_i128(rhs)) as u64
+        }
+    }
+
+    fn signed_rem_u64(lhs: u64, rhs: u64) -> u64 {
+        if rhs == 0 {
+            lhs
+        } else {
+            as_signed_i128(lhs).wrapping_rem(as_signed_i128(rhs)) as u64
+        }
+    }
+
     fn run_vv_binary_u32<OpIVV>(vs1: &[u32], vs2: &[u32], expected: &[u32])
     where
         OpIVV: VectorOpIntegerVV,
@@ -1071,12 +1113,51 @@ mod test {
         );
     }
 
+    fn run_vv_binary_u64<OpIVV>(vs1: &[u64], vs2: &[u64], expected: &[u64])
+    where
+        OpIVV: VectorOpIntegerVV,
+    {
+        const LMUL: Vlmul = Vlmul::M4;
+        const SEW: Vsew = Vsew::E64;
+        let param = TestOpParameter::new_vv(8, 16, 24);
+
+        run_test_integer_vv::<OpIVV, _, _>(
+            param,
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, false, expected.len() as u16)
+                    .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                    .reg(LMUL.get_lmul(), param.vs2(), vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+        );
+    }
+
     fn run_vx_binary_u32<OpIVX>(scalar: WordType, vs2: &[u32], expected: &[u32])
     where
         OpIVX: VectorOpIntegerVX,
     {
         const LMUL: Vlmul = Vlmul::M1;
         const SEW: Vsew = Vsew::E32;
+        let param = TestOpParameter::new_vx(scalar, 8, 24);
+
+        run_test_integer_vx::<OpIVX, _, _>(
+            param,
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, false, expected.len() as u16)
+                    .reg(LMUL.get_lmul(), param.vs2(), vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+        );
+    }
+
+    fn run_vx_binary_u64<OpIVX>(scalar: WordType, vs2: &[u64], expected: &[u64])
+    where
+        OpIVX: VectorOpIntegerVX,
+    {
+        const LMUL: Vlmul = Vlmul::M4;
+        const SEW: Vsew = Vsew::E64;
         let param = TestOpParameter::new_vx(scalar, 8, 24);
 
         run_test_integer_vx::<OpIVX, _, _>(
@@ -1410,6 +1491,126 @@ mod test {
             })
             .collect();
         run_vx_binary_u32::<VectorOpMinu>(scalar, &vs2, &expected);
+    }
+
+    #[test]
+    fn test_vector_op_mul_div_e64() {
+        let vs2 = [
+            0,
+            1,
+            2,
+            u64::MAX,
+            0x8000_0000_0000_0000,
+            0x7fff_ffff_ffff_ffff,
+            0x1234_5678_9abc_def0,
+            0xfedc_ba98_7654_3210,
+        ];
+        let vs1 = [
+            0,
+            1,
+            u64::MAX,
+            2,
+            u64::MAX,
+            0x8000_0000_0000_0000,
+            3,
+            0x1000_0000_0000_0001,
+        ];
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| lhs.wrapping_mul(*rhs))
+            .collect();
+        run_vv_binary_u64::<VectorOpMul>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| ((as_signed_i128(*lhs) * as_signed_i128(*rhs)) >> 64) as u64)
+            .collect();
+        run_vv_binary_u64::<VectorOpMulh>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| (((*lhs as u128) * (*rhs as u128)) >> 64) as u64)
+            .collect();
+        run_vv_binary_u64::<VectorOpMulhu>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| ((as_signed_i128(*lhs) * (*rhs as u128 as i128)) >> 64) as u64)
+            .collect();
+        run_vv_binary_u64::<VectorOpMulhsu>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| signed_div_u64(*lhs, *rhs))
+            .collect();
+        run_vv_binary_u64::<VectorOpDiv>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| if *rhs == 0 { u64::MAX } else { lhs / rhs })
+            .collect();
+        run_vv_binary_u64::<VectorOpDivu>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| signed_rem_u64(*lhs, *rhs))
+            .collect();
+        run_vv_binary_u64::<VectorOpRem>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u64> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| if *rhs == 0 { *lhs } else { lhs % rhs })
+            .collect();
+        run_vv_binary_u64::<VectorOpRemu>(&vs1, &vs2, &expected);
+
+        let scalar = 0xffff_ffff_ffff_fffb;
+        let expected: Vec<u64> = vs2.iter().map(|value| value.wrapping_mul(scalar)).collect();
+        run_vx_binary_u64::<VectorOpMul>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2
+            .iter()
+            .map(|value| ((as_signed_i128(*value) * as_signed_i128(scalar)) >> 64) as u64)
+            .collect();
+        run_vx_binary_u64::<VectorOpMulh>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2
+            .iter()
+            .map(|value| (((*value as u128) * (scalar as u128)) >> 64) as u64)
+            .collect();
+        run_vx_binary_u64::<VectorOpMulhu>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2
+            .iter()
+            .map(|value| ((as_signed_i128(*value) * (scalar as u128 as i128)) >> 64) as u64)
+            .collect();
+        run_vx_binary_u64::<VectorOpMulhsu>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2
+            .iter()
+            .map(|value| signed_div_u64(*value, scalar))
+            .collect();
+        run_vx_binary_u64::<VectorOpDiv>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2.iter().map(|value| value / scalar).collect();
+        run_vx_binary_u64::<VectorOpDivu>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2
+            .iter()
+            .map(|value| signed_rem_u64(*value, scalar))
+            .collect();
+        run_vx_binary_u64::<VectorOpRem>(scalar, &vs2, &expected);
+
+        let expected: Vec<u64> = vs2.iter().map(|value| value % scalar).collect();
+        run_vx_binary_u64::<VectorOpRemu>(scalar, &vs2, &expected);
     }
 
     #[test]

@@ -393,15 +393,15 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VADD_VV => vec_integer_op_vv::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
         RiscvInstr::VSUB_VV => vec_integer_op_vv::<VectorOpSub>,
 
-        RiscvInstr::VMUL_VV => unimplemented!(), // Single-Width Integer Multiply Instructions
-        RiscvInstr::VMULH_VV => unimplemented!(),
-        RiscvInstr::VMULHU_VV => unimplemented!(),
-        RiscvInstr::VMULHSU_VV => unimplemented!(),
+        RiscvInstr::VMUL_VV => vec_integer_op_vv::<VectorOpMul>, // Single-Width Integer Multiply Instructions
+        RiscvInstr::VMULH_VV => vec_integer_op_vv::<VectorOpMulh>,
+        RiscvInstr::VMULHU_VV => vec_integer_op_vv::<VectorOpMulhu>,
+        RiscvInstr::VMULHSU_VV => vec_integer_op_vv::<VectorOpMulhsu>,
 
-        RiscvInstr::VDIV_VV => unimplemented!(), // Integer Divide Instructions
-        RiscvInstr::VDIVU_VV => unimplemented!(),
-        RiscvInstr::VREM_VV => unimplemented!(),
-        RiscvInstr::VREMU_VV => unimplemented!(),
+        RiscvInstr::VDIV_VV => vec_integer_op_vv::<VectorOpDiv>, // Integer Divide Instructions
+        RiscvInstr::VDIVU_VV => vec_integer_op_vv::<VectorOpDivu>,
+        RiscvInstr::VREM_VV => vec_integer_op_vv::<VectorOpRem>,
+        RiscvInstr::VREMU_VV => vec_integer_op_vv::<VectorOpRemu>,
 
         RiscvInstr::VAND_VV => vec_integer_op_vv::<VectorOpAnd>, // Bitwise Logical Instructions
         RiscvInstr::VOR_VV => vec_integer_op_vv::<VectorOpOr>,
@@ -479,15 +479,15 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSUB_VX => vec_integer_op_vx::<VectorOpSub>,
         RiscvInstr::VRSUB_VX => vec_integer_op_vx::<VectorOpRevSub>,
 
-        RiscvInstr::VMUL_VX => unimplemented!(), // Single-Width Integer Multiply Instructions
-        RiscvInstr::VMULH_VX => unimplemented!(),
-        RiscvInstr::VMULHU_VX => unimplemented!(),
-        RiscvInstr::VMULHSU_VX => unimplemented!(),
+        RiscvInstr::VMUL_VX => vec_integer_op_vx::<VectorOpMul>, // Single-Width Integer Multiply Instructions
+        RiscvInstr::VMULH_VX => vec_integer_op_vx::<VectorOpMulh>,
+        RiscvInstr::VMULHU_VX => vec_integer_op_vx::<VectorOpMulhu>,
+        RiscvInstr::VMULHSU_VX => vec_integer_op_vx::<VectorOpMulhsu>,
 
-        RiscvInstr::VDIV_VX => unimplemented!(), // Integer Divide Instructions
-        RiscvInstr::VDIVU_VX => unimplemented!(),
-        RiscvInstr::VREM_VX => unimplemented!(),
-        RiscvInstr::VREMU_VX => unimplemented!(),
+        RiscvInstr::VDIV_VX => vec_integer_op_vx::<VectorOpDiv>, // Integer Divide Instructions
+        RiscvInstr::VDIVU_VX => vec_integer_op_vx::<VectorOpDivu>,
+        RiscvInstr::VREM_VX => vec_integer_op_vx::<VectorOpRem>,
+        RiscvInstr::VREMU_VX => vec_integer_op_vx::<VectorOpRemu>,
 
         RiscvInstr::VAND_VX => vec_integer_op_vx::<VectorOpAnd>, // Bitwise Logical Instructions
         RiscvInstr::VOR_VX => vec_integer_op_vx::<VectorOpOr>,
