@@ -74,7 +74,17 @@ impl From<u8> for Vsew {
 }
 
 impl Vsew {
-    pub(crate) fn byte_width(self) -> u8 {
+    pub(crate) fn from_byte_width(byte_width: u8) -> Option<Self> {
+        match byte_width {
+            1 => Some(Self::E8),
+            2 => Some(Self::E16),
+            4 => Some(Self::E32),
+            8 => Some(Self::E64),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn into_byte_width(self) -> u8 {
         match self {
             Self::E8 => 1,
             Self::E16 => 2,
@@ -355,7 +365,7 @@ mod test {
         let value: Vec<u8> = (0..(2 * VLEN_BYTE))
             .map(|i| if i % 2 == 0 { 0 } else { i as u8 })
             .collect();
-        let v = VGFRef::new(value.as_slice(), Vsew::E16.byte_width(), 1, 1);
+        let v = VGFRef::new(value.as_slice(), Vsew::E16.into_byte_width(), 1, 1);
         assert_eq!(v.get::<u16>(3), (3 * 2 + 1) << 8);
 
         let mut value_mut: Vec<u8> = (0..(4 * VLEN_BYTE))
@@ -363,7 +373,7 @@ mod test {
             .collect();
         let mut v = VGFRefMut::new(
             value_mut.as_mut_slice(),
-            Vsew::E16.byte_width(),
+            Vsew::E16.into_byte_width(),
             Vlmul::M2.get_lmul(),
             1,
         );
@@ -383,7 +393,7 @@ mod test {
     #[should_panic(expected = "assertion failed: self.sew as usize == size_of::<T>()")]
     fn vector_type_test_unequal_sew() {
         let value: Vec<u8> = (0..128).map(|i| if i % 2 == 0 { 0 } else { i }).collect();
-        let v = VGFRef::new(value.as_slice(), Vsew::E16.byte_width(), 1, 1);
+        let v = VGFRef::new(value.as_slice(), Vsew::E16.into_byte_width(), 1, 1);
         assert_eq!(v.get::<u32>(3), (3 * size_of::<u32>() as u32 + 1) << 8)
     }
 }

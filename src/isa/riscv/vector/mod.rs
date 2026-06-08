@@ -70,7 +70,7 @@ impl VectorIndexedAddrCal {
 /// Based on the mask bits in the `v0` register and the `tail_agnostic` / `mask_agnostic` configuration,
 /// determines whether each element actually performs memory access and whether unoperated elements
 /// are written with the default value (agnostic).
-struct VecOpMask {
+pub(in crate::isa::riscv) struct VecOpMask {
     mask_bit: Option<Vec<u8>>,
     length: u16,
     mask_agnostic: bool,
@@ -216,7 +216,7 @@ impl Vector {
     ) -> Result<VGFRef<'_>, Exception> {
         let lmul = self.config.vlmul.get_lmul();
         let raw = self.vector_regfile.get_ref(lmul, seg, idx)?;
-        Ok(VGFRef::new(raw, eew.byte_width(), lmul, seg))
+        Ok(VGFRef::new(raw, eew.into_byte_width(), lmul, seg))
     }
 
     // ================= LOAD =================
@@ -232,7 +232,7 @@ impl Vector {
     ) -> Result<(), Exception> {
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: stride.unwrap_or(eew.byte_width() as WordType),
+            stride: stride.unwrap_or(eew.into_byte_width() as WordType),
         };
         let lmul = self.config.vlmul.get_lmul();
         let mask = VecOpMask::new(
@@ -244,7 +244,7 @@ impl Vector {
         );
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, seg)?,
-            eew.byte_width(),
+            eew.into_byte_width(),
             lmul,
             seg,
         );
@@ -306,13 +306,13 @@ impl Vector {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: eew.byte_width() as WordType,
+            stride: eew.into_byte_width() as WordType,
         };
         let lmul = decode_whole_register_count(nf)?;
 
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, 1)?,
-            eew.byte_width(),
+            eew.into_byte_width(),
             lmul,
             1,
         );
@@ -348,7 +348,7 @@ impl Vector {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
-            index_width: eew.byte_width(),
+            index_width: eew.into_byte_width(),
         };
         let lmul = self.config.vlmul.get_lmul();
         let mask = VecOpMask::new(
@@ -360,7 +360,7 @@ impl Vector {
         );
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, seg)?,
-            self.config.vsew.byte_width(),
+            self.config.vsew.into_byte_width(),
             lmul,
             seg,
         );
@@ -418,12 +418,12 @@ impl Vector {
     ) -> Result<(), Exception> {
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: stride.unwrap_or(eew.byte_width() as WordType),
+            stride: stride.unwrap_or(eew.into_byte_width() as WordType),
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, seg, vs)?,
-            eew.byte_width(),
+            eew.into_byte_width(),
             lmul,
             seg,
         );
@@ -483,12 +483,12 @@ impl Vector {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
-            index_width: eew.byte_width(),
+            index_width: eew.into_byte_width(),
         };
         let lmul = self.config.vlmul.get_lmul();
         let vd_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, seg, vs)?,
-            self.config.vsew.byte_width(),
+            self.config.vsew.into_byte_width(),
             lmul,
             seg,
         );
@@ -555,12 +555,12 @@ impl Vector {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
-            stride: eew.byte_width() as WordType,
+            stride: eew.into_byte_width() as WordType,
         };
         let lmul = decode_whole_register_count(nf)?;
         let vs_ref = VGFRef::new(
             self.vector_regfile.get_ref(lmul, 1, vs)?,
-            eew.byte_width(),
+            eew.into_byte_width(),
             lmul,
             1,
         );

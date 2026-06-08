@@ -68,8 +68,8 @@ impl TestCPUBuilder {
         tail_agnostic: bool,
         mask_agnostic: bool,
     ) -> Self {
-        let new_vtype = vlmul.get_lmul() as WordType
-            | (vsew.byte_width() as WordType) << 3
+        let new_vtype = vlmul as WordType
+            | (vsew as WordType) << 3
             | (tail_agnostic as WordType) << 6
             | (mask_agnostic as WordType) << 7;
         let vl = self

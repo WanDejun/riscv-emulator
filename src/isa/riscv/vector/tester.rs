@@ -117,7 +117,7 @@ impl<'a> VectorChecker<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct TestOpParameter {
+pub(in crate::isa::riscv) struct TestOpParameter {
     x1: Option<WordType>,
     vs1: Option<u8>,
     vs2: Option<u8>,

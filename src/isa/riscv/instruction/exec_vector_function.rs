@@ -10,8 +10,14 @@ use crate::{
             executor::RVCPU,
             instruction::{RVInstrInfo, normal_exec},
             trap::Exception,
+            vector::integer::{
+                VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
+                VectorOpIntegerMaskVXM, VectorOpIntegerV, VectorOpIntegerVV, VectorOpIntegerVVM,
+                VectorOpIntegerVX, VectorOpIntegerVXM,
+            },
         },
     },
+    utils::sign_extend,
 };
 
 pub(super) struct VectorConfigField {
@@ -417,6 +423,324 @@ fn do_vector_indexed_ordered_store<const EEW: u8>(
     }
 }
 
+// ---------------------------------------
+//          Vector Integer
+// ---------------------------------------
+pub(super) fn vec_integer_op_vv<OpIVV>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    OpIVV: VectorOpIntegerVV,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector.exec_integer_vv::<OpIVV>(vs1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vx<OpIVX>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.exec_integer_vx::<OpIVX>(x1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vi_signed<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: simm5,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let imm = sign_extend(simm5 as WordType, 5);
+            cpu.vector.exec_integer_vx::<OpIVX>(imm, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vi_unsigned<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: uimm,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_integer_vx::<OpIVX>(uimm as WordType, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vvm<OpIVVM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVVM: VectorOpIntegerVVM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            cpu.vector.exec_integer_vvm::<OpIVVM>(vs1, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vxm<OpIVXM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVXM: VectorOpIntegerVXM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.exec_integer_vxm::<OpIVXM>(x1, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_op_vim<OpIVXM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVXM: VectorOpIntegerVXM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: simm5,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let imm = sign_extend(simm5 as WordType, 5);
+            cpu.vector.exec_integer_vxm::<OpIVXM>(imm, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vv<OpIMVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVV: VectorOpIntegerMaskVV,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            cpu.vector.exec_integer_mask_vv::<OpIMVV>(vs1, vs2, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vx<OpIMVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVX: VectorOpIntegerMaskVX,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.exec_integer_mask_vx::<OpIMVX>(x1, vs2, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vi<OpIMVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVX: VectorOpIntegerMaskVX,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: simm5,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let imm = sign_extend(simm5 as WordType, 5);
+            cpu.vector.exec_integer_mask_vx::<OpIMVX>(imm, vs2, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vvm<OpIMVVM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVVM: VectorOpIntegerMaskVVM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            cpu.vector.exec_integer_mask_vvm::<OpIMVVM>(vs1, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vxm<OpIMVXM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVXM: VectorOpIntegerMaskVXM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.exec_integer_mask_vxm::<OpIMVXM>(x1, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_mask_op_vim<OpIMVXM>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIMVXM: VectorOpIntegerMaskVXM,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: simm5,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            let imm = sign_extend(simm5 as WordType, 5);
+            cpu.vector.exec_integer_mask_vxm::<OpIMVXM>(imm, vs2, 0, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_ext_op_v<OpIV, const FACTOR: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIV: VectorOpIntegerV,
+{
+    normal_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector.exec_integer_v_ext::<OpIV, FACTOR>(vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
 #[cfg(test)]
 mod test {
     use std::{cell::UnsafeCell, rc::Rc};
@@ -424,8 +748,9 @@ mod test {
     use crate::{
         device::mmio::MemoryMapIO,
         isa::riscv::{
-            cpu_tester::run_test_exec_decode,
+            cpu_tester::{run_test_exec, run_test_exec_decode},
             csr_reg::csr_macro::Mstatus,
+            instruction::instr_table::RiscvInstr,
             mmu::VirtAddrManager,
             vector::{
                 VLEN_BYTE,
@@ -440,6 +765,85 @@ mod test {
 
     const TEST_DATA_ADDR_OFFSET: WordType = 0x1000;
     const TEST_DATA_BASE: WordType = BASE_ADDR + TEST_DATA_ADDR_OFFSET;
+
+    fn u32_vec_to_bytes(data: &[u32]) -> Vec<u8> {
+        data.iter().flat_map(|x| x.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn vector_add_vv_test_cpu() {
+        let vs1 = [1_u32, 2, 3, u32::MAX];
+        let vs2 = [10_u32, 20, 30, 1];
+        let expected = [11_u32, 22, 33, 0];
+
+        run_test_exec(
+            RiscvInstr::VADD_VV,
+            RVInstrInfo::V {
+                rs1: 1,
+                rs2: 2,
+                rd: 3,
+                vm: true,
+                func6: 0,
+            },
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E32, false, false)
+                    .reg_vec(1, 1, &u32_vec_to_bytes(&vs1))
+                    .reg_vec(1, 2, &u32_vec_to_bytes(&vs2))
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_vec(3, &expected).pc(0x2004),
+        );
+    }
+
+    #[test]
+    fn vector_add_vx_test_cpu() {
+        let vs2 = [10_u32, 20, 30, u32::MAX];
+        let expected = [15_u32, 25, 35, 4];
+
+        run_test_exec(
+            RiscvInstr::VADD_VX,
+            RVInstrInfo::V {
+                rs1: 5,
+                rs2: 2,
+                rd: 3,
+                vm: true,
+                func6: 0,
+            },
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E32, false, false)
+                    .reg(5, 5)
+                    .reg_vec(1, 2, &u32_vec_to_bytes(&vs2))
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_vec(3, &expected).pc(0x2004),
+        );
+    }
+
+    #[test]
+    fn vector_add_vi_test_cpu() {
+        let vs2 = [10_u32, 20, 30, 0];
+        let expected = [9_u32, 19, 29, u32::MAX];
+
+        run_test_exec(
+            RiscvInstr::VADD_VI,
+            RVInstrInfo::V {
+                rs1: 0b11111,
+                rs2: 2,
+                rd: 3,
+                vm: true,
+                func6: 0,
+            },
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E32, false, false)
+                    .reg_vec(1, 2, &u32_vec_to_bytes(&vs2))
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_vec(3, &expected).pc(0x2004),
+        );
+    }
 
     #[test]
     fn unit_stride_load_test() {
@@ -465,7 +869,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let instr_info = RVInstrInfo::V {
@@ -535,7 +939,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let instr_info = RVInstrInfo::V {
@@ -577,7 +981,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let vl = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -643,7 +1047,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let vreg_len = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -712,7 +1116,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let vreg_len = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();
@@ -757,7 +1161,7 @@ mod test {
             TEST_VSEW,
             false,
             false,
-            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.byte_width() as u16,
+            VLEN_BYTE as u16 * TEST_VLMUL.get_lmul() as u16 / TEST_VSEW.into_byte_width() as u16,
         ));
 
         let elem_cnt = VLEN_BYTE * TEST_VLMUL.get_lmul() as usize / size_of::<ElemType>();

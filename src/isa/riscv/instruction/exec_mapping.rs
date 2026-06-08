@@ -16,6 +16,7 @@ use crate::{
                 instr_table::RiscvInstr,
             },
             trap::{Exception, trap_controller::TrapController},
+            vector::integer::*,
         },
     },
 };
@@ -389,8 +390,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSE64_V => vector_store::<3>,
 
         //-------- OPIVV (func3 = 0b000) --------
-        RiscvInstr::VADD_VV => unimplemented!(), // Single-width Integer Arithmetic Instructions
-        RiscvInstr::VSUB_VV => unimplemented!(),
+        RiscvInstr::VADD_VV => vec_integer_op_vv::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VSUB_VV => vec_integer_op_vv::<VectorOpSub>,
 
         RiscvInstr::VMUL_VV => unimplemented!(), // Single-Width Integer Multiply Instructions
         RiscvInstr::VMULH_VV => unimplemented!(),
@@ -402,30 +403,30 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VREM_VV => unimplemented!(),
         RiscvInstr::VREMU_VV => unimplemented!(),
 
-        RiscvInstr::VAND_VV => unimplemented!(), // Bitwise Logical Instructions
-        RiscvInstr::VOR_VV => unimplemented!(),
-        RiscvInstr::VXOR_VV => unimplemented!(),
+        RiscvInstr::VAND_VV => vec_integer_op_vv::<VectorOpAnd>, // Bitwise Logical Instructions
+        RiscvInstr::VOR_VV => vec_integer_op_vv::<VectorOpOr>,
+        RiscvInstr::VXOR_VV => vec_integer_op_vv::<VectorOpXor>,
 
-        RiscvInstr::VSRA_VV => unimplemented!(), //  Single-Width Shift Instructions
-        RiscvInstr::VSRL_VV => unimplemented!(),
-        RiscvInstr::VSLL_VV => unimplemented!(),
+        RiscvInstr::VSRA_VV => vec_integer_op_vv::<VectorOpSra>, //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VV => vec_integer_op_vv::<VectorOpSrl>,
+        RiscvInstr::VSLL_VV => vec_integer_op_vv::<VectorOpSll>,
 
         RiscvInstr::VNSRL_WV => unimplemented!(), // Widening Shift Instructions
         RiscvInstr::VNSRA_WV => unimplemented!(),
 
-        RiscvInstr::VMSEQ_VV => unimplemented!(), // Integer Compare Instructions
+        RiscvInstr::VMSEQ_VV => vec_integer_mask_op_vv::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VV => unimplemented!(),
-        RiscvInstr::VMSLTU_VV => unimplemented!(),
-        RiscvInstr::VMSLT_VV => unimplemented!(),
-        RiscvInstr::VMSLEU_VV => unimplemented!(),
-        RiscvInstr::VMSLE_VV => unimplemented!(),
+        RiscvInstr::VMSLTU_VV => vec_integer_mask_op_vv::<VectorOpMsltu>,
+        RiscvInstr::VMSLT_VV => vec_integer_mask_op_vv::<VectorOpMslt>,
+        RiscvInstr::VMSLEU_VV => vec_integer_mask_op_vv::<VectorOpMsleu>,
+        RiscvInstr::VMSLE_VV => vec_integer_mask_op_vv::<VectorOpMsle>,
 
-        RiscvInstr::VADC_VVM => unimplemented!(), // Add-with-Carry / Subtract-with-Borrow
-        RiscvInstr::VMADC_VV => unimplemented!(),
-        RiscvInstr::VMADC_VVM => unimplemented!(),
-        RiscvInstr::VSBC_VVM => unimplemented!(),
-        RiscvInstr::VMSBC_VV => unimplemented!(),
-        RiscvInstr::VMSBC_VVM => unimplemented!(),
+        RiscvInstr::VADC_VVM => vec_integer_op_vvm::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VV => vec_integer_mask_op_vv::<VectorOpMadc>,
+        RiscvInstr::VMADC_VVM => vec_integer_mask_op_vvm::<VectorOpMadc>,
+        RiscvInstr::VSBC_VVM => vec_integer_op_vvm::<VectorOpSbc>,
+        RiscvInstr::VMSBC_VV => vec_integer_mask_op_vv::<VectorOpMsbc>,
+        RiscvInstr::VMSBC_VVM => vec_integer_mask_op_vvm::<VectorOpMsbc>,
 
         RiscvInstr::VMAX_VV => unimplemented!(), // Integer Min/Max Instructions
         RiscvInstr::VMAXU_VV => unimplemented!(),
@@ -474,8 +475,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VRGATHEREI16_VV => unimplemented!(),
 
         //-------- OPIVX (0x100) --------
-        RiscvInstr::VADD_VX => unimplemented!(), // Single-width Integer Arithmetic Instructions
-        RiscvInstr::VSUB_VX => unimplemented!(),
+        RiscvInstr::VADD_VX => vec_integer_op_vx::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VSUB_VX => vec_integer_op_vx::<VectorOpSub>,
         RiscvInstr::VRSUB_VX => unimplemented!(),
 
         RiscvInstr::VMUL_VX => unimplemented!(), // Single-Width Integer Multiply Instructions
@@ -488,32 +489,32 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VREM_VX => unimplemented!(),
         RiscvInstr::VREMU_VX => unimplemented!(),
 
-        RiscvInstr::VAND_VX => unimplemented!(), // Bitwise Logical Instructions
-        RiscvInstr::VOR_VX => unimplemented!(),
-        RiscvInstr::VXOR_VX => unimplemented!(),
+        RiscvInstr::VAND_VX => vec_integer_op_vx::<VectorOpAnd>, // Bitwise Logical Instructions
+        RiscvInstr::VOR_VX => vec_integer_op_vx::<VectorOpOr>,
+        RiscvInstr::VXOR_VX => vec_integer_op_vx::<VectorOpXor>,
 
-        RiscvInstr::VSRA_VX => unimplemented!(), //  Single-Width Shift Instructions
-        RiscvInstr::VSRL_VX => unimplemented!(),
-        RiscvInstr::VSLL_VX => unimplemented!(),
+        RiscvInstr::VSRA_VX => vec_integer_op_vx::<VectorOpSra>, //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VX => vec_integer_op_vx::<VectorOpSrl>,
+        RiscvInstr::VSLL_VX => vec_integer_op_vx::<VectorOpSll>,
 
         RiscvInstr::VNSRL_WX => unimplemented!(), // Widening Shift Instructions
         RiscvInstr::VNSRA_WX => unimplemented!(),
 
-        RiscvInstr::VMSEQ_VX => unimplemented!(), // Integer Compare Instructions
+        RiscvInstr::VMSEQ_VX => vec_integer_mask_op_vx::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VX => unimplemented!(),
-        RiscvInstr::VMSLTU_VX => unimplemented!(),
-        RiscvInstr::VMSLT_VX => unimplemented!(),
-        RiscvInstr::VMSLEU_VX => unimplemented!(),
-        RiscvInstr::VMSLE_VX => unimplemented!(),
-        RiscvInstr::VMSGTU_VX => unimplemented!(),
-        RiscvInstr::VMSGT_VX => unimplemented!(),
+        RiscvInstr::VMSLTU_VX => vec_integer_mask_op_vx::<VectorOpMsltu>,
+        RiscvInstr::VMSLT_VX => vec_integer_mask_op_vx::<VectorOpMslt>,
+        RiscvInstr::VMSLEU_VX => vec_integer_mask_op_vx::<VectorOpMsleu>,
+        RiscvInstr::VMSLE_VX => vec_integer_mask_op_vx::<VectorOpMsle>,
+        RiscvInstr::VMSGTU_VX => vec_integer_mask_op_vx::<VectorOpMsgtu>,
+        RiscvInstr::VMSGT_VX => vec_integer_mask_op_vx::<VectorOpMsgt>,
 
-        RiscvInstr::VADC_VXM => unimplemented!(), // Add-with-Carry / Subtract-with-Borrow
-        RiscvInstr::VMADC_VX => unimplemented!(),
-        RiscvInstr::VMADC_VXM => unimplemented!(),
-        RiscvInstr::VSBC_VXM => unimplemented!(),
-        RiscvInstr::VMSBC_VX => unimplemented!(),
-        RiscvInstr::VMSBC_VXM => unimplemented!(),
+        RiscvInstr::VADC_VXM => vec_integer_op_vxm::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VX => vec_integer_mask_op_vx::<VectorOpMadc>,
+        RiscvInstr::VMADC_VXM => vec_integer_mask_op_vxm::<VectorOpMadc>,
+        RiscvInstr::VSBC_VXM => vec_integer_op_vxm::<VectorOpSbc>,
+        RiscvInstr::VMSBC_VX => vec_integer_mask_op_vx::<VectorOpMsbc>,
+        RiscvInstr::VMSBC_VXM => vec_integer_mask_op_vxm::<VectorOpMsbc>,
 
         RiscvInstr::VMAX_VX => unimplemented!(), // Integer Min/Max Instructions
         RiscvInstr::VMAXU_VX => unimplemented!(),
@@ -564,30 +565,30 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VRGATHER_VX => unimplemented!(), // Vector Gather Instructions
 
         //-------- OPIVI (func3 = 0b011) --------
-        RiscvInstr::VADD_VI => unimplemented!(), // Single-width Integer Arithmetic Instructions
+        RiscvInstr::VADD_VI => vec_integer_op_vi_signed::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
         RiscvInstr::VRSUB_VI => unimplemented!(),
 
-        RiscvInstr::VAND_VI => unimplemented!(), // Bitwise Logical Instructions
-        RiscvInstr::VOR_VI => unimplemented!(),
-        RiscvInstr::VXOR_VI => unimplemented!(),
+        RiscvInstr::VAND_VI => vec_integer_op_vi_signed::<VectorOpAnd>, // Bitwise Logical Instructions
+        RiscvInstr::VOR_VI => vec_integer_op_vi_signed::<VectorOpOr>,
+        RiscvInstr::VXOR_VI => vec_integer_op_vi_signed::<VectorOpXor>,
 
-        RiscvInstr::VSRA_VI => unimplemented!(), //  Single-Width Shift Instructions
-        RiscvInstr::VSRL_VI => unimplemented!(),
-        RiscvInstr::VSLL_VI => unimplemented!(),
+        RiscvInstr::VSRA_VI => vec_integer_op_vi_unsigned::<VectorOpSra>, //  Single-Width Shift Instructions
+        RiscvInstr::VSRL_VI => vec_integer_op_vi_unsigned::<VectorOpSrl>,
+        RiscvInstr::VSLL_VI => vec_integer_op_vi_unsigned::<VectorOpSll>,
 
         RiscvInstr::VNSRL_WI => unimplemented!(), // Widening Shift Instructions
         RiscvInstr::VNSRA_WI => unimplemented!(),
 
-        RiscvInstr::VMSEQ_VI => unimplemented!(), // Integer Compare Instructions
+        RiscvInstr::VMSEQ_VI => vec_integer_mask_op_vi::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VI => unimplemented!(),
-        RiscvInstr::VMSLEU_VI => unimplemented!(),
-        RiscvInstr::VMSLE_VI => unimplemented!(),
-        RiscvInstr::VMSGTU_VI => unimplemented!(),
-        RiscvInstr::VMSGT_VI => unimplemented!(),
+        RiscvInstr::VMSLEU_VI => vec_integer_mask_op_vi::<VectorOpMsleu>,
+        RiscvInstr::VMSLE_VI => vec_integer_mask_op_vi::<VectorOpMsle>,
+        RiscvInstr::VMSGTU_VI => vec_integer_mask_op_vi::<VectorOpMsgtu>,
+        RiscvInstr::VMSGT_VI => vec_integer_mask_op_vi::<VectorOpMsgt>,
 
-        RiscvInstr::VADC_VIM => unimplemented!(), // Add-with-Carry / Subtract-with-Borrow
-        RiscvInstr::VMADC_VI => unimplemented!(),
-        RiscvInstr::VMADC_VIM => unimplemented!(),
+        RiscvInstr::VADC_VIM => vec_integer_op_vim::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VMADC_VI => vec_integer_mask_op_vi::<VectorOpMadc>,
+        RiscvInstr::VMADC_VIM => vec_integer_mask_op_vim::<VectorOpMadc>,
 
         RiscvInstr::VMERGE_VIM | RiscvInstr::VMV_V_I => {
             |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
@@ -636,12 +637,12 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VWMULU_VV => unimplemented!(),
         RiscvInstr::VWMULSU_VV => unimplemented!(),
 
-        RiscvInstr::VZEXT_VF2 => unimplemented!(), // Vector Sign/Zero Extension Instructions (for floating-point formats)
-        RiscvInstr::VZEXT_VF4 => unimplemented!(),
-        RiscvInstr::VZEXT_VF8 => unimplemented!(),
-        RiscvInstr::VSEXT_VF2 => unimplemented!(),
-        RiscvInstr::VSEXT_VF4 => unimplemented!(),
-        RiscvInstr::VSEXT_VF8 => unimplemented!(),
+        RiscvInstr::VZEXT_VF2 => vec_integer_ext_op_v::<VectorOpZextVf2, 2>, // Vector Sign/Zero Extension Instructions (for floating-point formats)
+        RiscvInstr::VZEXT_VF4 => vec_integer_ext_op_v::<VectorOpZextVf4, 4>,
+        RiscvInstr::VZEXT_VF8 => vec_integer_ext_op_v::<VectorOpZextVf8, 8>,
+        RiscvInstr::VSEXT_VF2 => vec_integer_ext_op_v::<VectorOpSextVf2, 2>,
+        RiscvInstr::VSEXT_VF4 => vec_integer_ext_op_v::<VectorOpSextVf4, 4>,
+        RiscvInstr::VSEXT_VF8 => vec_integer_ext_op_v::<VectorOpSextVf8, 8>,
 
         RiscvInstr::VWMACCU_VV => unimplemented!(), // Widening Integer Multiply-Add Instructions
         RiscvInstr::VWMACC_VV => unimplemented!(),

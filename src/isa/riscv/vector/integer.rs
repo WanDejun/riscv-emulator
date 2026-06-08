@@ -205,7 +205,7 @@ macro_rules! dispatch_integer_sew {
 }
 
 // OPIVV
-pub(super) trait VectorOpIntegerVV {
+pub(in crate::isa::riscv) trait VectorOpIntegerVV {
     fn exec(
         vs1: &VGFRef,
         vs2: &VGFRef,
@@ -223,7 +223,7 @@ pub(super) trait VectorOpIntegerVV {
 }
 
 // OPIVX
-pub(super) trait VectorOpIntegerVX {
+pub(in crate::isa::riscv) trait VectorOpIntegerVX {
     fn exec(
         x1: WordType,
         vs2: &VGFRef,
@@ -241,7 +241,7 @@ pub(super) trait VectorOpIntegerVX {
 }
 
 // OPIV(Unary)
-pub(super) trait VectorOpIntegerV {
+pub(in crate::isa::riscv) trait VectorOpIntegerV {
     fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -259,7 +259,7 @@ pub(super) trait VectorOpIntegerV {
     }
 }
 
-pub(super) trait VectorOpIntegerVVM {
+pub(in crate::isa::riscv) trait VectorOpIntegerVVM {
     fn exec(vs1: &VGFRef, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -271,7 +271,7 @@ pub(super) trait VectorOpIntegerVVM {
     }
 }
 
-pub(super) trait VectorOpIntegerVXM {
+pub(in crate::isa::riscv) trait VectorOpIntegerVXM {
     fn exec(x1: WordType, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -283,7 +283,7 @@ pub(super) trait VectorOpIntegerVXM {
     }
 }
 
-pub(super) trait VectorOpIntegerMaskVV {
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVV {
     fn exec(vs1: &VGFRef, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -295,7 +295,7 @@ pub(super) trait VectorOpIntegerMaskVV {
     }
 }
 
-pub(super) trait VectorOpIntegerMaskVX {
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVX {
     fn exec(x1: WordType, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -307,7 +307,7 @@ pub(super) trait VectorOpIntegerMaskVX {
     }
 }
 
-pub(super) trait VectorOpIntegerMaskVVM {
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVVM {
     fn exec(vs1: &VGFRef, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -319,7 +319,7 @@ pub(super) trait VectorOpIntegerMaskVVM {
     }
 }
 
-pub(super) trait VectorOpIntegerMaskVXM {
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
     fn exec(x1: WordType, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
 
     #[cfg(test)]
@@ -387,6 +387,16 @@ macro_rules! impl_vector_op_integer_vx_binary {
     };
 }
 
+/// Generate a `VectorOpIntegerV` implementation for unary extension operations (e.g., `vzext.vf2`, `vsext.vf4`).
+///
+/// This macro dispatches on `(src_sew, dst_sew)` pairs to call the appropriate type-specific executor,
+/// converting source vector elements (`$src_ty`) to wider destination elements (`$dst_ty`).
+///
+/// # Parameters
+/// - `$op_ty`: The marker type for the vector operation (e.g., `VectorOpZextVf2`).
+/// - `$exec_ty`: The executor struct implementing `ExecUnaryTrait` (e.g., `ExecZext`, `ExecSext`).
+/// - `$factor`: The extension factor (`dst_sew / src_sew`, e.g., `2` for vf2).
+/// - `[...]`: A list of `(src_sew, dst_sew, src_ty, dst_ty)` tuples defining valid type pairs.
 macro_rules! impl_vector_op_integer_v_unary_ext {
     ($op_ty:ty, $exec_ty:ident, $factor:literal, [$(($src_sew:literal, $dst_sew:literal, $src_ty:ty, $dst_ty:ty)),+ $(,)?]) => {
         impl VectorOpIntegerV for $op_ty {
@@ -567,33 +577,33 @@ macro_rules! impl_vector_op_integer_mask_vxm_binary {
     };
 }
 
-pub(super) struct VectorOpAdd;
-pub(super) struct VectorOpAddu;
-pub(super) struct VectorOpSub;
-pub(super) struct VectorOpSubu;
-pub(super) struct VectorOpAnd;
-pub(super) struct VectorOpOr;
-pub(super) struct VectorOpXor;
-pub(super) struct VectorOpSll;
-pub(super) struct VectorOpSrl;
-pub(super) struct VectorOpSra;
-pub(super) struct VectorOpAdc;
-pub(super) struct VectorOpSbc;
-pub(super) struct VectorOpMadc;
-pub(super) struct VectorOpMsbc;
-pub(super) struct VectorOpMseq;
-pub(super) struct VectorOpMsltu;
-pub(super) struct VectorOpMslt;
-pub(super) struct VectorOpMsleu;
-pub(super) struct VectorOpMsle;
-pub(super) struct VectorOpMsgtu;
-pub(super) struct VectorOpMsgt;
-pub(super) struct VectorOpZextVf2;
-pub(super) struct VectorOpZextVf4;
-pub(super) struct VectorOpZextVf8;
-pub(super) struct VectorOpSextVf2;
-pub(super) struct VectorOpSextVf4;
-pub(super) struct VectorOpSextVf8;
+pub(in crate::isa::riscv) struct VectorOpAdd;
+pub(in crate::isa::riscv) struct VectorOpAddu;
+pub(in crate::isa::riscv) struct VectorOpSub;
+pub(in crate::isa::riscv) struct VectorOpSubu;
+pub(in crate::isa::riscv) struct VectorOpAnd;
+pub(in crate::isa::riscv) struct VectorOpOr;
+pub(in crate::isa::riscv) struct VectorOpXor;
+pub(in crate::isa::riscv) struct VectorOpSll;
+pub(in crate::isa::riscv) struct VectorOpSrl;
+pub(in crate::isa::riscv) struct VectorOpSra;
+pub(in crate::isa::riscv) struct VectorOpAdc;
+pub(in crate::isa::riscv) struct VectorOpSbc;
+pub(in crate::isa::riscv) struct VectorOpMadc;
+pub(in crate::isa::riscv) struct VectorOpMsbc;
+pub(in crate::isa::riscv) struct VectorOpMseq;
+pub(in crate::isa::riscv) struct VectorOpMsltu;
+pub(in crate::isa::riscv) struct VectorOpMslt;
+pub(in crate::isa::riscv) struct VectorOpMsleu;
+pub(in crate::isa::riscv) struct VectorOpMsle;
+pub(in crate::isa::riscv) struct VectorOpMsgtu;
+pub(in crate::isa::riscv) struct VectorOpMsgt;
+pub(in crate::isa::riscv) struct VectorOpZextVf2;
+pub(in crate::isa::riscv) struct VectorOpZextVf4;
+pub(in crate::isa::riscv) struct VectorOpZextVf8;
+pub(in crate::isa::riscv) struct VectorOpSextVf2;
+pub(in crate::isa::riscv) struct VectorOpSextVf4;
+pub(in crate::isa::riscv) struct VectorOpSextVf8;
 
 impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
@@ -648,7 +658,7 @@ impl_vector_op_integer_v_unary_ext!(
     VectorOpZextVf2,
     ExecZext,
     2,
-    [(1, 2, u8, u16), (2, 4, u16, u32), (4, 8, u32, u64)]
+    [(1, 2, u8, u16), (2, 4, u16, u32), (4, 8, u32, u64)] // (src_sew, dst_sew, src_ty, dst_ty), extend from src to dst.
 );
 impl_vector_op_integer_v_unary_ext!(
     VectorOpZextVf4,
@@ -672,7 +682,8 @@ impl_vector_op_integer_v_unary_ext!(
 impl_vector_op_integer_v_unary_ext!(VectorOpSextVf8, ExecSext, 8, [(1, 8, u8, u64)]);
 
 impl Vector {
-    fn exec_integer_vv<OpIVV>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_vv<OpIVV>(
         &mut self,
         vs1: u8,
         vs2: u8,
@@ -683,7 +694,7 @@ impl Vector {
         OpIVV: VectorOpIntegerVV,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new(
@@ -699,7 +710,8 @@ impl Vector {
         OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
     }
 
-    fn exec_integer_vx<OpIVX>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_vx<OpIVX>(
         &mut self,
         x1: WordType,
         vs2: u8,
@@ -710,7 +722,7 @@ impl Vector {
         OpIVX: VectorOpIntegerVX,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new(
             &self.vector_regfile,
@@ -724,7 +736,8 @@ impl Vector {
         OpIVX::exec(x1, &vs2_ref, &mut vd_ref, &mask)
     }
 
-    fn exec_integer_v<OpIV>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_v<OpIV>(
         &mut self,
         vs2: u8,
         vd: u8,
@@ -744,18 +757,35 @@ impl Vector {
             self.config.mask_agnostic,
             self.config.tail_agnostic,
         );
-        let vs2_ref = VGFRef::new(&vs2_data, src_eew.byte_width(), lmul, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, src_eew.into_byte_width(), lmul, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, 1)?,
-            dst_eew.byte_width(),
+            dst_eew.into_byte_width(),
             lmul,
             1,
         );
         OpIV::exec(&vs2_ref, &mut vd_ref, &mask)
     }
 
-    #[cfg(test)]
-    fn exec_integer_vvm<OpIVVM>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_v_ext<OpIV, const FACTOR: u8>(
+        &mut self,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+    ) -> Result<(), Exception>
+    where
+        OpIV: VectorOpIntegerV,
+    {
+        let dst_eew = self.config.vsew;
+        let Some(src_eew) = Vsew::from_byte_width(dst_eew.into_byte_width() / FACTOR) else {
+            return Err(Exception::IllegalInstruction);
+        };
+        self.exec_integer_v::<OpIV>(vs2, vd, src_eew, dst_eew, enable_mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_vvm<OpIVVM>(
         &mut self,
         vs1: u8,
         vs2: u8,
@@ -766,19 +796,19 @@ impl Vector {
         OpIVVM: VectorOpIntegerVVM,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
-        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.byte_width(), 1, 1);
+        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref)
     }
 
-    #[cfg(test)]
-    fn exec_integer_vxm<OpIVXM>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_vxm<OpIVXM>(
         &mut self,
         x1: WordType,
         vs2: u8,
@@ -789,37 +819,42 @@ impl Vector {
         OpIVXM: VectorOpIntegerVXM,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
-        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.byte_width(), 1, 1);
+        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref)
     }
 
-    #[cfg(test)]
-    fn exec_integer_mask_vv<OpIMVV>(&mut self, vs1: u8, vs2: u8, vd: u8) -> Result<(), Exception>
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_mask_vv<OpIMVV>(
+        &mut self,
+        vs1: u8,
+        vs2: u8,
+        vd: u8,
+    ) -> Result<(), Exception>
     where
         OpIMVV: VectorOpIntegerMaskVV,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
-            Vsew::E8.byte_width(),
+            Vsew::E8.into_byte_width(),
             1,
             1,
         );
         OpIMVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref)
     }
 
-    #[cfg(test)]
-    fn exec_integer_mask_vx<OpIMVX>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_mask_vx<OpIMVX>(
         &mut self,
         x1: WordType,
         vs2: u8,
@@ -829,20 +864,20 @@ impl Vector {
         OpIMVX: VectorOpIntegerMaskVX,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
-            Vsew::E8.byte_width(),
+            Vsew::E8.into_byte_width(),
             1,
             1,
         );
         OpIMVX::exec(x1, &vs2_ref, &mut vd_ref)
     }
 
-    #[cfg(test)]
-    fn exec_integer_mask_vvm<OpIMVVM>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_mask_vvm<OpIMVVM>(
         &mut self,
         vs1: u8,
         vs2: u8,
@@ -853,24 +888,24 @@ impl Vector {
         OpIMVVM: VectorOpIntegerMaskVVM,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
-        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.byte_width(), 1, 1);
+        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
-            Vsew::E8.byte_width(),
+            Vsew::E8.into_byte_width(),
             1,
             1,
         );
         OpIMVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref)
     }
 
-    #[cfg(test)]
-    fn exec_integer_mask_vxm<OpIMVXM>(
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_mask_vxm<OpIMVXM>(
         &mut self,
         x1: WordType,
         vs2: u8,
@@ -881,14 +916,14 @@ impl Vector {
         OpIMVXM: VectorOpIntegerMaskVXM,
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
-        let (sew, lmul) = (vsew.byte_width(), vlmul.get_lmul());
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
-        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.byte_width(), 1, 1);
+        let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
-            Vsew::E8.byte_width(),
+            Vsew::E8.into_byte_width(),
             1,
             1,
         );
