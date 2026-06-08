@@ -144,7 +144,7 @@ pub(crate) struct VectorConfig {
     pub(crate) vsew: Vsew,
     pub(crate) tail_agnostic: bool,
     pub(crate) mask_agnostic: bool,
-    pub(crate) fixed_point_accrued_aturation_flag: bool,
+    pub(crate) fixed_point_accrued_saturation_flag: bool,
     pub(crate) fixed_point_rounding_mode: FixedPointRoundingMode,
     pub(crate) vl: u16, // [0, 10240 * 8 / 8]
 }
@@ -156,7 +156,7 @@ impl VectorConfig {
             vsew: Vsew::E8,
             tail_agnostic: false,
             mask_agnostic: false,
-            fixed_point_accrued_aturation_flag: false,
+            fixed_point_accrued_saturation_flag: false,
             fixed_point_rounding_mode: FixedPointRoundingMode::RoundToNearestUp,
             vl: 0,
         }

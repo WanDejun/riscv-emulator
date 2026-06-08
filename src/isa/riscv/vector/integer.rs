@@ -263,74 +263,142 @@ pub(in crate::isa::riscv) trait VectorOpIntegerV {
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerVVM {
-    fn exec(vs1: &VGFRef, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_vvm::<Self>(param.vs1(), param.vs2(), param.v0(), param.vd())
+        vector.exec_integer_vvm::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerVXM {
-    fn exec(x1: WordType, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_vxm::<Self>(param.x1(), param.vs2(), param.v0(), param.vd())
+        vector.exec_integer_vxm::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerMaskVV {
-    fn exec(vs1: &VGFRef, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_mask_vv::<Self>(param.vs1(), param.vs2(), param.vd())
+        vector.exec_integer_mask_vv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerMaskVX {
-    fn exec(x1: WordType, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_mask_vx::<Self>(param.x1(), param.vs2(), param.vd())
+        vector.exec_integer_mask_vx::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerMaskVVM {
-    fn exec(vs1: &VGFRef, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_mask_vvm::<Self>(param.vs1(), param.vs2(), param.v0(), param.vd())
+        vector.exec_integer_mask_vvm::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
 pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
-    fn exec(x1: WordType, vs2: &VGFRef, v0: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception>;
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
 
     #[cfg(test)]
     fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
     where
         Self: Sized,
     {
-        vector.exec_integer_mask_vxm::<Self>(param.x1(), param.vs2(), param.v0(), param.vd())
+        vector.exec_integer_mask_vxm::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
     }
 }
 
@@ -352,7 +420,7 @@ macro_rules! impl_vector_op_integer_vv_binary {
                     for (index, element) in vd.iter_mut().enumerate() {
                         mask.element_load(
                             element,
-                            $exec_ty::<T>::exec(vs1[index], vs2[index])?,
+                            $exec_ty::<T>::exec(vs2[index], vs1[index])?,
                             index,
                         );
                     }
@@ -438,6 +506,7 @@ macro_rules! impl_vector_op_integer_vvm_binary {
                 vs2: &VGFRef,
                 v0: &VGFRef,
                 vd: &mut VGFRefMut,
+                mask: &VecOpMask,
             ) -> Result<(), Exception> {
                 assert!(vs1.sew == vs2.sew && vs1.sew == vd.sew);
                 let carry = v0.as_slice::<u8>();
@@ -445,11 +514,11 @@ macro_rules! impl_vector_op_integer_vvm_binary {
                     let vs1 = vs1.as_slice::<T>();
                     let vs2 = vs2.as_slice::<T>();
                     for (index, element) in vd.iter_mut().enumerate() {
-                        element.set($exec_ty::exec(
-                            vs2[index],
-                            vs1[index],
-                            read_mask_bit(carry, index),
-                        )?);
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], vs1[index], read_mask_bit(carry, index))?,
+                            index,
+                        );
                     }
                 });
                 Ok(())
@@ -466,6 +535,7 @@ macro_rules! impl_vector_op_integer_vxm_binary {
                 vs2: &VGFRef,
                 v0: &VGFRef,
                 vd: &mut VGFRefMut,
+                mask: &VecOpMask,
             ) -> Result<(), Exception> {
                 assert!(vs2.sew == vd.sew);
                 let carry = v0.as_slice::<u8>();
@@ -473,11 +543,11 @@ macro_rules! impl_vector_op_integer_vxm_binary {
                     let scalar = x1 as T;
                     let vs2 = vs2.as_slice::<T>();
                     for (index, element) in vd.iter_mut().enumerate() {
-                        element.set($exec_ty::exec(
-                            vs2[index],
-                            scalar,
-                            read_mask_bit(carry, index),
-                        )?);
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], scalar, read_mask_bit(carry, index))?,
+                            index,
+                        );
                     }
                 });
                 Ok(())
@@ -489,14 +559,19 @@ macro_rules! impl_vector_op_integer_vxm_binary {
 macro_rules! impl_vector_op_integer_mask_vv_binary {
     ($op_ty:ty, $exec_ty:ident) => {
         impl VectorOpIntegerMaskVV for $op_ty {
-            fn exec(vs1: &VGFRef, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception> {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
                 assert!(vs1.sew == vs2.sew);
                 let mask = vd.as_mut_slice::<u8>();
                 dispatch_integer_sew!(vs2.sew, |T| {
                     let vs1 = vs1.as_slice::<T>();
                     let vs2 = vs2.as_slice::<T>();
                     for index in 0..vs2.len() {
-                        write_mask_bit(mask, index, $exec_ty::exec(vs2[index], vs1[index]));
+                        op_mask.mask_bit_load(mask, index, $exec_ty::exec(vs2[index], vs1[index]));
                     }
                 });
                 Ok(())
@@ -508,13 +583,18 @@ macro_rules! impl_vector_op_integer_mask_vv_binary {
 macro_rules! impl_vector_op_integer_mask_vx_binary {
     ($op_ty:ty, $exec_ty:ident) => {
         impl VectorOpIntegerMaskVX for $op_ty {
-            fn exec(x1: WordType, vs2: &VGFRef, vd: &mut VGFRefMut) -> Result<(), Exception> {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
                 let mask = vd.as_mut_slice::<u8>();
                 dispatch_integer_sew!(vs2.sew, |T| {
                     let scalar = x1 as T;
                     let vs2 = vs2.as_slice::<T>();
                     for index in 0..vs2.len() {
-                        write_mask_bit(mask, index, $exec_ty::exec(vs2[index], scalar));
+                        op_mask.mask_bit_load(mask, index, $exec_ty::exec(vs2[index], scalar));
                     }
                 });
                 Ok(())
@@ -531,6 +611,7 @@ macro_rules! impl_vector_op_integer_mask_vvm_binary {
                 vs2: &VGFRef,
                 v0: &VGFRef,
                 vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
             ) -> Result<(), Exception> {
                 assert!(vs1.sew == vs2.sew);
                 let carry = v0.as_slice::<u8>();
@@ -539,7 +620,7 @@ macro_rules! impl_vector_op_integer_mask_vvm_binary {
                     let vs1 = vs1.as_slice::<T>();
                     let vs2 = vs2.as_slice::<T>();
                     for index in 0..vs2.len() {
-                        write_mask_bit(
+                        op_mask.mask_bit_load(
                             mask,
                             index,
                             $exec_ty::exec(vs2[index], vs1[index], read_mask_bit(carry, index))?,
@@ -560,6 +641,7 @@ macro_rules! impl_vector_op_integer_mask_vxm_binary {
                 vs2: &VGFRef,
                 v0: &VGFRef,
                 vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
             ) -> Result<(), Exception> {
                 let carry = v0.as_slice::<u8>();
                 let mask = vd.as_mut_slice::<u8>();
@@ -567,7 +649,7 @@ macro_rules! impl_vector_op_integer_mask_vxm_binary {
                     let scalar = x1 as T;
                     let vs2 = vs2.as_slice::<T>();
                     for index in 0..vs2.len() {
-                        write_mask_bit(
+                        op_mask.mask_bit_load(
                             mask,
                             index,
                             $exec_ty::exec(vs2[index], scalar, read_mask_bit(carry, index))?,
@@ -632,6 +714,18 @@ impl_vector_op_integer_vv_binary!(VectorOpXor, ExecXor);
 impl_vector_op_integer_vv_binary!(VectorOpSll, ExecSLL);
 impl_vector_op_integer_vv_binary!(VectorOpSrl, ExecSRL);
 impl_vector_op_integer_vv_binary!(VectorOpSra, ExecSRA);
+impl_vector_op_integer_vv_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vv_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vv_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vv_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vv_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vv_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
 
 impl_vector_op_integer_vx_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vx_binary!(VectorOpAddu, ExecAddu);
@@ -644,6 +738,18 @@ impl_vector_op_integer_vx_binary!(VectorOpXor, ExecXor);
 impl_vector_op_integer_vx_binary!(VectorOpSll, ExecSLL);
 impl_vector_op_integer_vx_binary!(VectorOpSrl, ExecSRL);
 impl_vector_op_integer_vx_binary!(VectorOpSra, ExecSRA);
+impl_vector_op_integer_vx_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vx_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vx_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vx_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vx_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vx_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vx_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vx_binary!(VectorOpRemu, ExecRemUnsigned);
 
 impl_vector_op_integer_vvm_binary!(VectorOpAdc, ExecAdc);
 impl_vector_op_integer_vxm_binary!(VectorOpAdc, ExecAdc);
@@ -673,31 +779,6 @@ impl_vector_op_integer_mask_vv_binary!(VectorOpMsle, ExecSignedLessEqual);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsle, ExecSignedLessEqual);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsgtu, ExecUnsignedGreaterX);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsgt, ExecSignedGreaterX);
-
-impl_vector_op_integer_vv_binary!(VectorOpMax, ExecMax);
-impl_vector_op_integer_vv_binary!(VectorOpMaxu, ExecMaxu);
-impl_vector_op_integer_vv_binary!(VectorOpMin, ExecMin);
-impl_vector_op_integer_vv_binary!(VectorOpMinu, ExecMinu);
-impl_vector_op_integer_vx_binary!(VectorOpMax, ExecMax);
-impl_vector_op_integer_vx_binary!(VectorOpMaxu, ExecMaxu);
-impl_vector_op_integer_vx_binary!(VectorOpMin, ExecMin);
-impl_vector_op_integer_vx_binary!(VectorOpMinu, ExecMinu);
-impl_vector_op_integer_vv_binary!(VectorOpMul, ExecMulLow);
-impl_vector_op_integer_vv_binary!(VectorOpMulh, ExecMulHighSigned);
-impl_vector_op_integer_vv_binary!(VectorOpMulhu, ExecMulHighUnsigned);
-impl_vector_op_integer_vv_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
-impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
-impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
-impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
-impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
-impl_vector_op_integer_vx_binary!(VectorOpMul, ExecMulLow);
-impl_vector_op_integer_vx_binary!(VectorOpMulh, ExecMulHighSigned);
-impl_vector_op_integer_vx_binary!(VectorOpMulhu, ExecMulHighUnsigned);
-impl_vector_op_integer_vx_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
-impl_vector_op_integer_vx_binary!(VectorOpDiv, ExecDivSigned);
-impl_vector_op_integer_vx_binary!(VectorOpDivu, ExecDivUnsigned);
-impl_vector_op_integer_vx_binary!(VectorOpRem, ExecRemSigned);
-impl_vector_op_integer_vx_binary!(VectorOpRemu, ExecRemUnsigned);
 
 impl_vector_op_integer_v_unary_ext!(
     VectorOpZextVf2,
@@ -836,6 +917,7 @@ impl Vector {
         vs2: u8,
         v0: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIVVM: VectorOpIntegerVVM,
@@ -845,11 +927,18 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
-        OpIVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref)
+        OpIVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref, &mask)
     }
 
     #[inline]
@@ -859,6 +948,7 @@ impl Vector {
         vs2: u8,
         v0: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIVXM: VectorOpIntegerVXM,
@@ -867,10 +957,17 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
-        OpIVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref)
+        OpIVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref, &mask)
     }
 
     #[inline]
@@ -879,6 +976,7 @@ impl Vector {
         vs1: u8,
         vs2: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIMVV: VectorOpIntegerMaskVV,
@@ -887,6 +985,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -895,7 +1000,7 @@ impl Vector {
             1,
             1,
         );
-        OpIMVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref)
+        OpIMVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
     }
 
     #[inline]
@@ -904,6 +1009,7 @@ impl Vector {
         x1: WordType,
         vs2: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIMVX: VectorOpIntegerMaskVX,
@@ -911,6 +1017,13 @@ impl Vector {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
@@ -918,7 +1031,7 @@ impl Vector {
             1,
             1,
         );
-        OpIMVX::exec(x1, &vs2_ref, &mut vd_ref)
+        OpIMVX::exec(x1, &vs2_ref, &mut vd_ref, &mask)
     }
 
     #[inline]
@@ -928,6 +1041,7 @@ impl Vector {
         vs2: u8,
         v0: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIMVVM: VectorOpIntegerMaskVVM,
@@ -937,6 +1051,13 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
@@ -946,7 +1067,7 @@ impl Vector {
             1,
             1,
         );
-        OpIMVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref)
+        OpIMVVM::exec(&vs1_ref, &vs2_ref, &v0_ref, &mut vd_ref, &mask)
     }
 
     #[inline]
@@ -956,6 +1077,7 @@ impl Vector {
         vs2: u8,
         v0: u8,
         vd: u8,
+        enable_mask: bool,
     ) -> Result<(), Exception>
     where
         OpIMVXM: VectorOpIntegerMaskVXM,
@@ -964,6 +1086,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -972,7 +1101,7 @@ impl Vector {
             1,
             1,
         );
-        OpIMVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref)
+        OpIMVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref, &mask)
     }
 }
 
@@ -1301,7 +1430,7 @@ mod test {
         let expected: Vec<u32> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| lhs.wrapping_sub(*rhs))
+            .map(|(rhs, lhs)| lhs.wrapping_sub(*rhs))
             .collect();
         run_vv_binary_u32::<VectorOpSub>(&vs1, &vs2, &expected);
         run_vv_binary_u32::<VectorOpSubu>(&vs1, &vs2, &expected);
@@ -1316,21 +1445,21 @@ mod test {
         let expected: Vec<u32> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| lhs.wrapping_shl(rhs & 31))
+            .map(|(rhs, lhs)| lhs.wrapping_shl(rhs & 31))
             .collect();
         run_vv_binary_u32::<VectorOpSll>(&vs1, &vs2, &expected);
 
         let expected: Vec<u32> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| lhs.wrapping_shr(rhs & 31))
+            .map(|(rhs, lhs)| lhs.wrapping_shr(rhs & 31))
             .collect();
         run_vv_binary_u32::<VectorOpSrl>(&vs1, &vs2, &expected);
 
         let expected: Vec<u32> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| (as_signed_i128(*lhs) >> (rhs & 31)) as u32)
+            .map(|(rhs, lhs)| (as_signed_i128(*lhs) >> (rhs & 31)) as u32)
             .collect();
         run_vv_binary_u32::<VectorOpSra>(&vs1, &vs2, &expected);
 
@@ -1540,35 +1669,35 @@ mod test {
         let expected: Vec<u64> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| ((as_signed_i128(*lhs) * (*rhs as u128 as i128)) >> 64) as u64)
+            .map(|(rhs, lhs)| ((as_signed_i128(*lhs) * (*rhs as u128 as i128)) >> 64) as u64)
             .collect();
         run_vv_binary_u64::<VectorOpMulhsu>(&vs1, &vs2, &expected);
 
         let expected: Vec<u64> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| signed_div_u64(*lhs, *rhs))
+            .map(|(rhs, lhs)| signed_div_u64(*lhs, *rhs))
             .collect();
         run_vv_binary_u64::<VectorOpDiv>(&vs1, &vs2, &expected);
 
         let expected: Vec<u64> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| if *rhs == 0 { u64::MAX } else { lhs / rhs })
+            .map(|(rhs, lhs)| if *rhs == 0 { u64::MAX } else { lhs / rhs })
             .collect();
         run_vv_binary_u64::<VectorOpDivu>(&vs1, &vs2, &expected);
 
         let expected: Vec<u64> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| signed_rem_u64(*lhs, *rhs))
+            .map(|(rhs, lhs)| signed_rem_u64(*lhs, *rhs))
             .collect();
         run_vv_binary_u64::<VectorOpRem>(&vs1, &vs2, &expected);
 
         let expected: Vec<u64> = vs1
             .iter()
             .zip(vs2.iter())
-            .map(|(lhs, rhs)| if *rhs == 0 { *lhs } else { lhs % rhs })
+            .map(|(rhs, lhs)| if *rhs == 0 { *lhs } else { lhs % rhs })
             .collect();
         run_vv_binary_u64::<VectorOpRemu>(&vs1, &vs2, &expected);
 
@@ -1668,6 +1797,41 @@ mod test {
     }
 
     #[test]
+    fn test_vector_op_mask_vv_honors_mask_and_tail() {
+        const LMUL: Vlmul = Vlmul::M1;
+        const SEW: Vsew = Vsew::E8;
+        let param = TestOpParameter::new_mask_vv(8, 16, 24).with_enable_mask(true);
+        let elem_count = VLEN_BYTE;
+        let vl = 8;
+        let vs1: Vec<u8> = (0..elem_count)
+            .map(|i| [1, 2, 3, 4, 5, 6, 7, 8][i % 8])
+            .collect();
+        let vs2: Vec<u8> = (0..elem_count)
+            .map(|i| [1, 9, 3, 0, 5, 0, 7, 0][i % 8])
+            .collect();
+        let pred_mask = mask_from_bits((0..elem_count).map(|i| i % 2 == 0));
+        let mut expected = vec![0xff; VLEN_BYTE];
+        for index in 0..vl {
+            if mask_bit(&pred_mask, index) {
+                write_mask_bit(&mut expected, index, vs2[index] == vs1[index]);
+            }
+        }
+
+        run_test_integer_mask_vv::<VectorOpMseq, _, _>(
+            param,
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, false, vl as u16)
+                    .reg(1, param.v0(), &pred_mask)
+                    .reg(1, param.vd(), &[0xffu8; VLEN_BYTE])
+                    .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                    .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+            },
+            |checker| checker.reg(1, param.vd(), &expected),
+        );
+    }
+
+    #[test]
     fn test_vector_op_mask_vx() {
         let elem_count = VLEN_BYTE;
         let vs2: Vec<u8> = (0..elem_count)
@@ -1717,6 +1881,42 @@ mod test {
             |(index, (vs1, vs2))| (*vs2 as u16) < (*vs1 as u16 + mask_bit(&carry, index) as u16),
         ));
         run_mask_vvm_u8::<VectorOpMsbc>(&vs1, &vs2, &carry, &expected);
+    }
+
+    #[test]
+    fn test_vector_op_adc_vvm_honors_tail() {
+        const LMUL: Vlmul = Vlmul::M1;
+        const SEW: Vsew = Vsew::E8;
+        let param = TestOpParameter::new_vvm(8, 16, 24);
+        let elem_count = VLEN_BYTE;
+        let vl = 5;
+        let vs1: Vec<u8> = (0..elem_count).map(|i| i as u8).collect();
+        let vs2: Vec<u8> = (0..elem_count)
+            .map(|i| 0x80u8.wrapping_add(i as u8))
+            .collect();
+        let carry = mask_from_bits((0..elem_count).map(|i| i % 2 == 1));
+        let mut expected = vec![0xaa; elem_count];
+        for index in 0..vl {
+            expected[index] = vs2[index]
+                .wrapping_add(vs1[index])
+                .wrapping_add(mask_bit(&carry, index) as u8);
+        }
+        for value in expected.iter_mut().skip(vl) {
+            *value = 0;
+        }
+
+        run_test_integer_vvm::<VectorOpAdc, _, _>(
+            param,
+            |builder| {
+                builder
+                    .config(LMUL, SEW, false, true, vl as u16)
+                    .reg(1, param.v0(), &carry)
+                    .reg(LMUL.get_lmul(), param.vd(), &[0xaau8; VLEN_BYTE])
+                    .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                    .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+            },
+            |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+        );
     }
 
     #[test]

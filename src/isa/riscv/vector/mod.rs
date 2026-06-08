@@ -37,7 +37,7 @@ struct VectorStrideAddrCal {
 impl VectorStrideAddrCal {
     #[inline(always)]
     fn exec(&self, index: WordType) -> Result<WordType, MemError> {
-        Ok(self.base + index * self.stride)
+        Ok(self.base.wrapping_add(index.wrapping_mul(self.stride)))
     }
 }
 
@@ -57,11 +57,57 @@ impl VectorIndexedAddrCal {
     where
         R: FnOnce(WordType, u32) -> Result<WordType, MemError>,
     {
-        Ok(self.base
-            + mem_reader(
-                self.index_arr_base + self.index_width as WordType * index,
-                self.index_width as u32,
-            )?)
+        let index_addr = self
+            .index_arr_base
+            .wrapping_add((self.index_width as WordType).wrapping_mul(index));
+        Ok(self
+            .base
+            .wrapping_add(mem_reader(index_addr, self.index_width as u32)?))
+    }
+}
+
+/// Error returned by vector memory helpers.
+///
+/// Memory faults need to carry the element index that caused the trap so the
+/// instruction wrapper can write `vstart` precisely before raising the exception.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum VectorMemException {
+    Memory {
+        fault_index: usize,
+        exception: Exception,
+    },
+    /// Non-memory errors, such as illegal register grouping, do not update `vstart`.
+    Other(Exception),
+}
+
+impl VectorMemException {
+    #[inline]
+    fn memory(fault_index: usize, err: MemError) -> Self {
+        Self::Memory {
+            fault_index,
+            exception: err.into(),
+        }
+    }
+
+    #[inline]
+    pub(super) fn fault_index(&self) -> Option<usize> {
+        match self {
+            Self::Memory { fault_index, .. } => Some(*fault_index),
+            Self::Other(_) => None,
+        }
+    }
+
+    #[inline]
+    pub(super) fn exception(&self) -> Exception {
+        match self {
+            Self::Memory { exception, .. } | Self::Other(exception) => *exception,
+        }
+    }
+}
+
+impl From<Exception> for VectorMemException {
+    fn from(value: Exception) -> Self {
+        Self::Other(value)
     }
 }
 
@@ -110,25 +156,31 @@ impl VecOpMask {
     }
 
     #[inline(always)]
-    fn load_value<T>(&self, value: T, index: usize) -> Option<T>
+    pub fn should_access(&self, index: usize) -> bool {
+        // Only active body elements may perform memory address calculation or access.
+        // Masked-off and tail elements must not fault.
+        self.is_active_body(index)
+    }
+
+    #[inline(always)]
+    fn mask_value<T>(&self, value: T, index: usize) -> Option<T>
     where
         T: Default,
     {
-        let (mask, tail) = (self.bit(index), index >= self.length as usize);
-        if tail {
+        // `None` means undisturbed: keep the old destination value.
+        // `Some(default)` models the current agnostic policy as zero-fill.
+        if index >= self.length as usize {
             if self.tail_agnostic {
                 Some(T::default())
             } else {
                 None
             }
-        } else if mask {
+        } else if self.bit(index) {
             Some(value)
+        } else if self.mask_agnostic {
+            Some(T::default())
         } else {
-            if self.mask_agnostic {
-                Some(T::default())
-            } else {
-                None
-            }
+            None
         }
     }
 
@@ -137,9 +189,52 @@ impl VecOpMask {
     where
         T: Default,
     {
-        match self.load_value(value, index) {
+        // All vector load-like writes go through this helper so tail/mask policy
+        // is applied consistently across memory and integer operations.
+        match self.mask_value(value, index) {
             Some(v) => element.set(v),
             None => (),
+        }
+    }
+
+    #[inline]
+    pub fn element_load_default<T>(&self, element: types::RVVElemMutTy, index: usize)
+    where
+        T: Default,
+    {
+        self.element_load(element, T::default(), index);
+    }
+
+    #[inline]
+    pub fn element_load_default_by_sew(
+        &self,
+        element: types::RVVElemMutTy,
+        index: usize,
+        sew: Vsew,
+    ) {
+        // Used when no real value is produced, e.g. tail or masked-off load elements.
+        match sew {
+            Vsew::E8 => self.element_load_default::<u8>(element, index),
+            Vsew::E16 => self.element_load_default::<u16>(element, index),
+            Vsew::E32 => self.element_load_default::<u32>(element, index),
+            Vsew::E64 => self.element_load_default::<u64>(element, index),
+        }
+    }
+
+    #[inline]
+    pub fn mask_bit_load(&self, mask: &mut [u8], index: usize, value: bool) {
+        // Mask destination registers are packed bits, but they still follow the
+        // same tail/mask undisturbed-vs-agnostic decision as normal elements.
+        let Some(value) = self.mask_value(value, index) else {
+            return;
+        };
+
+        let byte = &mut mask[index / 8];
+        let bit = 1 << (index % 8);
+        if value {
+            *byte |= bit;
+        } else {
+            *byte &= !bit;
         }
     }
 
@@ -153,6 +248,7 @@ impl VecOpMask {
     where
         F: FnOnce(T) -> Result<(), MemError>,
     {
+        // Stores are side-effecting, so inactive elements simply do nothing.
         if self.is_active_body(index) {
             store_fn(elem_value.get::<T>())
         } else {
@@ -227,9 +323,10 @@ impl Vector {
         seg: u8,
         stride: Option<WordType>,
         enable_mask: bool,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let f = VectorStrideAddrCal {
             base: base_addr,
             stride: stride.unwrap_or(eew.into_byte_width() as WordType),
@@ -249,41 +346,43 @@ impl Vector {
             seg,
         );
 
-        let mut err = Ok(());
-        // if set tail undisturbed, jump tail element
-        vd_ref
-            .iter_mut()
-            .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
-            .for_each(|(index, element)| {
-                let addr = match f.exec(index as WordType) {
-                    Ok(addr) => addr,
-                    Err(_) => unreachable!(),
-                };
+        let active_len = self.config.vl as usize * seg as usize;
+        // Resume at `vstart`; elements before it have already completed before
+        // the previous precise trap.
+        for (index, element) in vd_ref.iter_mut().enumerate().skip(vstart) {
+            // Do this before address generation so inactive/tail elements cannot
+            // raise memory exceptions. Tail/mask agnostic policy is handled by
+            // writing a default value when the config asks for it.
+            if index >= active_len || !mask.should_access(index) {
+                mask.element_load_default_by_sew(element, index, eew);
+                continue;
+            }
 
-                match eew {
-                    Vsew::E8 => match mem.read_u8(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E16 => match mem.read_u16(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E32 => match mem.read_u32(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E64 => match mem.read_u64(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                }
-            });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
+            let addr = match f.exec(index as WordType) {
+                Ok(addr) => addr,
+                Err(_) => unreachable!(),
+            };
+
+            match eew {
+                Vsew::E8 => match mem.read_u8(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E16 => match mem.read_u16(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E32 => match mem.read_u32(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E64 => match mem.read_u64(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+            }
         }
+        Ok(())
     }
 
     /// Execute vl[nf]r.v — whole vector register load, always unmasked.
@@ -300,9 +399,10 @@ impl Vector {
         &mut self,
         vd: u8,
         nf: u8,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
@@ -317,8 +417,9 @@ impl Vector {
             1,
         );
 
-        let mut err = Ok(());
-        vd_ref.iter_mut().enumerate().for_each(|(index, element)| {
+        // Whole-register transfers also honor `vstart` for resumability, even
+        // though they ignore normal `vl`/mask/tail policy.
+        for (index, element) in vd_ref.iter_mut().enumerate().skip(vstart) {
             let addr = match f.exec(index as WordType) {
                 Ok(addr) => addr,
                 Err(_) => unreachable!(),
@@ -326,13 +427,10 @@ impl Vector {
 
             match mem.read_u64(addr) {
                 Ok(ram_value) => element.set(ram_value),
-                Err(e) => err = Err(e),
+                Err(e) => return Err(VectorMemException::memory(index, e)),
             };
-        });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
         }
+        Ok(())
     }
 
     pub(super) fn indexed_ordered_load(
@@ -342,9 +440,10 @@ impl Vector {
         seg: u8,
         index_arr_base: WordType,
         enable_mask: bool,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
@@ -365,44 +464,40 @@ impl Vector {
             seg,
         );
 
-        let mut err = Ok(());
-        // if set tail undisturbed, jump tail element
-        vd_ref
-            .iter_mut()
-            .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
-            .for_each(|(index, element)| {
-                let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        err = Err(e);
-                        return;
-                    }
-                };
+        let active_len = self.config.vl as usize * seg as usize;
+        // Indexed loads must skip inactive elements before reading the index
+        // array; otherwise a masked-off index could incorrectly fault.
+        for (index, element) in vd_ref.iter_mut().enumerate().skip(vstart) {
+            if index >= active_len || !mask.should_access(index) {
+                mask.element_load_default_by_sew(element, index, self.config.vsew);
+                continue;
+            }
 
-                match self.config.vsew {
-                    Vsew::E8 => match mem.read_u8(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E16 => match mem.read_u16(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E32 => match mem.read_u32(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                    Vsew::E64 => match mem.read_u64(addr) {
-                        Ok(ram_value) => mask.element_load(element, ram_value, index),
-                        Err(e) => err = Err(e),
-                    },
-                }
-            });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
+            let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
+                Ok(addr) => addr,
+                Err(e) => return Err(VectorMemException::memory(index, e)),
+            };
+
+            match self.config.vsew {
+                Vsew::E8 => match mem.read_u8(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E16 => match mem.read_u16(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E32 => match mem.read_u32(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+                Vsew::E64 => match mem.read_u64(addr) {
+                    Ok(ram_value) => mask.element_load(element, ram_value, index),
+                    Err(e) => return Err(VectorMemException::memory(index, e)),
+                },
+            }
         }
+        Ok(())
     }
 
     // ================= STORE =================
@@ -413,9 +508,10 @@ impl Vector {
         seg: u8,
         stride: Option<WordType>,
         enable_mask: bool,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let f = VectorStrideAddrCal {
             base: base_addr,
             stride: stride.unwrap_or(eew.into_byte_width() as WordType),
@@ -435,39 +531,39 @@ impl Vector {
             self.config.tail_agnostic,
         );
 
-        let mut err = Ok(());
-        // if set tail undisturbed, jump tail element
-        vd_ref
-            .iter()
-            .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
-            .for_each(|(index, element)| {
-                let addr = match f.exec(index as WordType) {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        err = Err(e);
-                        return;
-                    }
-                };
-                match eew {
-                    Vsew::E8 => mask
-                        .element_store(|v| mem.write_u8(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E16 => mask
-                        .element_store(|v| mem.write_u16(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E32 => mask
-                        .element_store(|v| mem.write_u32(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E64 => mask
-                        .element_store(|v| mem.write_u64(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                }
-            });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
+        let active_len = self.config.vl as usize * seg as usize;
+        // Stores have no destination tail policy to apply; tail elements simply
+        // perform no memory access.
+        for (index, element) in vd_ref.iter().enumerate().skip(vstart) {
+            if index >= active_len {
+                break;
+            }
+            // Check the mask before address generation so inactive stores are
+            // side-effect free and cannot fault.
+            if !mask.should_access(index) {
+                continue;
+            }
+
+            let addr = match f.exec(index as WordType) {
+                Ok(addr) => addr,
+                Err(e) => return Err(VectorMemException::memory(index, e)),
+            };
+            match eew {
+                Vsew::E8 => mask
+                    .element_store(|v| mem.write_u8(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E16 => mask
+                    .element_store(|v| mem.write_u16(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E32 => mask
+                    .element_store(|v| mem.write_u32(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E64 => mask
+                    .element_store(|v| mem.write_u64(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+            }
         }
+        Ok(())
     }
 
     pub(super) fn indexed_ordered_store(
@@ -477,9 +573,10 @@ impl Vector {
         seg: u8,
         index_arr_base: WordType,
         enable_mask: bool,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let f = VectorIndexedAddrCal {
             base: base_addr,
             index_arr_base,
@@ -500,39 +597,36 @@ impl Vector {
             self.config.tail_agnostic,
         );
 
-        let mut err = Ok(());
-        // if set tail undisturbed, jump tail element
-        vd_ref
-            .iter()
-            .enumerate()
-            .filter(|v| v.0 < self.config.vl as usize * seg as usize || self.config.tail_agnostic)
-            .for_each(|(index, element)| {
-                let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        err = Err(e);
-                        return;
-                    }
-                };
-                match self.config.vsew {
-                    Vsew::E8 => mask
-                        .element_store(|v| mem.write_u8(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E16 => mask
-                        .element_store(|v| mem.write_u16(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E32 => mask
-                        .element_store(|v| mem.write_u32(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                    Vsew::E64 => mask
-                        .element_store(|v| mem.write_u64(addr, v), element, index)
-                        .unwrap_or_else(|e| err = Err(e.into())),
-                }
-            });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
+        let active_len = self.config.vl as usize * seg as usize;
+        // Indexed stores must not fetch the index for inactive elements.
+        for (index, element) in vd_ref.iter().enumerate().skip(vstart) {
+            if index >= active_len {
+                break;
+            }
+            if !mask.should_access(index) {
+                continue;
+            }
+
+            let addr = match f.exec(index as WordType, |addr, len| mem.read(addr, len)) {
+                Ok(addr) => addr,
+                Err(e) => return Err(VectorMemException::memory(index, e)),
+            };
+            match self.config.vsew {
+                Vsew::E8 => mask
+                    .element_store(|v| mem.write_u8(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E16 => mask
+                    .element_store(|v| mem.write_u16(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E32 => mask
+                    .element_store(|v| mem.write_u32(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+                Vsew::E64 => mask
+                    .element_store(|v| mem.write_u64(addr, v), element, index)
+                    .map_err(|e| VectorMemException::memory(index, e))?,
+            }
         }
+        Ok(())
     }
 
     /// Execute vs[nf]r.v — whole vector register store, always unmasked.
@@ -549,9 +643,10 @@ impl Vector {
         &mut self,
         vs: u8,
         nf: u8,
+        vstart: usize,
         base_addr: WordType,
         mem: &mut MemoryMapIO,
-    ) -> Result<(), Exception> {
+    ) -> Result<(), VectorMemException> {
         let eew = Vsew::E64;
         let f = VectorStrideAddrCal {
             base: base_addr,
@@ -565,21 +660,19 @@ impl Vector {
             1,
         );
 
-        let mut err = Ok(());
-        vs_ref.iter().enumerate().for_each(|(index, element)| {
+        // Whole-register store is unmasked and ignores `vl`, but it can still
+        // resume after a precise memory trap using `vstart`.
+        for (index, element) in vs_ref.iter().enumerate().skip(vstart) {
             let addr = match f.exec(index as WordType) {
                 Ok(addr) => addr,
                 Err(_) => unreachable!(),
             };
 
             if let Err(e) = mem.write_u64(addr, element.get::<u64>()) {
-                err = Err(e);
+                return Err(VectorMemException::memory(index, e));
             }
-        });
-        match err {
-            Err(err) => Err(err.into()),
-            Ok(()) => Ok(()),
         }
+        Ok(())
     }
 }
 
@@ -604,7 +697,7 @@ mod test {
 
         // --------------- Seg = 1 ---------------
         vector
-            .stride_load(2, Vsew::E8, 1, None, false, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 1, None, false, 0, BASE_ADDR, &mut mmio)
             .unwrap();
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
             let vector_ref = checker
@@ -625,7 +718,7 @@ mod test {
             VLEN_BYTE as u16 * Vlmul::M1.get_lmul() as u16,
         ));
         vector
-            .stride_load(2, Vsew::E8, 2, None, false, BASE_ADDR, &mut mmio)
+            .stride_load(2, Vsew::E8, 2, None, false, 0, BASE_ADDR, &mut mmio)
             .unwrap();
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
             let vector_ref = checker
@@ -655,7 +748,7 @@ mod test {
             .build();
 
         vector
-            .stride_store(2, Vsew::E8, 1, None, false, store_addr, &mut mmio)
+            .stride_store(2, Vsew::E8, 1, None, false, 0, store_addr, &mut mmio)
             .unwrap();
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
             for (i, expected) in test_values.iter().copied().enumerate() {
@@ -687,7 +780,16 @@ mod test {
             );
         }
         vector
-            .stride_store(0, Vsew::E32, SEG_SIZE, None, false, store_addr, &mut mmio)
+            .stride_store(
+                0,
+                Vsew::E32,
+                SEG_SIZE,
+                None,
+                false,
+                0,
+                store_addr,
+                &mut mmio,
+            )
             .unwrap();
         VectorChecker::new(&mut vector, &mut mmio)
             .customized(|checker| {
@@ -733,7 +835,16 @@ mod test {
             .build();
 
         vector
-            .indexed_ordered_load(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
+            .indexed_ordered_load(
+                0,
+                Vsew::E32,
+                1,
+                index_arr_base,
+                false,
+                0,
+                data_base,
+                &mut mmio,
+            )
             .unwrap();
 
         let expected: Vec<u32> = (0..(VLEN_BYTE / size_of::<u32>()))
@@ -766,7 +877,16 @@ mod test {
             .build();
 
         vector
-            .indexed_ordered_store(0, Vsew::E32, 1, index_arr_base, false, data_base, &mut mmio)
+            .indexed_ordered_store(
+                0,
+                Vsew::E32,
+                1,
+                index_arr_base,
+                false,
+                0,
+                data_base,
+                &mut mmio,
+            )
             .unwrap();
 
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
@@ -808,7 +928,7 @@ mod test {
             .build();
 
         vector
-            .stride_load(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .stride_load(8, SEW, 1, None, true, 0, base_addr, &mut mmio)
             .unwrap();
 
         let expected: Vec<ElemType> = (0..elem_cnt)
@@ -845,7 +965,7 @@ mod test {
             .build();
 
         vector
-            .stride_load(8, SEW, 1, None, false, base_addr, &mut mmio)
+            .stride_load(8, SEW, 1, None, false, 0, base_addr, &mut mmio)
             .unwrap();
 
         let expected: Vec<ElemType> = (0..elem_cnt)
@@ -890,7 +1010,7 @@ mod test {
             .build();
 
         vector
-            .stride_store(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .stride_store(8, SEW, 1, None, true, 0, base_addr, &mut mmio)
             .unwrap();
 
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
@@ -933,7 +1053,7 @@ mod test {
             .build();
 
         vector
-            .stride_store(8, SEW, 1, None, true, base_addr, &mut mmio)
+            .stride_store(8, SEW, 1, None, true, 0, base_addr, &mut mmio)
             .unwrap();
 
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
@@ -964,7 +1084,7 @@ mod test {
             .build();
 
         vector
-            .load_whole_register(8, 7, base_addr, &mut mmio)
+            .load_whole_register(8, 7, 0, base_addr, &mut mmio)
             .unwrap();
 
         VectorChecker::new(&mut vector, &mut mmio).reg(8, 8, &test_values);
@@ -982,7 +1102,7 @@ mod test {
             .build();
 
         vector
-            .store_whole_register(8, 7, base_addr, &mut mmio)
+            .store_whole_register(8, 7, 0, base_addr, &mut mmio)
             .unwrap();
 
         VectorChecker::new(&mut vector, &mut mmio).customized(|checker| {
