@@ -47,8 +47,6 @@ int main() {
         // do nothing
     }
 
-    TEST_END(__BASE_FILE__);
-
-    PowerOff();
+    pass();
     return 0;
 }

@@ -38,24 +38,21 @@ void external_irq_handler() {
     trap_cnt++;
 
     uint64_t mip = read_csr_mip();
-    mip &= ~(1 << 11);  // clear MEIP
+    mip &= ~(1ull << 11);  // clear MEIP
     write_csr_mip(mip);
     plic->context_config[0].claimed_id = claimed_id;  // complete
 }
 
 void trap_handler(TrapContext* trap_ctx) {
     uint64_t mcause = read_csr_mcause();
-    if (mcause == (1ll << 63 | 11)) {  // machine external interrupt
+    if (mcause == ((1ull << 63) | 11)) {  // machine external interrupt
         printf("interrupt happend...\n");
         external_irq_handler();
     }
     __traps_return(trap_ctx);
 }
 
-const uint64_t PLIC_CONTEXT_CONFIG_OFFSET = 0x200000;
-const uint64_t PLIC_CONTEXT_CONFIG_SIZE = 0x1000;
 void plic_set_threshold(uint32_t context, uint32_t threshold) {
-    uint64_t addr = PLIC_CONTEXT_CONFIG_OFFSET + (context * PLIC_CONTEXT_CONFIG_SIZE);
     plic->context_config[context].threshold = threshold;
 }
 
@@ -64,30 +61,28 @@ void plic_set_priority(uint32_t interrupt_id, uint32_t priority) {
 }
 
 void plic_enable_interrupt(uint32_t context, uint32_t interrupt_id) {
-    uint64_t addr = 0x2000 + (context * 0x1000) + (interrupt_id / 32) * 4;
-    plic->context_enable_bits[context][interrupt_id / 32] |= (1 << (interrupt_id % 32));
+    plic->context_enable_bits[context][interrupt_id / 32] |= (1u << (interrupt_id % 32));
 }
 
 void plic_disenable_interrupt(uint32_t context, uint32_t interrupt_id) {
-    uint64_t addr = 0x2000 + (context * 0x1000) + (interrupt_id / 32) * 4;
-    plic->context_enable_bits[context][interrupt_id / 32] &= ~(1 << (interrupt_id % 32));
+    plic->context_enable_bits[context][interrupt_id / 32] &= ~(1u << (interrupt_id % 32));
 }
 
 const uint32_t TEST_DEVICE_INTERRUPT_ID = 63;
 int main() {
+    TEST_START(__BASE_FILE__);
     printf("%x\n", sizeof(PLIC));
     trap_init();
     plic_set_priority(TEST_DEVICE_INTERRUPT_ID, 5);
     plic_set_threshold(0, 1);
     plic_enable_interrupt(0, TEST_DEVICE_INTERRUPT_ID);
 
-    test_device->idr0 = 0x100,000,000;
+    test_device->idr0 = 1;
+    test_device->idr1 = 0;
     test_device->imr = 0x1;  // enable interrupt
-
     while (trap_cnt < 10) {
-        
     }
 
-    PowerOff();
+    pass();
     return 0;
 }

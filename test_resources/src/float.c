@@ -18,6 +18,7 @@ double sqrt(double x) {
 }
 
 int main() {
+    TEST_START(__BASE_FILE__);
     /// Enable FPU by setting FS field in mstatus to 11
     asm volatile (
         "li t0, (3 << 13)\n"
@@ -25,9 +26,13 @@ int main() {
         ::: "t0"
     );
 
-    printf("Square root of 2 is %.7f\n", sqrt(2));
+    double result = sqrt(2);
+    printf("Square root of 2 is %.7f\n", result);
+    if (result < 1.4142135 || result > 1.4142136) {
+        fail();
+    }
 
-    PowerOff();
+    pass();
 
     return 0;
 }

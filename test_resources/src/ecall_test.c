@@ -36,20 +36,19 @@ int main() {
     for (int i = 0; i < 7; i++) {
         printf("[%d]: ecall_nr: %d\n\t", i, ecall_id[i]);
         if (ecall_id[i] != 10 + i) {
-            FAIL;
+            fail();
         }
         printf("args: ");
         for (int j = 0; j < i; j++) {
             printf("%2d ", ecall_args[i][j]);
             if (ecall_args[i][j] != j + 1) {
-                FAIL;
+                fail();
             }
         }
         printf("\n");
     }
 
-    TEST_END(__BASE_FILE__);
-    PASS;
+    pass();
 
     return 0;
 }

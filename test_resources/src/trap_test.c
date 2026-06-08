@@ -31,14 +31,14 @@ int main() {
     *illigal_ptr = 5;  // Store Misaligned (6)
 
     if (trap_cnt != 4)
-        FAIL;
+        fail();
     for (int i = 0; i < 4; i++) {
         if (trap_values[i] != standard[i])
-            FAIL;
+            fail();
     }
 
     TEST_START(__BASE_FILE__);
-    PASS;
+    pass();
 
     return 0;
 }

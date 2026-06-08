@@ -62,7 +62,7 @@ typedef struct  {
 
 typedef struct  {
     enum VirtQueueUsedFlag flags; // Written by Device. (u16)
-    atomic_char16_t idx;          // Written by Device.
+    _Atomic uint16_t idx;        // Written by Device.
     VirtQueueUsedElem ring[];
     /* ring1 ... */
     /* Only if VIRTIO_F_EVENT_IDX: avail_event: u16; */

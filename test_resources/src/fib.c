@@ -26,9 +26,14 @@ int fib(int n) {
 }
 
 int main() {
-    output(fib(30));
-    printf("%d\n", 1);
+    TEST_START(__BASE_FILE__);
+    int result = fib(30);
+    output(result);
+    printf("\n");
+    if (result != 832040) {
+        fail();
+    }
 
-    PowerOff();
+    pass();
     return 0;
 }

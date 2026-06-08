@@ -24,6 +24,7 @@ void display_section_info() {
 
 // 程序入口点 (由链接脚本指定)
 int main() {
+    TEST_START(__BASE_FILE__);
     display_section_info();
     printf("Hello Qemu.\nformat test: %8d %08x %4o %c %s\n", 1ll, 255ll, 15, 'c', "test");
     Log(ERROR, "error test.");
@@ -32,6 +33,6 @@ int main() {
     Log(INFO, "info test.");
     Log(TRACE, "trace test.");
 
-    PowerOff();
+    pass();
     return 0;
 }

@@ -13,14 +13,17 @@ int is_prime(int n) {
 }
 
 int main() {
+    TEST_START(__BASE_FILE__);
     int count = 0;
     for (int i = 2; i < 20000; ++i) {
         if (is_prime(i))
             count++;
     }
-    // print count
-    printf("%d", count);
+    printf("%d\n", count);
+    if (count != 2262) {
+        fail();
+    }
 
-    PowerOff();
+    pass();
     return 0;
 }

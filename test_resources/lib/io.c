@@ -352,6 +352,24 @@ void print_str(const char* s) {
     }
 }
 
+void test_start(const char* name) {
+    print_str("========== START ");
+    print_str(name);
+    print_str(" ==========\n");
+}
+
+
+void pass(void) {
+    print_str("\x1b[32mPASS\x1b[0m\n");
+    PowerOff();
+}
+
+void fail(void) {
+    print_str("\x1b[31mFAIL\x1b[0m\n");
+    while (1) {
+    }
+}
+
 #define isdigit(__n) ((__n) >= '0' && (__n) <= '9')
 #define isalpha(__n) (((__n) >= 'A' && (__n) <= 'Z') || ((__n) >= 'a' && (__n) <= 'z'))
 #define isspace(__n)                                                                     \

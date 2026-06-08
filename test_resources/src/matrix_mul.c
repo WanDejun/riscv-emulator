@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 int main() {
+    TEST_START(__BASE_FILE__);
     const int N = 64;
     static int A[64][64];
     static int B[64][64];
@@ -31,7 +32,10 @@ int main() {
             sum += (unsigned long)C[i][j];
 
     printf("%ld\n", sum);
+    if (sum != 89456640ul) {
+        fail();
+    }
 
-    PowerOff();
+    pass();
     return 0;
 }
