@@ -4,8 +4,9 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         instruction::exec_function::{
-            ExecAdd, ExecAddu, ExecAnd, ExecEqual, ExecOr, ExecSLL, ExecSRA, ExecSRL, ExecSext,
-            ExecSub, ExecSubu, ExecTrait, ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
+            ExecAdd, ExecAddu, ExecAnd, ExecEqual, ExecMax, ExecMaxu, ExecMin, ExecMinu,
+            ExecNotEqual, ExecOr, ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub,
+            ExecSubu, ExecTrait, ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
         },
         trap::Exception,
         vector::{
@@ -581,6 +582,7 @@ pub(in crate::isa::riscv) struct VectorOpAdd;
 pub(in crate::isa::riscv) struct VectorOpAddu;
 pub(in crate::isa::riscv) struct VectorOpSub;
 pub(in crate::isa::riscv) struct VectorOpSubu;
+pub(in crate::isa::riscv) struct VectorOpRevSub;
 pub(in crate::isa::riscv) struct VectorOpAnd;
 pub(in crate::isa::riscv) struct VectorOpOr;
 pub(in crate::isa::riscv) struct VectorOpXor;
@@ -592,12 +594,17 @@ pub(in crate::isa::riscv) struct VectorOpSbc;
 pub(in crate::isa::riscv) struct VectorOpMadc;
 pub(in crate::isa::riscv) struct VectorOpMsbc;
 pub(in crate::isa::riscv) struct VectorOpMseq;
+pub(in crate::isa::riscv) struct VectorOpMsne;
 pub(in crate::isa::riscv) struct VectorOpMsltu;
 pub(in crate::isa::riscv) struct VectorOpMslt;
 pub(in crate::isa::riscv) struct VectorOpMsleu;
 pub(in crate::isa::riscv) struct VectorOpMsle;
 pub(in crate::isa::riscv) struct VectorOpMsgtu;
 pub(in crate::isa::riscv) struct VectorOpMsgt;
+pub(in crate::isa::riscv) struct VectorOpMax;
+pub(in crate::isa::riscv) struct VectorOpMaxu;
+pub(in crate::isa::riscv) struct VectorOpMin;
+pub(in crate::isa::riscv) struct VectorOpMinu;
 pub(in crate::isa::riscv) struct VectorOpZextVf2;
 pub(in crate::isa::riscv) struct VectorOpZextVf4;
 pub(in crate::isa::riscv) struct VectorOpZextVf8;
@@ -620,6 +627,7 @@ impl_vector_op_integer_vx_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vx_binary!(VectorOpAddu, ExecAddu);
 impl_vector_op_integer_vx_binary!(VectorOpSub, ExecSub);
 impl_vector_op_integer_vx_binary!(VectorOpSubu, ExecSubu);
+impl_vector_op_integer_vx_binary!(VectorOpRevSub, ExecRevSub);
 impl_vector_op_integer_vx_binary!(VectorOpAnd, ExecAnd);
 impl_vector_op_integer_vx_binary!(VectorOpOr, ExecOr);
 impl_vector_op_integer_vx_binary!(VectorOpXor, ExecXor);
@@ -643,6 +651,8 @@ impl_vector_op_integer_mask_vxm_binary!(VectorOpMsbc, ExecSbcBorrow);
 
 impl_vector_op_integer_mask_vv_binary!(VectorOpMseq, ExecEqual);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMseq, ExecEqual);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsne, ExecNotEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsne, ExecNotEqual);
 impl_vector_op_integer_mask_vv_binary!(VectorOpMsltu, ExecUnsignedLess);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsltu, ExecUnsignedLess);
 impl_vector_op_integer_mask_vv_binary!(VectorOpMslt, ExecSignedLess);
@@ -653,6 +663,15 @@ impl_vector_op_integer_mask_vv_binary!(VectorOpMsle, ExecSignedLessEqual);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsle, ExecSignedLessEqual);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsgtu, ExecUnsignedGreaterX);
 impl_vector_op_integer_mask_vx_binary!(VectorOpMsgt, ExecSignedGreaterX);
+
+impl_vector_op_integer_vv_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vv_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vv_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vv_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vx_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vx_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vx_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vx_binary!(VectorOpMinu, ExecMinu);
 
 impl_vector_op_integer_v_unary_ext!(
     VectorOpZextVf2,
@@ -1233,6 +1252,46 @@ mod test {
             .map(|(lhs, rhs)| (as_signed_i128(*lhs) >> (rhs & 31)) as u32)
             .collect();
         run_vv_binary_u32::<VectorOpSra>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u32> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| {
+                if as_signed_i128(*lhs) > as_signed_i128(*rhs) {
+                    *lhs
+                } else {
+                    *rhs
+                }
+            })
+            .collect();
+        run_vv_binary_u32::<VectorOpMax>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u32> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| if lhs > rhs { *lhs } else { *rhs })
+            .collect();
+        run_vv_binary_u32::<VectorOpMaxu>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u32> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| {
+                if as_signed_i128(*lhs) < as_signed_i128(*rhs) {
+                    *lhs
+                } else {
+                    *rhs
+                }
+            })
+            .collect();
+        run_vv_binary_u32::<VectorOpMin>(&vs1, &vs2, &expected);
+
+        let expected: Vec<u32> = vs1
+            .iter()
+            .zip(vs2.iter())
+            .map(|(lhs, rhs)| if lhs < rhs { *lhs } else { *rhs })
+            .collect();
+        run_vv_binary_u32::<VectorOpMinu>(&vs1, &vs2, &expected);
     }
 
     #[test]
@@ -1282,6 +1341,12 @@ mod test {
         run_vx_binary_u32::<VectorOpSub>(scalar, &vs2, &expected);
         run_vx_binary_u32::<VectorOpSubu>(scalar, &vs2, &expected);
 
+        let expected: Vec<u32> = vs2
+            .iter()
+            .map(|value| scalar_u32.wrapping_sub(*value))
+            .collect();
+        run_vx_binary_u32::<VectorOpRevSub>(scalar, &vs2, &expected);
+
         let expected: Vec<u32> = vs2.iter().map(|value| value & scalar_u32).collect();
         run_vx_binary_u32::<VectorOpAnd>(scalar, &vs2, &expected);
 
@@ -1297,6 +1362,54 @@ mod test {
             .map(|value| (as_signed_i128(*value) >> shift) as u32)
             .collect();
         run_vx_binary_u32::<VectorOpSra>(scalar, &vs2, &expected);
+
+        let expected: Vec<u32> = vs2
+            .iter()
+            .map(|value| {
+                if as_signed_i128(*value) > as_signed_i128(scalar_u32) {
+                    *value
+                } else {
+                    scalar_u32
+                }
+            })
+            .collect();
+        run_vx_binary_u32::<VectorOpMax>(scalar, &vs2, &expected);
+
+        let expected: Vec<u32> = vs2
+            .iter()
+            .map(|value| {
+                if *value > scalar_u32 {
+                    *value
+                } else {
+                    scalar_u32
+                }
+            })
+            .collect();
+        run_vx_binary_u32::<VectorOpMaxu>(scalar, &vs2, &expected);
+
+        let expected: Vec<u32> = vs2
+            .iter()
+            .map(|value| {
+                if as_signed_i128(*value) < as_signed_i128(scalar_u32) {
+                    *value
+                } else {
+                    scalar_u32
+                }
+            })
+            .collect();
+        run_vx_binary_u32::<VectorOpMin>(scalar, &vs2, &expected);
+
+        let expected: Vec<u32> = vs2
+            .iter()
+            .map(|value| {
+                if *value < scalar_u32 {
+                    *value
+                } else {
+                    scalar_u32
+                }
+            })
+            .collect();
+        run_vx_binary_u32::<VectorOpMinu>(scalar, &vs2, &expected);
     }
 
     #[test]
@@ -1346,6 +1459,9 @@ mod test {
         let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 == vs1));
         run_mask_vv_u8::<VectorOpMseq>(&vs1, &vs2, &expected);
 
+        let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 != vs1));
+        run_mask_vv_u8::<VectorOpMsne>(&vs1, &vs2, &expected);
+
         let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 < vs1));
         run_mask_vv_u8::<VectorOpMsltu>(&vs1, &vs2, &expected);
     }
@@ -1360,6 +1476,9 @@ mod test {
         let scalar = 0x40;
         let expected = mask_from_bits(vs2.iter().map(|value| *value == scalar as u8));
         run_mask_vx_u8::<VectorOpMseq>(scalar, &vs2, &expected);
+
+        let expected = mask_from_bits(vs2.iter().map(|value| *value != scalar as u8));
+        run_mask_vx_u8::<VectorOpMsne>(scalar, &vs2, &expected);
 
         let expected = mask_from_bits(vs2.iter().map(|value| *value < scalar as u8));
         run_mask_vx_u8::<VectorOpMsltu>(scalar, &vs2, &expected);

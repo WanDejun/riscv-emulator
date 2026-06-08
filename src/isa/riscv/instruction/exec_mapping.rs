@@ -415,7 +415,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNSRA_WV => unimplemented!(),
 
         RiscvInstr::VMSEQ_VV => vec_integer_mask_op_vv::<VectorOpMseq>, // Integer Compare Instructions
-        RiscvInstr::VMSNE_VV => unimplemented!(),
+        RiscvInstr::VMSNE_VV => vec_integer_mask_op_vv::<VectorOpMsne>,
         RiscvInstr::VMSLTU_VV => vec_integer_mask_op_vv::<VectorOpMsltu>,
         RiscvInstr::VMSLT_VV => vec_integer_mask_op_vv::<VectorOpMslt>,
         RiscvInstr::VMSLEU_VV => vec_integer_mask_op_vv::<VectorOpMsleu>,
@@ -428,10 +428,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMSBC_VV => vec_integer_mask_op_vv::<VectorOpMsbc>,
         RiscvInstr::VMSBC_VVM => vec_integer_mask_op_vvm::<VectorOpMsbc>,
 
-        RiscvInstr::VMAX_VV => unimplemented!(), // Integer Min/Max Instructions
-        RiscvInstr::VMAXU_VV => unimplemented!(),
-        RiscvInstr::VMIN_VV => unimplemented!(),
-        RiscvInstr::VMINU_VV => unimplemented!(),
+        RiscvInstr::VMAX_VV => vec_integer_op_vv::<VectorOpMax>, // Integer Min/Max Instructions
+        RiscvInstr::VMAXU_VV => vec_integer_op_vv::<VectorOpMaxu>,
+        RiscvInstr::VMIN_VV => vec_integer_op_vv::<VectorOpMin>,
+        RiscvInstr::VMINU_VV => vec_integer_op_vv::<VectorOpMinu>,
 
         //  Single-Width Integer Multiply-Add Instructions
         RiscvInstr::VMACC_VV => unimplemented!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
@@ -477,7 +477,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         //-------- OPIVX (0x100) --------
         RiscvInstr::VADD_VX => vec_integer_op_vx::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
         RiscvInstr::VSUB_VX => vec_integer_op_vx::<VectorOpSub>,
-        RiscvInstr::VRSUB_VX => unimplemented!(),
+        RiscvInstr::VRSUB_VX => vec_integer_op_vx::<VectorOpRevSub>,
 
         RiscvInstr::VMUL_VX => unimplemented!(), // Single-Width Integer Multiply Instructions
         RiscvInstr::VMULH_VX => unimplemented!(),
@@ -501,7 +501,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNSRA_WX => unimplemented!(),
 
         RiscvInstr::VMSEQ_VX => vec_integer_mask_op_vx::<VectorOpMseq>, // Integer Compare Instructions
-        RiscvInstr::VMSNE_VX => unimplemented!(),
+        RiscvInstr::VMSNE_VX => vec_integer_mask_op_vx::<VectorOpMsne>,
         RiscvInstr::VMSLTU_VX => vec_integer_mask_op_vx::<VectorOpMsltu>,
         RiscvInstr::VMSLT_VX => vec_integer_mask_op_vx::<VectorOpMslt>,
         RiscvInstr::VMSLEU_VX => vec_integer_mask_op_vx::<VectorOpMsleu>,
@@ -516,10 +516,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMSBC_VX => vec_integer_mask_op_vx::<VectorOpMsbc>,
         RiscvInstr::VMSBC_VXM => vec_integer_mask_op_vxm::<VectorOpMsbc>,
 
-        RiscvInstr::VMAX_VX => unimplemented!(), // Integer Min/Max Instructions
-        RiscvInstr::VMAXU_VX => unimplemented!(),
-        RiscvInstr::VMIN_VX => unimplemented!(),
-        RiscvInstr::VMINU_VX => unimplemented!(),
+        RiscvInstr::VMAX_VX => vec_integer_op_vx::<VectorOpMax>, // Integer Min/Max Instructions
+        RiscvInstr::VMAXU_VX => vec_integer_op_vx::<VectorOpMaxu>,
+        RiscvInstr::VMIN_VX => vec_integer_op_vx::<VectorOpMin>,
+        RiscvInstr::VMINU_VX => vec_integer_op_vx::<VectorOpMinu>,
 
         //  Single-Width Integer Multiply-Add Instructions
         RiscvInstr::VMACC_VX => unimplemented!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
@@ -566,7 +566,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         //-------- OPIVI (func3 = 0b011) --------
         RiscvInstr::VADD_VI => vec_integer_op_vi_signed::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
-        RiscvInstr::VRSUB_VI => unimplemented!(),
+        RiscvInstr::VRSUB_VI => vec_integer_op_vi_signed::<VectorOpRevSub>,
 
         RiscvInstr::VAND_VI => vec_integer_op_vi_signed::<VectorOpAnd>, // Bitwise Logical Instructions
         RiscvInstr::VOR_VI => vec_integer_op_vi_signed::<VectorOpOr>,
@@ -580,7 +580,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNSRA_WI => unimplemented!(),
 
         RiscvInstr::VMSEQ_VI => vec_integer_mask_op_vi::<VectorOpMseq>, // Integer Compare Instructions
-        RiscvInstr::VMSNE_VI => unimplemented!(),
+        RiscvInstr::VMSNE_VI => vec_integer_mask_op_vi::<VectorOpMsne>,
         RiscvInstr::VMSLEU_VI => vec_integer_mask_op_vi::<VectorOpMsleu>,
         RiscvInstr::VMSLE_VI => vec_integer_mask_op_vi::<VectorOpMsle>,
         RiscvInstr::VMSGTU_VI => vec_integer_mask_op_vi::<VectorOpMsgtu>,

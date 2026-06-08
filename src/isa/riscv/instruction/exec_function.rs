@@ -269,6 +269,24 @@ where
 
 pub(in super::super) type ExecSubu<T = WordType> = ExecSub<T>;
 
+/// Reverse subtraction executor for instructions whose scalar/immediate operand is the minuend.
+///
+/// `ExecSub` computes `a - b`; this executor computes `b - a` with wrapping semantics.
+/// It is used by vector reverse-subtract forms such as `vrsub.vx` and `vrsub.vi`, where the
+/// element from `vs2` is passed as `a` and the scalar or immediate value is passed as `b`.
+pub(in super::super) struct ExecRevSub<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecRevSub<T>
+where
+    T: num_traits::WrappingSub,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(b.wrapping_sub(&a))
+    }
+}
+
 pub(in super::super) struct ExecMulLow<T = WordType> {
     phantom: PhantomData<T>,
 }
@@ -719,6 +737,66 @@ where
 }
 
 // Compare
+pub(in super::super) struct ExecMax<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMax<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if as_signed_i128(a) > as_signed_i128(b) {
+            Ok(a)
+        } else {
+            Ok(b)
+        }
+    }
+}
+
+pub(in super::super) struct ExecMaxu<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMaxu<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.max(b))
+    }
+}
+
+pub(in super::super) struct ExecMin<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMin<T>
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        if as_signed_i128(a) < as_signed_i128(b) {
+            Ok(a)
+        } else {
+            Ok(b)
+        }
+    }
+}
+
+pub(in super::super) struct ExecMinu<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecMinu<T>
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.min(b))
+    }
+}
+
 pub(in super::super) struct ExecSignedLess<T = WordType> {
     phantom: PhantomData<T>,
 }
