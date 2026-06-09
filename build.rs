@@ -32,6 +32,39 @@ fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
 
+fn instr_object<'a>(value: &'a Value, path: &PathBuf) -> &'a serde_json::Map<String, Value> {
+    value
+        .as_object()
+        .unwrap_or_else(|| panic!("{} must contain a JSON object", path.display()))
+}
+
+fn instr_array<'a>(instr: &'a Value, instr_name: &str, field: &str) -> &'a Vec<Value> {
+    instr[field].as_array().unwrap_or_else(|| {
+        panic!(
+            "Instruction `{}` field `{}` must be an array",
+            instr_name, field
+        )
+    })
+}
+
+fn instr_str<'a>(instr: &'a Value, instr_name: &str, field: &str) -> &'a str {
+    instr[field].as_str().unwrap_or_else(|| {
+        panic!(
+            "Instruction `{}` field `{}` must be a string",
+            instr_name, field
+        )
+    })
+}
+
+fn value_str<'a>(value: &'a Value, instr_name: &str, field: &str) -> &'a str {
+    value.as_str().unwrap_or_else(|| {
+        panic!(
+            "Instruction `{}` field `{}` must contain strings",
+            instr_name, field
+        )
+    })
+}
+
 fn parse_instr<'a>(
     isa_dict: &mut HashMap<&'a str, Vec<String>>,
     ext_to_name: &HashMap<&str, &'a str>,
@@ -42,21 +75,19 @@ fn parse_instr<'a>(
     let data = fs::read_to_string(&json_path).expect("Failed to read instr.json");
     let v: Value = serde_json::from_str(&data).expect("Invalid JSON");
 
-    for (name, instr) in v.as_object().unwrap() {
-        let exts = instr["extension"].as_array().unwrap();
+    for (name, instr) in instr_object(&v, json_path) {
+        let exts = instr_array(instr, name, "extension");
 
         if let Some(ext) = exts
             .iter()
-            .map(|val| val.as_str().unwrap())
+            .map(|val| value_str(val, name, "extension"))
             .find(|e| target_ext.contains(&e))
         {
-            let encoding = instr["encoding"].as_str().unwrap();
+            let encoding = instr_str(instr, name, "encoding");
 
-            let fields = instr["variable_fields"]
-                .as_array()
-                .unwrap()
+            let fields = instr_array(instr, name, "variable_fields")
                 .iter()
-                .map(|f| f.as_str().unwrap())
+                .map(|f| value_str(f, name, "variable_fields"))
                 .collect::<Vec<_>>();
 
             let format = if fields == ["rd", "rs1", "rs2"]
@@ -109,8 +140,8 @@ fn parse_instr<'a>(
                 get_funct7(encoding)
             };
 
-            let mask = hex_to_u64(instr["mask"].as_str().unwrap());
-            let key = hex_to_u64(instr["match"].as_str().unwrap());
+            let mask = hex_to_u64(instr_str(instr, name, "mask"));
+            let key = hex_to_u64(instr_str(instr, name, "match"));
 
             // use mask to identify instructions instead of opcode/funct3/funct7.
             let use_mask = fields.contains(&"shamtd")
