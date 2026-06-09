@@ -143,7 +143,7 @@ mod rv64_tests {
     #[test]
     fn run_rv64uf() {
         run_test_group("rv64uf-p-");
-        run_test_group("rv64uf-p-");
+        run_test_group("rv64uf-v-");
     }
 
     #[test]
