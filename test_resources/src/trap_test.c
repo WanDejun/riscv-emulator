@@ -37,7 +37,6 @@ int main() {
             fail();
     }
 
-    TEST_START(__BASE_FILE__);
     pass();
 
     return 0;

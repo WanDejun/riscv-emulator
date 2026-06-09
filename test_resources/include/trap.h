@@ -5,8 +5,10 @@ typedef struct TRAP_CONTEXT {
     uint64_t x[32];
     uint64_t mstatus;
     uint64_t mepc;
-    uint64_t mscratch;
 } TrapContext;
+
+_Static_assert(sizeof(TrapContext) == 34 * sizeof(uint64_t),
+               "TrapContext must match trap.S stack frame");
 
 void __traps_entry();
 void __traps_return(TrapContext*);
