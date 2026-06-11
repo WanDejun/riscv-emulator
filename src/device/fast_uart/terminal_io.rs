@@ -17,6 +17,7 @@ impl<IO: HostSerialIO> TerminalIO<IO> {
 
     pub fn poll_nonblocking(&mut self) -> TerminalPollResult {
         imp::before_poll();
+        log::trace!("start polling");
 
         loop {
             if !self
@@ -143,6 +144,7 @@ mod imp {
 
     impl HostSerialIO for NativeTerminalIo {
         fn flush_output_nonblocking(&mut self, channel: &mut UartIOChannel) {
+            log::trace!("start polling: flushing output");
             while let Ok(v) = channel.output_rx.try_recv() {
                 print!("{}", v as char);
             }
@@ -150,6 +152,8 @@ mod imp {
         }
 
         fn poll_input_nonblocking(&mut self, channel: &mut UartIOChannel) -> bool {
+            log::trace!("start polling: input");
+
             if !event::poll(Duration::from_millis(0)).unwrap() {
                 return false;
             }

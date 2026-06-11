@@ -91,6 +91,8 @@ mod imp {
         control_sender: Sender<PollerCommand>,
         /// Used in polling thread to receive control commands.
         control_receiver: Receiver<PollerCommand>,
+
+        thread_handle: Option<thread::JoinHandle<()>>,
     }
 
     impl DevicePoller {
@@ -104,6 +106,7 @@ mod imp {
                 irq_receiver,
                 control_sender,
                 control_receiver,
+                thread_handle: None,
             }
         }
 
@@ -111,14 +114,16 @@ mod imp {
             self.core.add_event(event);
         }
 
-        pub fn start_polling(self) -> Self {
+        pub fn start_polling(mut self) -> Self {
             let events = self.core.events.clone();
             let sender = self.irq_sender.clone();
             let control_receiver = self.control_receiver.clone();
 
-            thread::spawn(move || {
+            self.thread_handle = Some(thread::spawn(move || {
                 loop {
                     if let Ok(PollerCommand::Exit) = control_receiver.try_recv() {
+                        log::trace!("exiting poller thread");
+                        PollerCore::poll_once_collect(&events);
                         return;
                     }
 
@@ -132,13 +137,19 @@ mod imp {
                         thread::sleep(Duration::from_millis(10));
                     }
                 }
-            });
+            }));
 
             self
         }
 
-        pub fn stop_polling(&self) {
+        pub fn stop_polling(&mut self) {
+            log::trace!("stop polling");
             let _ = self.control_sender.send(PollerCommand::Exit);
+            self.thread_handle
+                .take()
+                .expect("poller thread never started")
+                .join()
+                .unwrap();
         }
 
         pub fn trigger_external_interrupt(&mut self) {
