@@ -1,4 +1,5 @@
 use crate::device::plic::ExternalInterrupt;
+use crossbeam::channel::{Receiver, Sender};
 
 #[cfg(feature = "riscv64")]
 use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
@@ -8,6 +9,29 @@ use std::sync::{Arc, Mutex};
 pub trait PollingEventTrait: Send {
     /// Poll once without blocking the caller thread.
     fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt>;
+}
+
+pub trait PollingFn: FnMut() -> Option<ExternalInterrupt> {}
+
+impl<F: FnMut() -> Option<ExternalInterrupt>> PollingFn for F {}
+
+pub struct PollingFnWrapper<F>
+where
+    F: PollingFn + Send,
+{
+    f: F,
+}
+
+impl<F: PollingFn + Send> PollingFnWrapper<F> {
+    pub fn new(f: F) -> Self {
+        Self { f }
+    }
+}
+
+impl<F: PollingFn + Send> PollingEventTrait for PollingFnWrapper<F> {
+    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt> {
+        (self.f)()
+    }
 }
 
 struct PollerCore {
@@ -30,6 +54,7 @@ impl PollerCore {
         self.events.lock().unwrap().push(event);
     }
 
+    // TODO: Consider to stop returning interrupt here, let every have a Sender<ExternalInterrupt>.
     fn poll_once_collect(
         events: &Arc<Mutex<Vec<Box<dyn PollingEventTrait>>>>,
     ) -> Vec<ExternalInterrupt> {
@@ -71,9 +96,8 @@ pub use imp::DevicePoller;
 
 #[cfg(feature = "multithreading")]
 mod imp {
+    use crossbeam::channel;
     use std::{thread, time::Duration};
-
-    use crossbeam::channel::{self, Receiver, Sender};
 
     use super::*;
 
@@ -81,6 +105,8 @@ mod imp {
         Exit,
     }
 
+    // TODO: Current DevicePoller is in charge of: PLIC IRQ and running background task,
+    // split them into two modules, and change these wired namings.
     pub struct DevicePoller {
         core: PollerCore,
 
@@ -96,14 +122,16 @@ mod imp {
     }
 
     impl DevicePoller {
-        pub fn new() -> Self {
-            let (irq_sender, irq_receiver) = channel::unbounded();
+        pub fn new(
+            plic_irq_tx: Sender<ExternalInterrupt>,
+            plic_irq_rx: Receiver<ExternalInterrupt>,
+        ) -> Self {
             let (control_sender, control_receiver) = channel::unbounded();
 
             Self {
                 core: PollerCore::new(),
-                irq_sender,
-                irq_receiver,
+                irq_sender: plic_irq_tx,
+                irq_receiver: plic_irq_rx,
                 control_sender,
                 control_receiver,
                 thread_handle: None,
@@ -165,7 +193,6 @@ mod imp {
         }
     }
 
-    #[cfg(feature = "riscv64")]
     impl PlicIRQSource for DevicePoller {
         fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
             self.core.set_irq_line(line);
@@ -175,18 +202,21 @@ mod imp {
 
 #[cfg(not(feature = "multithreading"))]
 mod imp {
-    #[cfg(feature = "riscv64")]
-    use super::{PlicIRQLine, PlicIRQSource};
-    use super::{PollerCore, PollingEventTrait};
+    use super::*;
 
     pub struct DevicePoller {
         core: PollerCore,
+        plic_irq_rx: Receiver<ExternalInterrupt>,
     }
 
     impl DevicePoller {
-        pub fn new() -> Self {
+        pub fn new(
+            _plic_irq_tx: Sender<ExternalInterrupt>,
+            plic_irq_rx: Receiver<ExternalInterrupt>,
+        ) -> Self {
             Self {
                 core: PollerCore::new(),
+                plic_irq_rx,
             }
         }
 
@@ -201,7 +231,10 @@ mod imp {
         pub fn stop_polling(&self) {}
 
         pub fn trigger_external_interrupt(&mut self) {
-            let pending = PollerCore::poll_once_collect(&self.core.events);
+            let mut pending = PollerCore::poll_once_collect(&self.core.events);
+            while let Ok(id) = self.plic_irq_rx.try_recv() {
+                pending.push(id);
+            }
             self.core.dispatch_irqs(pending);
         }
     }

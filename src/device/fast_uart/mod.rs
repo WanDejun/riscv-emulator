@@ -7,63 +7,58 @@ use std::{
     cell::RefCell,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     u8,
 };
 
-use crossbeam::channel::{self, Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
     config::arch_config::WordType,
-    device::plic::ExternalInterrupt,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        fast_uart::terminal_io::{
-            BufferedSerialHandle, HostSerialIO, TerminalIO, create_default_host_serial_io,
-        },
+        fast_uart::terminal_io::{ByteSink, ByteSource, ChannelIOContext},
+        plic::ExternalInterrupt,
     },
-    device_poller::PollingEventTrait,
+    device_poller::{PollingEventTrait, PollingFnWrapper},
     utils::{clear_bit, read_bit, set_bit},
 };
 
 const UART_DATA_LENGTH: u8 = 8;
 
-pub struct UartIOChannel {
-    pub(crate) input_tx: Sender<u8>,
-    pub(crate) output_rx: Receiver<u8>,
-    pub(crate) busy: Arc<AtomicBool>,
-}
-
-struct UartPollingEvent<IO: HostSerialIO> {
-    terminal_io: TerminalIO<IO>,
+#[derive(Clone)]
+pub struct UartBytePort {
+    uart_io: ChannelIOContext,
     ier: Arc<AtomicU8>,
     thre_pending: Arc<AtomicBool>,
-    interrupt_id: ExternalInterrupt,
+    rx_pending: Arc<AtomicBool>,
 }
 
-impl<IO: HostSerialIO> PollingEventTrait for UartPollingEvent<IO> {
-    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt> {
-        let poll = self.terminal_io.poll_nonblocking();
+impl ByteSink for UartBytePort {
+    fn before_receive(&mut self) {
+        log::trace!("[uart] before receive");
+        self.uart_io.before_receive();
+    }
 
-        let ier = self.ier.load(std::sync::atomic::Ordering::Acquire);
-        let thre_interrupt =
-            ier & 0x02 != 0 && self.thre_pending.load(std::sync::atomic::Ordering::Acquire);
-        let rda_interrupt = ier & 0x01 != 0 && poll.has_input;
+    fn do_receive(&mut self, byte: u8) {
+        log::trace!("[uart] char {:?} received", byte as char);
+        self.uart_io.do_receive(byte);
+    }
 
-        if thre_interrupt || rda_interrupt {
-            log::trace!(
-                "[UART-poll] firing IRQ {}: thre={} rda={} ier={:#04x}",
-                self.interrupt_id,
-                thre_interrupt,
-                rda_interrupt,
-                ier
-            );
-            Some(self.interrupt_id)
-        } else {
-            None
+    fn after_receive(&mut self, received: bool) {
+        log::trace!("[uart] after receive");
+        self.uart_io.after_receive(received);
+        if received {
+            self.rx_pending.store(true, Ordering::Release);
         }
+    }
+}
+
+impl ByteSource for UartBytePort {
+    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+        self.uart_io.drain_to(target)
     }
 }
 
@@ -155,21 +150,40 @@ pub struct FastUart16550 {
     reg_mut_ptr: [*mut u8; 8],
     reg_lcr_ptr: [*mut u8; 8],
 
-    input_tx: Sender<u8>,
     input_rx: Receiver<u8>,
     output_tx: Sender<u8>,
-    output_rx: Receiver<u8>,
-    sync_lock: Arc<AtomicBool>,
+
     /// Shared IER value for the polling thread to check interrupt conditions.
     ier_shared: Arc<AtomicU8>,
     /// THRE event latch for simplified ETBEI behavior.
     /// Cleared when IIR reports THRE as the identified interrupt source.
     thre_pending: Arc<AtomicBool>,
-    terminal_host_io: Option<terminal_io::DefaultHostSerialIO>,
-    serial_handle: Option<BufferedSerialHandle>,
+    /// RX-data-pending latch (mirrors LSR[0] plus any queued input) for the
+    /// interrupt poll. Set when bytes arrive, cleared once all input is read.
+    rx_pending: Arc<AtomicBool>,
 }
+
 impl FastUart16550 {
-    pub fn new() -> Self {
+    pub fn new() -> (Self, UartBytePort) {
+        let (channel1, channel2) = ChannelIOContext::new();
+        let uart = Self::from_channel(channel1.input_receiver, channel1.output_sender);
+
+        let ier = uart.ier_shared.clone();
+        let thre_pending = uart.thre_pending.clone();
+        let rx_pending = uart.rx_pending.clone();
+
+        (
+            uart,
+            UartBytePort {
+                uart_io: channel2,
+                ier,
+                thre_pending,
+                rx_pending,
+            },
+        )
+    }
+
+    pub fn from_channel(input_rx: Receiver<u8>, output_tx: Sender<u8>) -> Self {
         let reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
@@ -203,12 +217,9 @@ impl FastUart16550 {
             (&mut reg_ref.SCR) as *mut u8,
         ];
 
-        let (input_tx, input_rx) = channel::unbounded();
-        let (output_tx, output_rx) = channel::unbounded();
-        let sync_lock = Arc::new(AtomicBool::new(false));
         let ier_shared = Arc::new(AtomicU8::new(0));
         let thre_pending = Arc::new(AtomicBool::new(true)); // THR is initially empty.
-        let (terminal_host_io, serial_handle) = create_default_host_serial_io();
+        let rx_pending = Arc::new(AtomicBool::new(false)); // No RX data at reset.
 
         drop(reg_ref);
         Self {
@@ -216,15 +227,11 @@ impl FastUart16550 {
             reg_ptr,
             reg_mut_ptr,
             reg_lcr_ptr,
-            input_tx,
             input_rx,
             output_tx,
-            output_rx,
-            sync_lock,
             ier_shared,
             thre_pending,
-            terminal_host_io: Some(terminal_host_io),
-            serial_handle,
+            rx_pending,
         }
     }
 
@@ -269,6 +276,24 @@ impl FastUart16550 {
         );
 
         iir
+    }
+
+    /// Pure evaluation of the UART interrupt state,
+    /// returning the UART IRQ id when an enabled source is currently active.
+    fn eval_irq(ier: u8, thre_pending: bool, rx_pending: bool) -> Option<ExternalInterrupt> {
+        let rda = ier & 0x01 != 0 && rx_pending; // Received Data Available
+        let thre = ier & 0x02 != 0 && thre_pending; // Transmit Holding Register Empty
+        (rda || thre).then_some(UART_IRQ)
+    }
+
+    /// Snapshot the current interrupt state.
+    #[cfg(test)]
+    pub fn poll_interrupt(&self) -> Option<ExternalInterrupt> {
+        Self::eval_irq(
+            self.ier_shared.load(Ordering::Acquire),
+            self.thre_pending.load(Ordering::Acquire),
+            self.rx_pending.load(Ordering::Acquire),
+        )
     }
 
     fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
@@ -378,27 +403,20 @@ impl FastUart16550 {
         Ok(())
     }
 
-    pub(crate) fn get_io_channel(&self) -> UartIOChannel {
-        UartIOChannel {
-            input_tx: self.input_tx.clone(),
-            output_rx: self.output_rx.clone(),
-            busy: self.sync_lock.clone(),
-        }
-    }
-
-    pub(crate) fn serial_handle(&self) -> Option<BufferedSerialHandle> {
-        self.serial_handle.clone()
-    }
-
     #[allow(non_snake_case)]
     fn read_RBR(&mut self) -> u8 {
         clear_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
+        // RDA must stay asserted while more bytes remain queued from the terminal,
+        // and drop once the last one is consumed.
+        self.rx_pending
+            .store(!self.input_rx.is_empty(), Ordering::Release);
         self.reg.borrow().RBR
     }
 
     #[allow(non_snake_case)]
     fn write_RBR(&mut self, data: u8) {
         set_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
+        self.rx_pending.store(true, Ordering::Release);
         self.reg.borrow_mut().RBR = data
     }
 }
@@ -409,13 +427,19 @@ impl DeviceTrait for FastUart16550 {
     fn sync(&mut self) {}
 
     fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
-        let host_io = self.terminal_host_io.take()?;
-        Some(Box::new(UartPollingEvent {
-            terminal_io: TerminalIO::new(self.get_io_channel(), host_io),
-            ier: self.ier_shared.clone(),
-            thre_pending: self.thre_pending.clone(),
-            interrupt_id: UART_IRQ,
-        }))
+        // Evaluate the UART's interrupt conditions on the device poller's
+        // cadence — independent of terminal input — so THRE and RDA are
+        // delivered even when no bytes are flowing.
+        let ier = self.ier_shared.clone();
+        let thre_pending = self.thre_pending.clone();
+        let rx_pending = self.rx_pending.clone();
+        Some(Box::new(PollingFnWrapper::new(move || {
+            FastUart16550::eval_irq(
+                ier.load(Ordering::Acquire),
+                thre_pending.load(Ordering::Acquire),
+                rx_pending.load(Ordering::Acquire),
+            )
+        })))
     }
 }
 
@@ -430,31 +454,31 @@ impl MemMappedDeviceTrait for FastUart16550 {
 
 #[cfg(test)]
 mod test {
+    use std::collections::VecDeque;
+
+    use crate::device::config::UART_IRQ;
+    use crate::device::fast_uart::terminal_io::ByteSinkExt;
+
     use super::*;
 
     #[test]
     fn output_test() {
-        let mut uart = FastUart16550::new();
-        let io = uart.get_io_channel();
+        let (mut uart, mut port) = FastUart16550::new();
 
         uart.write_impl(0, 'a' as u8).unwrap();
 
-        let mut receive = Vec::new();
-        while let Ok(v) = io.output_rx.try_recv() {
-            receive.push(v);
-        }
-        assert_eq!(receive.len(), 1);
-        assert_eq!(receive[0], 'a' as u8);
+        let mut deque = VecDeque::new();
+        port.drain_to(&mut deque);
+
+        assert_eq!(deque.len(), 1);
+        assert_eq!(deque[0], 'a' as u8);
     }
 
     #[test]
     fn input_test() {
-        let mut uart = FastUart16550::new();
-        let io = uart.get_io_channel();
+        let (mut uart, mut port) = FastUart16550::new();
 
-        for v in ['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8] {
-            let _ = io.input_tx.send(v);
-        }
+        port.receive_bytes(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
 
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);
@@ -462,5 +486,62 @@ mod test {
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'c' as u8);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'd' as u8);
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 0);
+    }
+
+    // Interrupt evaluation is now driven by `poll_interrupt`, decoupled from the
+    // byte-receive callbacks. These tests exercise it directly.
+
+    /// Receiving input while RDA (IER bit0) is enabled must raise UART_IRQ.
+    #[test]
+    fn input_raises_external_interrupt_when_rda_enabled() {
+        let (mut uart, mut port) = FastUart16550::new();
+        uart.write_impl::<u8>(1, 0x01).unwrap(); // enable Received Data Available (IER bit0)
+
+        // No interrupt before any input arrives.
+        assert_eq!(uart.poll_interrupt(), None);
+
+        port.receive_bytes([b'x']);
+
+        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+    }
+
+    /// Without RDA enabled, incoming bytes are buffered but must not interrupt.
+    #[test]
+    fn input_without_rda_enabled_does_not_interrupt() {
+        let (uart, mut port) = FastUart16550::new();
+
+        port.receive_bytes([b'x']);
+
+        assert_eq!(uart.poll_interrupt(), None);
+    }
+
+    /// RDA stays asserted until every queued byte has been read, then clears.
+    /// IIR must identify the source as "Received Data Available" (0x04).
+    #[test]
+    fn rda_stays_asserted_until_input_fully_drained() {
+        let (mut uart, mut port) = FastUart16550::new();
+        uart.write_impl::<u8>(1, 0x01).unwrap(); // enable RDA
+        port.receive_bytes([b'a', b'b']);
+
+        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+        assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x04); // IIR: data available
+
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'a');
+        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ)); // 'b' still pending
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'b');
+        assert_eq!(uart.poll_interrupt(), None); // fully drained
+    }
+
+    /// THRE (transmit) interrupts are input-independent: enabling ETBEI raises
+    /// UART_IRQ with no bytes received and no `after_receive` call at all.
+    /// Reading IIR identifies THRE (0x02) and clears the pending condition.
+    #[test]
+    fn thre_interrupt_is_input_independent() {
+        let (mut uart, _port) = FastUart16550::new();
+        uart.write_impl::<u8>(1, 0x02).unwrap(); // enable ETBEI (IER bit1)
+
+        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+        assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02); // IIR: THR empty
+        assert_eq!(uart.poll_interrupt(), None); // cleared, no storm
     }
 }
