@@ -12,17 +12,15 @@ use std::{
     u8,
 };
 
-use crossbeam::channel::{self, Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
     config::arch_config::WordType,
-    device::plic::ExternalInterrupt,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
-        config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        fast_uart::terminal_io::{
-            BufferedSerialHandle, HostSerialIO, TerminalIO, create_default_host_serial_io,
-        },
+        config::{UART_BASE, UART_DEFAULT_DIV, UART_SIZE},
+        fast_uart::terminal_io::{ByteSink, ByteSource, ChannelIOContext},
+        plic::ExternalInterrupt,
     },
     device_poller::PollingEventTrait,
     utils::{clear_bit, read_bit, set_bit},
@@ -30,27 +28,22 @@ use crate::{
 
 const UART_DATA_LENGTH: u8 = 8;
 
-pub struct UartIOChannel {
-    pub(crate) input_tx: Sender<u8>,
-    pub(crate) output_rx: Receiver<u8>,
-    pub(crate) busy: Arc<AtomicBool>,
-}
-
-struct UartPollingEvent<IO: HostSerialIO> {
-    terminal_io: TerminalIO<IO>,
+#[derive(Clone)]
+pub struct UartBytePort {
+    uart_io: ChannelIOContext,
+    irq_sender: Sender<ExternalInterrupt>,
     ier: Arc<AtomicU8>,
     thre_pending: Arc<AtomicBool>,
     interrupt_id: ExternalInterrupt,
 }
 
-impl<IO: HostSerialIO> PollingEventTrait for UartPollingEvent<IO> {
-    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt> {
-        let poll = self.terminal_io.poll_nonblocking();
-
+impl UartBytePort {
+    fn try_send_interrupt(&mut self, has_input: bool) {
+        log::trace!("[UART] try send interrupt");
         let ier = self.ier.load(std::sync::atomic::Ordering::Acquire);
         let thre_interrupt =
             ier & 0x02 != 0 && self.thre_pending.load(std::sync::atomic::Ordering::Acquire);
-        let rda_interrupt = ier & 0x01 != 0 && poll.has_input;
+        let rda_interrupt = ier & 0x01 != 0 && has_input;
 
         if thre_interrupt || rda_interrupt {
             log::trace!(
@@ -60,10 +53,32 @@ impl<IO: HostSerialIO> PollingEventTrait for UartPollingEvent<IO> {
                 rda_interrupt,
                 ier
             );
-            Some(self.interrupt_id)
-        } else {
-            None
+            let _ = self.irq_sender.send(self.interrupt_id);
         }
+    }
+}
+
+impl ByteSink for UartBytePort {
+    fn do_receive(&mut self, byte: u8) {
+        log::trace!("[uart] char {:?} received", byte as char);
+        self.uart_io.do_receive(byte);
+    }
+
+    fn before_receive(&mut self) {
+        log::trace!("[uart] before receive");
+        self.uart_io.before_receive();
+    }
+
+    fn after_receive(&mut self, received: bool) {
+        log::trace!("[uart] after receive");
+        self.uart_io.after_receive(received);
+        self.try_send_interrupt(received);
+    }
+}
+
+impl ByteSource for UartBytePort {
+    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+        self.uart_io.drain_to(target)
     }
 }
 
@@ -155,21 +170,37 @@ pub struct FastUart16550 {
     reg_mut_ptr: [*mut u8; 8],
     reg_lcr_ptr: [*mut u8; 8],
 
-    input_tx: Sender<u8>,
     input_rx: Receiver<u8>,
     output_tx: Sender<u8>,
-    output_rx: Receiver<u8>,
-    sync_lock: Arc<AtomicBool>,
+
     /// Shared IER value for the polling thread to check interrupt conditions.
     ier_shared: Arc<AtomicU8>,
     /// THRE event latch for simplified ETBEI behavior.
     /// Cleared when IIR reports THRE as the identified interrupt source.
     thre_pending: Arc<AtomicBool>,
-    terminal_host_io: Option<terminal_io::DefaultHostSerialIO>,
-    serial_handle: Option<BufferedSerialHandle>,
 }
+
 impl FastUart16550 {
-    pub fn new() -> Self {
+    pub fn new(irq_sender: Sender<ExternalInterrupt>) -> (Self, UartBytePort) {
+        let (channel1, channel2) = ChannelIOContext::new();
+        let uart = Self::from_channel(channel1.input_receiver, channel1.output_sender);
+
+        let ier = uart.ier_shared.clone();
+        let thre_pending = uart.thre_pending.clone();
+
+        (
+            uart,
+            UartBytePort {
+                uart_io: channel2,
+                irq_sender,
+                ier,
+                thre_pending,
+                interrupt_id: super::config::UART_IRQ,
+            },
+        )
+    }
+
+    pub fn from_channel(input_rx: Receiver<u8>, output_tx: Sender<u8>) -> Self {
         let reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
@@ -203,12 +234,8 @@ impl FastUart16550 {
             (&mut reg_ref.SCR) as *mut u8,
         ];
 
-        let (input_tx, input_rx) = channel::unbounded();
-        let (output_tx, output_rx) = channel::unbounded();
-        let sync_lock = Arc::new(AtomicBool::new(false));
         let ier_shared = Arc::new(AtomicU8::new(0));
         let thre_pending = Arc::new(AtomicBool::new(true)); // THR is initially empty.
-        let (terminal_host_io, serial_handle) = create_default_host_serial_io();
 
         drop(reg_ref);
         Self {
@@ -216,15 +243,10 @@ impl FastUart16550 {
             reg_ptr,
             reg_mut_ptr,
             reg_lcr_ptr,
-            input_tx,
             input_rx,
             output_tx,
-            output_rx,
-            sync_lock,
             ier_shared,
             thre_pending,
-            terminal_host_io: Some(terminal_host_io),
-            serial_handle,
         }
     }
 
@@ -378,18 +400,6 @@ impl FastUart16550 {
         Ok(())
     }
 
-    pub(crate) fn get_io_channel(&self) -> UartIOChannel {
-        UartIOChannel {
-            input_tx: self.input_tx.clone(),
-            output_rx: self.output_rx.clone(),
-            busy: self.sync_lock.clone(),
-        }
-    }
-
-    pub(crate) fn serial_handle(&self) -> Option<BufferedSerialHandle> {
-        self.serial_handle.clone()
-    }
-
     #[allow(non_snake_case)]
     fn read_RBR(&mut self) -> u8 {
         clear_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
@@ -409,13 +419,7 @@ impl DeviceTrait for FastUart16550 {
     fn sync(&mut self) {}
 
     fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
-        let host_io = self.terminal_host_io.take()?;
-        Some(Box::new(UartPollingEvent {
-            terminal_io: TerminalIO::new(self.get_io_channel(), host_io),
-            ier: self.ier_shared.clone(),
-            thre_pending: self.thre_pending.clone(),
-            interrupt_id: UART_IRQ,
-        }))
+        None
     }
 }
 
@@ -430,31 +434,37 @@ impl MemMappedDeviceTrait for FastUart16550 {
 
 #[cfg(test)]
 mod test {
+    use std::collections::VecDeque;
+
+    use crossbeam::channel;
+
+    use crate::device::fast_uart::terminal_io::ByteSinkExt;
+
     use super::*;
+
+    fn void_irq_sender() -> Sender<ExternalInterrupt> {
+        let (tx, _rx) = channel::unbounded();
+        tx
+    }
 
     #[test]
     fn output_test() {
-        let mut uart = FastUart16550::new();
-        let io = uart.get_io_channel();
+        let (mut uart, mut port) = FastUart16550::new(void_irq_sender());
 
         uart.write_impl(0, 'a' as u8).unwrap();
 
-        let mut receive = Vec::new();
-        while let Ok(v) = io.output_rx.try_recv() {
-            receive.push(v);
-        }
-        assert_eq!(receive.len(), 1);
-        assert_eq!(receive[0], 'a' as u8);
+        let mut deque = VecDeque::new();
+        port.drain_to(&mut deque);
+
+        assert_eq!(deque.len(), 1);
+        assert_eq!(deque[0], 'a' as u8);
     }
 
     #[test]
     fn input_test() {
-        let mut uart = FastUart16550::new();
-        let io = uart.get_io_channel();
+        let (mut uart, mut port) = FastUart16550::new(void_irq_sender());
 
-        for v in ['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8] {
-            let _ = io.input_tx.send(v);
-        }
+        port.receive_bytes(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
 
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);

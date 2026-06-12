@@ -132,35 +132,13 @@ impl RVCPU {
         if let Err(ex) = rst {
             cold_path();
 
-            // Avoid logging common/normal exceptions.
-            const IGNORE_EXCEPTIONS: &[Exception] = &[
-                Exception::LoadMisaligned, // We need OpenSBI to support misaligned access
-                Exception::StoreMisaligned,
-                Exception::UserEnvCall,
-                Exception::SupervisorEnvCall,
-                Exception::MachineEnvCall,
-            ];
-
-            if IGNORE_EXCEPTIONS.contains(&ex) == false {
-                cold_path();
-
-                if ex == Exception::IllegalInstruction {
-                    log::warn!(
-                        "IllegalInstruction for instr: {:#?} at pc = {:#x}, info: {:?} ",
-                        instr,
-                        self.pc,
-                        info,
-                    );
-                } else {
-                    log::info!(
-                        "Exception {:?} for instr: {:#?} at pc = {:#x}, xtval = {:#x}, info: {:?}",
-                        ex,
-                        instr,
-                        self.pc,
-                        self.pending_tval.unwrap_or(0),
-                        info
-                    );
-                }
+            if ex == Exception::IllegalInstruction {
+                log::warn!(
+                    "IllegalInstruction for instr: {:#?} at pc = {:#x}, info: {:?} ",
+                    instr,
+                    self.pc,
+                    info,
+                );
             }
         }
 

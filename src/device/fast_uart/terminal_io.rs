@@ -1,158 +1,158 @@
-use crate::device::fast_uart::UartIOChannel;
+use std::collections::VecDeque;
+
 use crossbeam::channel::{self, Receiver, Sender};
 
-pub(crate) struct TerminalPollResult {
-    pub has_input: bool,
+pub struct ReceiveGuard<'a, S: ByteSink + ?Sized> {
+    sink: &'a mut S,
+    has_received: bool,
 }
 
-pub(crate) struct TerminalIO<IO: HostSerialIO = DefaultHostSerialIO> {
-    channel: UartIOChannel,
-    host_io: IO,
-}
-
-impl<IO: HostSerialIO> TerminalIO<IO> {
-    pub fn new(channel: UartIOChannel, host_io: IO) -> Self {
-        Self { channel, host_io }
-    }
-
-    pub fn poll_nonblocking(&mut self) -> TerminalPollResult {
-        imp::before_poll();
-        log::trace!("start polling");
-
-        loop {
-            if !self
-                .channel
-                .busy
-                .swap(true, std::sync::atomic::Ordering::AcqRel)
-            {
-                break;
-            }
+impl<'a, S: ByteSink + ?Sized> ReceiveGuard<'a, S> {
+    fn new(sink: &'a mut S) -> Self {
+        sink.before_receive();
+        Self {
+            sink,
+            has_received: false,
         }
+    }
 
-        self.host_io.flush_output_nonblocking(&mut self.channel);
-
-        self.channel
-            .busy
-            .store(false, std::sync::atomic::Ordering::Release);
-
-        let has_input = self.host_io.poll_input_nonblocking(&mut self.channel);
-        TerminalPollResult { has_input }
+    pub fn receive(&mut self, byte: u8) {
+        self.sink.do_receive(byte);
+        self.has_received = true;
     }
 }
 
-/// Host-side serial interaction strategy.
-///
-/// All methods must be non-blocking so they are safe in single-threaded stepping.
-pub(crate) trait HostSerialIO: Send {
-    /// Drain pending UART output bytes to host side.
-    fn flush_output_nonblocking(&mut self, channel: &mut UartIOChannel);
+impl<'a, S: ByteSink + ?Sized> Drop for ReceiveGuard<'a, S> {
+    fn drop(&mut self) {
+        self.sink.after_receive(self.has_received);
+    }
+}
 
-    /// Try to fetch host input and enqueue it to UART RX path.
-    /// Returns true if input was received in this call.
-    fn poll_input_nonblocking(&mut self, channel: &mut UartIOChannel) -> bool;
+/// Use [`ByteSinkExt::receive_guard`] to automatically call [`Self::before_receive`] and [`Self::after_receive`] with RAII.
+pub trait ByteSink {
+    fn do_receive(&mut self, byte: u8);
+    fn before_receive(&mut self);
+    fn after_receive(&mut self, has_received: bool);
+}
+
+pub trait ByteSinkExt: ByteSink {
+    #[inline]
+    #[must_use]
+    fn receive_guard(&mut self) -> ReceiveGuard<'_, Self> {
+        ReceiveGuard::new(self)
+    }
+
+    fn receive_bytes(&mut self, bytes: impl IntoIterator<Item = u8>) {
+        let mut guard = self.receive_guard();
+        for byte in bytes.into_iter() {
+            guard.receive(byte);
+        }
+    }
+}
+
+impl<S: ByteSink + ?Sized> ByteSinkExt for S {}
+
+impl ByteSink for VecDeque<u8> {
+    #[inline]
+    fn do_receive(&mut self, byte: u8) {
+        self.push_back(byte);
+    }
+
+    fn before_receive(&mut self) {}
+    fn after_receive(&mut self, _has_received: bool) {}
+}
+
+impl ByteSink for Vec<u8> {
+    #[inline]
+    fn do_receive(&mut self, byte: u8) {
+        self.push(byte);
+    }
+
+    fn before_receive(&mut self) {}
+    fn after_receive(&mut self, _has_received: bool) {}
+}
+
+pub trait ByteSource {
+    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool;
 }
 
 #[derive(Clone)]
-pub(crate) struct BufferedSerialHandle {
-    input_tx: Sender<u8>,
-    output_rx: Receiver<u8>,
+pub struct ChannelIOContext {
+    pub output_sender: Sender<u8>,
+    pub input_receiver: Receiver<u8>,
 }
 
-impl BufferedSerialHandle {
-    pub fn send_input_data<T>(&self, data: T)
-    where
-        T: IntoIterator<Item = u8>,
-    {
-        for byte in data {
-            let _ = self.input_tx.send(byte);
-        }
-    }
-
-    pub fn receive_output_data(&self) -> Vec<u8> {
-        let mut datas = Vec::new();
-        while let Ok(data) = self.output_rx.try_recv() {
-            datas.push(data);
-        }
-        datas
-    }
-}
-
-pub(crate) struct BufferedHostSerialIO {
-    input_rx: Receiver<u8>,
-    output_tx: Sender<u8>,
-}
-
-impl BufferedHostSerialIO {
-    fn new_with_handle() -> (Self, BufferedSerialHandle) {
-        let (input_tx, input_rx) = channel::unbounded();
+impl ChannelIOContext {
+    pub fn new() -> (ChannelIOContext, ChannelIOContext) {
         let (output_tx, output_rx) = channel::unbounded();
-        (
+        let (input_tx, input_rx) = channel::unbounded();
+
+        return (
             Self {
-                input_rx,
-                output_tx,
+                output_sender: output_tx,
+                input_receiver: input_rx,
             },
-            BufferedSerialHandle {
-                input_tx,
-                output_rx,
+            Self {
+                output_sender: input_tx,
+                input_receiver: output_rx,
             },
-        )
+        );
     }
 }
 
-impl HostSerialIO for BufferedHostSerialIO {
-    fn flush_output_nonblocking(&mut self, channel: &mut UartIOChannel) {
-        while let Ok(v) = channel.output_rx.try_recv() {
-            let _ = self.output_tx.send(v);
-        }
+impl ByteSink for ChannelIOContext {
+    #[inline]
+    fn do_receive(&mut self, byte: u8) {
+        let _ = self.output_sender.send(byte);
     }
 
-    fn poll_input_nonblocking(&mut self, channel: &mut UartIOChannel) -> bool {
-        let mut has_input = false;
-        while let Ok(v) = self.input_rx.try_recv() {
-            has_input = true;
-            let _ = channel.input_tx.send(v);
+    fn before_receive(&mut self) {}
+    fn after_receive(&mut self, _received: bool) {}
+}
+
+impl ByteSource for ChannelIOContext {
+    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+        let mut guard = target.receive_guard();
+        while let Ok(byte) = self.input_receiver.try_recv() {
+            guard.receive(byte);
         }
-        has_input
+
+        guard.has_received
     }
 }
 
-pub(crate) use imp::{DefaultHostSerialIO, create_default_host_serial_io};
-
-#[cfg(all(feature = "native-cli", not(test)))]
-mod imp {
+#[cfg(feature = "native-cli")]
+pub mod native {
+    use super::*;
     use crate::cli_coordinator::CliCoordinator;
     use crossterm::event::{self, Event, KeyCode};
-    use std::{
-        io::{self, Write},
-        time::Duration,
-    };
+    use std::{io::Write, time::Duration};
 
-    use super::{BufferedSerialHandle, HostSerialIO, UartIOChannel};
+    pub struct TerminalIOContext;
 
-    pub(crate) struct NativeTerminalIo;
-
-    pub(crate) type DefaultHostSerialIO = NativeTerminalIo;
-
-    pub(crate) fn create_default_host_serial_io()
-    -> (DefaultHostSerialIO, Option<BufferedSerialHandle>) {
-        (NativeTerminalIo, None)
-    }
-
-    pub(super) fn before_poll() {
-        CliCoordinator::global().confirm_pause_and_wait();
-    }
-
-    impl HostSerialIO for NativeTerminalIo {
-        fn flush_output_nonblocking(&mut self, channel: &mut UartIOChannel) {
-            log::trace!("start polling: flushing output");
-            while let Ok(v) = channel.output_rx.try_recv() {
-                print!("{}", v as char);
-            }
-            io::stdout().flush().unwrap();
+    impl ByteSink for TerminalIOContext {
+        #[inline]
+        fn before_receive(&mut self) {
+            CliCoordinator::global().confirm_pause_and_wait();
         }
 
-        fn poll_input_nonblocking(&mut self, channel: &mut UartIOChannel) -> bool {
-            log::trace!("start polling: input");
+        #[inline]
+        fn do_receive(&mut self, byte: u8) {
+            log::trace!("[TerminalIO] char {:?} received", byte as char);
+            print!("{}", byte as char);
+        }
+
+        #[inline]
+        fn after_receive(&mut self, _received: bool) {
+            log::trace!("[TerminalIO] flushing");
+            std::io::stdout().flush().unwrap();
+        }
+    }
+
+    impl ByteSource for TerminalIOContext {
+        #[inline]
+        fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+            let mut guard = target.receive_guard();
 
             if !event::poll(Duration::from_millis(0)).unwrap() {
                 return false;
@@ -163,29 +163,29 @@ mod imp {
             };
 
             match k.code {
-                KeyCode::Char(c) => channel.input_tx.send(c as u8).unwrap(),
-                KeyCode::Esc => channel.input_tx.send(0x1B).unwrap(),
-                KeyCode::Tab => channel.input_tx.send(b'\t').unwrap(),
-                KeyCode::Backspace => channel.input_tx.send(0x08).unwrap(),
-                KeyCode::Enter => channel.input_tx.send(b'\r').unwrap(),
+                KeyCode::Char(c) => guard.receive(c as u8),
+                KeyCode::Esc => guard.receive(0x1B),
+                KeyCode::Tab => guard.receive(b'\t'),
+                KeyCode::Backspace => guard.receive(0x08),
+                KeyCode::Enter => guard.receive(b'\r'),
                 KeyCode::Up => {
                     for v in [0x1B, 0x5B, 0x41] {
-                        channel.input_tx.send(v).unwrap();
+                        guard.receive(v);
                     }
                 }
                 KeyCode::Down => {
                     for v in [0x1B, 0x5B, 0x42] {
-                        channel.input_tx.send(v).unwrap();
+                        guard.receive(v);
                     }
                 }
                 KeyCode::Left => {
                     for v in [0x1B, 0x5B, 0x44] {
-                        channel.input_tx.send(v).unwrap();
+                        guard.receive(v);
                     }
                 }
                 KeyCode::Right => {
                     for v in [0x1B, 0x5B, 0x43] {
-                        channel.input_tx.send(v).unwrap();
+                        guard.receive(v);
                     }
                 }
                 _ => {
@@ -198,17 +198,75 @@ mod imp {
     }
 }
 
-#[cfg(any(not(feature = "native-cli"), test))]
-mod imp {
-    use super::{BufferedHostSerialIO, BufferedSerialHandle};
+#[cfg(test)]
+mod test {
+    use super::*;
 
-    pub(crate) type DefaultHostSerialIO = BufferedHostSerialIO;
-
-    pub(crate) fn create_default_host_serial_io()
-    -> (DefaultHostSerialIO, Option<BufferedSerialHandle>) {
-        let (host_io, handle) = BufferedHostSerialIO::new_with_handle();
-        (host_io, Some(handle))
+    #[derive(Debug, PartialEq, Eq)]
+    struct MockByteSink {
+        before_called: bool,
+        received: Vec<u8>,
+        after_called: bool,
+        has_received: bool,
     }
 
-    pub(super) fn before_poll() {}
+    impl MockByteSink {
+        fn new() -> Self {
+            Self {
+                before_called: false,
+                received: vec![],
+                after_called: false,
+                has_received: false,
+            }
+        }
+    }
+
+    impl ByteSink for MockByteSink {
+        fn before_receive(&mut self) {
+            self.before_called = true;
+        }
+
+        fn do_receive(&mut self, byte: u8) {
+            self.received.push(byte);
+        }
+
+        fn after_receive(&mut self, has_received: bool) {
+            self.after_called = true;
+            self.has_received = has_received;
+        }
+    }
+
+    struct MockByteSource {
+        bytes: Vec<u8>,
+    }
+
+    impl ByteSource for MockByteSource {
+        fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+            let mut guard = target.receive_guard();
+            for byte in self.bytes.iter() {
+                guard.receive(*byte);
+            }
+            guard.has_received
+        }
+    }
+
+    #[test]
+    fn test_byte_source() {
+        let mut src = MockByteSource {
+            bytes: vec![1, 2, 3],
+        };
+        let mut sink = MockByteSink::new();
+        let sink_ref: &mut dyn ByteSink = &mut sink;
+
+        assert!(src.drain_to(sink_ref));
+        assert_eq!(
+            sink,
+            MockByteSink {
+                before_called: true,
+                after_called: true,
+                received: vec![1, 2, 3],
+                has_received: true
+            }
+        );
+    }
 }

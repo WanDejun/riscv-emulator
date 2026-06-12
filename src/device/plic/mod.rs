@@ -488,6 +488,7 @@ impl RiscvIRQSource for PLIC {
 // Receive the interrupt signal from peripherals.
 impl PlicIRQHandler for PLIC {
     fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
+        log::trace!("[PLIC] handling IRQ");
         if level {
             self.trigger_interrupt(interrupt);
         }

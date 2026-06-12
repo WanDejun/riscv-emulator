@@ -28,6 +28,7 @@ mod imp {
 
     impl CliCoordinator {
         pub fn new() -> Self {
+            enable_raw_mode().unwrap();
             Self {
                 state: Arc::new((Mutex::new(CliThreadState::Running), Condvar::new())),
             }

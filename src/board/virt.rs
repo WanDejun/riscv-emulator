@@ -1,11 +1,13 @@
 use std::{
     any::TypeId,
     cell::{RefCell, UnsafeCell},
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     hint::cold_path,
     rc::Rc,
     sync::atomic::Ordering,
 };
+
+use crossbeam::channel::{self, Receiver, Sender};
 
 use crate::{
     DeviceConfig, EMULATOR_CONFIG,
@@ -16,11 +18,13 @@ use crate::{
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
-        fast_uart::FastUart16550,
-        fast_uart::terminal_io::BufferedSerialHandle,
+        fast_uart::{
+            FastUart16550, UartBytePort,
+            terminal_io::{ByteSinkExt, ByteSource},
+        },
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
-            PLIC,
+            ExternalInterrupt, PLIC,
             irq_line::{PlicIRQLine, PlicIRQSource},
         },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
@@ -79,16 +83,23 @@ pub struct RVBoardBuilder {
     mmio_items: Vec<MemoryMapItem>,
     id_allocators: HashMap<TypeId, IdAllocator>,
     device_poller: DevicePoller,
+
+    plic_irq_tx: Sender<ExternalInterrupt>,
+    plic_irq_rx: Receiver<ExternalInterrupt>,
 }
 
 impl RVBoardBuilder {
     pub fn new() -> Self {
+        let (plic_irq_tx, plic_irq_rx) = channel::unbounded();
+
         Self {
             extra_plic_devices: Vec::new(),
             virtio_devices: Vec::new(),
             mmio_items: Vec::new(),
             id_allocators: HashMap::new(),
-            device_poller: DevicePoller::new(),
+            device_poller: DevicePoller::new(plic_irq_tx.clone(), plic_irq_rx.clone()),
+            plic_irq_tx,
+            plic_irq_rx,
         }
     }
 
@@ -126,9 +137,27 @@ impl RVBoardBuilder {
         let ram_ref = Rc::new(UnsafeCell::new(ram));
 
         // Construct devices
-        let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
-        let serial_io = uart1.borrow().serial_handle();
+        let (uart1, uart_port1) = FastUart16550::new(self.plic_irq_tx.clone());
+        let uart1 = Rc::new(RefCell::new(uart1));
         self = self.add_plic_device(uart1);
+
+        #[cfg(feature = "native-cli")]
+        {
+            // TODO: make this configurable
+            // uart <-> std I/O
+            use crate::device::fast_uart::terminal_io::native;
+            use crate::device_poller::PollingFnWrapper;
+
+            let mut ctx = native::TerminalIOContext {};
+            let mut uart_port1 = uart_port1.clone();
+
+            self.device_poller
+                .add_event(Box::new(PollingFnWrapper::new(move || {
+                    ctx.drain_to(&mut uart_port1);
+                    uart_port1.drain_to(&mut ctx);
+                    None
+                })));
+        }
 
         const MTIME_OFFSET: u64 = 0xbff8;
         const MTIMECMP_OFFSET: u64 = 0x4000;
@@ -228,7 +257,7 @@ impl RVBoardBuilder {
             clint,
             plic,
             plic_freq_counter: 0,
-            serial_io,
+            uart_port: uart_port1,
 
             status: BoardStatus::Running,
         }
@@ -246,10 +275,13 @@ pub struct VirtBoard {
     pub clint: Rc<RefCell<Clint>>,
     pub plic: Rc<RefCell<PLIC>>,
     pub plic_freq_counter: usize,
-    pub device_poller: DevicePoller,
-    serial_io: Option<BufferedSerialHandle>,
+
+    pub uart_port: UartBytePort,
 
     status: BoardStatus,
+
+    // DevicePoller must in the back of VirtBoard to make sure it destruct before other devices.
+    pub device_poller: DevicePoller,
 }
 
 impl VirtBoard {
@@ -282,20 +314,14 @@ impl VirtBoard {
         builder.build(ram)
     }
 
-    #[cfg(feature = "web")]
-    pub fn push_uart_input(&self, bytes: &[u8]) {
-        if let Some(serial_io) = &self.serial_io {
-            serial_io.send_input_data(bytes.iter().copied());
-        }
+    pub fn push_uart_input(&mut self, bytes: &[u8]) {
+        self.uart_port.receive_bytes(bytes.iter().cloned());
     }
 
-    #[cfg(feature = "web")]
-    pub fn take_uart_output(&self) -> Vec<u8> {
-        if let Some(serial_io) = &self.serial_io {
-            serial_io.receive_output_data()
-        } else {
-            Vec::new()
-        }
+    pub fn take_uart_output(&mut self) -> Vec<u8> {
+        let mut deque = VecDeque::new();
+        self.uart_port.drain_to(&mut deque);
+        deque.into_iter().collect()
     }
 }
 
