@@ -158,7 +158,7 @@ fn test_vector_scalar_move_uses_u64_width() {
         .build();
 
     vector
-        .exec_integer_scalar_move::<ExecMove<u64>, u64>(value, 24)
+        .exec_integer_scalar_move::<ExecMove<u64>, u64>(value, 24, 0)
         .unwrap();
 
     VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 24, &expected);
@@ -176,7 +176,7 @@ fn test_vector_whole_register_move_copies_group() {
         .build();
 
     vector
-        .exec_whole_register_move::<ExecMove<u64>>(8, 16, LMUL.get_lmul())
+        .exec_whole_register_move::<ExecMove<u64>>(8, 16, LMUL.get_lmul(), 0)
         .unwrap();
 
     VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 16, &source);

@@ -118,6 +118,9 @@ impl From<Exception> for VectorMemException {
 /// are written with the default value (agnostic).
 pub(in crate::isa::riscv) struct VecOpMask {
     mask_bit: Option<Vec<u8>>,
+    // Elements below `start` have already completed before a resumable trap.
+    // They are always left undisturbed when the instruction is retried.
+    start: usize,
     length: u16,
     mask_agnostic: bool,
     tail_agnostic: bool,
@@ -131,9 +134,21 @@ impl VecOpMask {
         mask_agnostic: bool,
         tail_agnostic: bool,
     ) -> Self {
+        Self::new_with_start(vgr, length, enable_mask, mask_agnostic, tail_agnostic, 0)
+    }
+
+    pub fn new_with_start(
+        vgr: &VectorRegFile,
+        length: u16,
+        enable_mask: bool,
+        mask_agnostic: bool,
+        tail_agnostic: bool,
+        start: usize,
+    ) -> Self {
         let mask_bit = enable_mask.then(|| vgr.read_as_type::<u8>(1, 0).unwrap().to_vec());
         Self {
             mask_bit,
+            start,
             length,
             mask_agnostic,
             tail_agnostic,
@@ -152,7 +167,7 @@ impl VecOpMask {
 
     #[inline(always)]
     fn is_active_body(&self, index: usize) -> bool {
-        self.bit(index) && index < self.length as usize
+        index >= self.start && self.bit(index) && index < self.length as usize
     }
 
     #[inline(always)]
@@ -169,7 +184,9 @@ impl VecOpMask {
     {
         // `None` means undisturbed: keep the old destination value.
         // `Some(default)` models the current agnostic policy as zero-fill.
-        if index >= self.length as usize {
+        if index < self.start {
+            None
+        } else if index >= self.length as usize {
             if self.tail_agnostic {
                 Some(T::default())
             } else {

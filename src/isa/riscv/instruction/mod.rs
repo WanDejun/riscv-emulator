@@ -10,7 +10,10 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         self,
-        csr_reg::csr_macro::{Minstret, Mstatus},
+        csr_reg::{
+            NamedCsrReg,
+            csr_macro::{Minstret, Mstatus, Vstart},
+        },
         executor::RVCPU,
         instruction::exec_function::save_fflags_to_cpu,
     },
@@ -62,13 +65,21 @@ where
 #[inline(always)]
 pub(super) fn normal_vector_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
 where
-    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
+    F: FnOnce(&mut RVCPU, usize) -> Result<(), riscv::trap::Exception>,
 {
     if cpu.csr.get_by_type_existing::<Mstatus>().get_vs() == 0 {
         return Err(riscv::trap::Exception::IllegalInstruction);
     }
 
-    normal_exec(cpu, f)?;
+    let vstart = cpu.csr.get_by_type_existing::<Vstart>().get_vstart() as usize;
+    normal_exec(cpu, |cpu| f(cpu, vstart))?;
+
+    // Any successfully retired vector instruction completes all resumable work.
+    // Precise memory traps return before this point and preserve their fault index.
+    cpu.csr
+        .write_directly(Vstart::get_index(), 0)
+        .then(|| ())
+        .unwrap();
 
     // TODO: updata vector registers status.
 

@@ -21,6 +21,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVV: VectorOpIntegerVV,
@@ -29,12 +30,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
@@ -49,6 +51,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVX: VectorOpIntegerVX,
@@ -56,12 +59,13 @@ impl Vector {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
@@ -75,6 +79,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVV: VectorOpIntegerVVV,
@@ -84,12 +89,13 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let vd_data = self.vector_regfile.get_ref(lmul, 1, vd)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
@@ -105,6 +111,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVX: VectorOpIntegerVXV,
@@ -113,12 +120,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let vd_data = self.vector_regfile.get_ref(lmul, 1, vd)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let old_vd_ref = VGFRef::new(&vd_data, sew, lmul, 1);
@@ -133,6 +141,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVV: VectorOpWideningIntegerVV,
@@ -149,12 +158,13 @@ impl Vector {
 
         let vs1_data = self.vector_regfile.get_ref(src_lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(src_lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, src_sew, src_lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, src_sew, src_lmul, 1);
@@ -174,6 +184,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVV: VectorOpWideningIntegerVVV,
@@ -191,12 +202,13 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(src_lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(src_lmul, 1, vs2)?.to_vec();
         let vd_data = self.vector_regfile.get_ref(dst_lmul, 1, vd)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, src_sew, src_lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, src_sew, src_lmul, 1);
@@ -217,6 +229,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVX: VectorOpWideningIntegerVXV,
@@ -233,12 +246,13 @@ impl Vector {
 
         let vs2_data = self.vector_regfile.get_ref(src_lmul, 1, vs2)?.to_vec();
         let vd_data = self.vector_regfile.get_ref(dst_lmul, 1, vd)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, src_sew, src_lmul, 1);
         let old_vd_ref = VGFRef::new(&vd_data, dst_eew.into_byte_width(), dst_lmul, 1);
@@ -258,6 +272,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVX: VectorOpWideningIntegerVX,
@@ -273,12 +288,13 @@ impl Vector {
         }
 
         let vs2_data = self.vector_regfile.get_ref(src_lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, src_sew, src_lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -297,6 +313,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVV: VectorOpWideningIntegerWV,
@@ -313,12 +330,13 @@ impl Vector {
 
         let vs1_data = self.vector_regfile.get_ref(src_lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(dst_lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, src_sew, src_lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, dst_eew.into_byte_width(), dst_lmul, 1);
@@ -338,6 +356,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVX: VectorOpWideningIntegerWX,
@@ -353,12 +372,13 @@ impl Vector {
         }
 
         let vs2_data = self.vector_regfile.get_ref(dst_lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, dst_eew.into_byte_width(), dst_lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -378,18 +398,20 @@ impl Vector {
         src_eew: Vsew,
         dst_eew: Vsew,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIV: VectorOpIntegerV,
     {
         let lmul = self.config.vlmul.get_lmul();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, src_eew.into_byte_width(), lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -407,6 +429,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIV: VectorOpIntegerV,
@@ -415,7 +438,7 @@ impl Vector {
         let Some(src_eew) = Vsew::from_byte_width(dst_eew.into_byte_width() / FACTOR) else {
             return Err(Exception::IllegalInstruction);
         };
-        self.exec_integer_v::<OpIV>(vs2, vd, src_eew, dst_eew, enable_mask)
+        self.exec_integer_v::<OpIV>(vs2, vd, src_eew, dst_eew, enable_mask, vstart)
     }
 
     #[inline]
@@ -423,6 +446,7 @@ impl Vector {
         &mut self,
         src: T,
         vd: u8,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIV: ExecUnaryTrait<Result<T, Exception>, T>,
@@ -432,12 +456,13 @@ impl Vector {
         let Some(eew) = Vsew::from_byte_width(size_of::<T>() as u8) else {
             return Err(Exception::IllegalInstruction);
         };
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             false,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let mut vd_ref = VGFRefMut::new(
             self.vector_regfile.get_mut(lmul, vd, 1)?,
@@ -458,17 +483,19 @@ impl Vector {
         vs2: u8,
         vd: u8,
         lmul: u8,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIV: VectorOpIntegerV,
     {
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             (VLEN_BYTE * lmul as usize / size_of::<u64>()) as u16,
             false,
             false,
             false,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, Vsew::E64.into_byte_width(), lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -488,6 +515,7 @@ impl Vector {
         v0: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVVM: VectorOpIntegerVVM,
@@ -497,12 +525,13 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
@@ -519,6 +548,7 @@ impl Vector {
         v0: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIVXM: VectorOpIntegerVXM,
@@ -527,12 +557,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);
@@ -547,6 +578,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIMVV: VectorOpIntegerMaskVV,
@@ -555,12 +587,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
@@ -580,6 +613,7 @@ impl Vector {
         vs2: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIMVX: VectorOpIntegerMaskVX,
@@ -587,12 +621,13 @@ impl Vector {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(
@@ -612,6 +647,7 @@ impl Vector {
         v0: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIMVVM: VectorOpIntegerMaskVVM,
@@ -621,12 +657,13 @@ impl Vector {
         let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
@@ -648,6 +685,7 @@ impl Vector {
         v0: u8,
         vd: u8,
         enable_mask: bool,
+        vstart: usize,
     ) -> Result<(), Exception>
     where
         OpIMVXM: VectorOpIntegerMaskVXM,
@@ -656,12 +694,13 @@ impl Vector {
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let v0_data = self.vector_regfile.get_ref(1, 1, v0)?.to_vec();
-        let mask = VecOpMask::new(
+        let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
             self.config.vl,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
+            vstart,
         );
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let v0_ref = VGFRef::new(&v0_data, Vsew::E8.into_byte_width(), 1, 1);

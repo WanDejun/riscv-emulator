@@ -338,7 +338,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVV {
     where
         Self: Sized,
     {
-        vector.exec_integer_vv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask())
+        vector.exec_integer_vv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask(), 0)
     }
 }
 
@@ -356,7 +356,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVX {
     where
         Self: Sized,
     {
-        vector.exec_integer_vx::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask())
+        vector.exec_integer_vx::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask(), 0)
     }
 }
 
@@ -374,7 +374,13 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVVV {
     where
         Self: Sized,
     {
-        vector.exec_integer_vvv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask())
+        vector.exec_integer_vvv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+            0,
+        )
     }
 }
 
@@ -392,7 +398,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVXV {
     where
         Self: Sized,
     {
-        vector.exec_integer_vxv::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask())
+        vector.exec_integer_vxv::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask(), 0)
     }
 }
 
@@ -414,6 +420,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerVV {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -437,6 +444,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerVVV {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -460,6 +468,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerVXV {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -482,6 +491,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerVX {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -504,6 +514,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerWV {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -526,6 +537,7 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerWX {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -545,6 +557,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerV {
             param.src_eew(),
             param.dst_eew(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -569,6 +582,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVVM {
             param.v0(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -593,6 +607,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVXM {
             param.v0(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -615,6 +630,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVV {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -637,6 +653,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVX {
             param.vs2(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -661,6 +678,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVVM {
             param.v0(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
@@ -685,6 +703,7 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
             param.v0(),
             param.vd(),
             param.enable_mask(),
+            0,
         )
     }
 }
