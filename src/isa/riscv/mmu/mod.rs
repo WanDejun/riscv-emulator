@@ -79,7 +79,7 @@ fn determine_data_access_privilege(csr: &mut CsrRegFile) -> AccessPrivilege {
                         }
                     }
                     PrivilegeLevel::U => AccessPrivilege::UserOnly,
-                    PrivilegeLevel::V => todo!(), // Doesn't have V-mode.
+                    PrivilegeLevel::V => unreachable!(), // Doesn't have V-mode.
                 }
             }
         }
@@ -259,7 +259,6 @@ impl VirtAddrManager {
     where
         T: UnsignedInteger,
     {
-        // TODO: Do we need to check alignment for lr/sc?
         if !crate::utils::check_align::<T>(addr) {
             return Err(MemError::LoadMisaligned);
         }

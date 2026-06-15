@@ -6,7 +6,7 @@
 #define UART_ADDR 0x10000000
 #define UART_LSR_ADDR (UART_ADDR + 0x05)
 #define UART_LSR_THRE 0x20  // Bit 5: Transmitter Holding Register Empty
-#define UART_LSR_RDR 0x01   // Bit 5: Receive Data Ready
+#define UART_LSR_RDR 0x01   // Bit 0: Receive Data Ready
 
 #define INPUT_LINEBUF_SIZE 128
 
@@ -349,6 +349,24 @@ void printf(const char* fmt, ...) {
 void print_str(const char* s) {
     while (*s) {
         uart_putc(*s++);
+    }
+}
+
+void test_start(const char* name) {
+    print_str("========== START ");
+    print_str(name);
+    print_str(" ==========\n");
+}
+
+
+void pass(void) {
+    print_str("\x1b[32mPASS\x1b[0m\n");
+    PowerOff();
+}
+
+void fail(void) {
+    print_str("\x1b[31mFAIL\x1b[0m\n");
+    while (1) {
     }
 }
 

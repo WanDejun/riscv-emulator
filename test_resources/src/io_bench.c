@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 int main() {
+    TEST_START(__BASE_FILE__);
     for (int i = 0; i < 500; ++i) {
         uart_putc('A');
     }
@@ -12,6 +13,6 @@ int main() {
     }
 
     uart_putc('\n');
-    PowerOff();
+    pass();
     return 0;
 }

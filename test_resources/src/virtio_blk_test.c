@@ -81,16 +81,16 @@ int main() {
     virtio_blk1->status = ACKNOWLEDGE | DRIVER | FEATURES_OK;
     if (!(virtio_blk1->status & FEATURES_OK)) {
         // feature negotiation failed
-        printf("Feature negotiation failed\n");
-        PowerOff();
+        Log(ERROR, "Feature negotiation failed\n");
+        fail();
     }
 
     // setup queue
     virtio_blk1->queue_sel = 0;
     if (virtio_blk1->queue_num_max == 0) {
         // no queue 0
-        printf("No queue 0\n");
-        PowerOff();
+        Log(ERROR, "No queue 0\n");
+        fail();
     }
     virtio_blk1->queue_num = QUEUE_SIZE;
 
@@ -104,7 +104,8 @@ int main() {
     virtio_blk1->queue_ready = 1;
 
     avail->flags = 0;
-    avail->idx = 0;
+    uint16_t avail_idx = 0;
+    avail->idx = avail_idx;
     used->flags = 0;
     used->idx = 0;
 
@@ -139,7 +140,7 @@ int main() {
     desc2->next = 0;
 
     avail->ring[0] = 0; // desc index
-    avail->idx += 1;
+    avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
     // TODO!
@@ -147,7 +148,7 @@ int main() {
 
     if (status != 0 /*OK*/) {
         Log(ERROR, "First read failed: %d\n", status);
-        PowerOff();
+        fail();
     }
 
     /// ========================================
@@ -179,7 +180,7 @@ int main() {
     desc2->next = 0;
 
     avail->ring[0] = 0; // desc index
-    avail->idx += 1;
+    avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
 
@@ -187,12 +188,10 @@ int main() {
         // printf("%4d", buf[0][i]);
         if (buf[0][i] != (i & 0xff)) {
             Log(ERROR, "Read data error: buf[%d] = %d\n", i, buf[i]);
-            PowerOff();
+            fail();
         }
     }
 
-    TEST_END(__func__);
-    PASS;
-    PowerOff();
+    pass();
     return 0;
 }

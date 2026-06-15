@@ -8,7 +8,7 @@ pub const POWER_MANAGER_SIZE: WordType = 0x1000;
 #[cfg(feature = "test-device")]
 pub const TEST_DEVICE_BASE: WordType = 0x10_1000;
 #[cfg(feature = "test-device")]
-pub const TEST_DEVICE_SIZE: WordType = 0x0f;
+pub const TEST_DEVICE_SIZE: WordType = 0x10;
 
 pub const CLINT_NAME: &'static str = "clint";
 pub const CLINT_BASE: WordType = 0x200_0000;

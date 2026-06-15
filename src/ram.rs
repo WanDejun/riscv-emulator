@@ -74,10 +74,19 @@ impl Ram {
     }
 
     pub fn insert_section(&mut self, elf_section_data: &[u8], start_addr: WordType) {
-        if start_addr >= ram_config::SIZE as WordType {
+        let Some(end_addr) = (start_addr as usize).checked_add(elf_section_data.len()) else {
             log::error!(
-                "ram::insert_section out of range! start_addr = {}",
-                start_addr
+                "ram::insert_section address overflow! start_addr = {}, len = {}",
+                start_addr,
+                elf_section_data.len()
+            );
+            panic!();
+        };
+        if end_addr > ram_config::SIZE {
+            log::error!(
+                "ram::insert_section out of range! start_addr = {}, len = {}",
+                start_addr,
+                elf_section_data.len()
             );
             panic!();
         }
@@ -89,7 +98,7 @@ impl Ram {
     }
 
     pub fn read<T>(&self, addr: WordType) -> Result<T, MemError> {
-        if addr.gt(&(ram_config::SIZE as WordType)) {
+        if !Self::contains_access::<T>(addr) {
             return Err(MemError::LoadFault);
         }
 
@@ -120,7 +129,7 @@ impl Ram {
     }
 
     pub fn write<T>(&mut self, addr: WordType, data: T) -> Result<(), MemError> {
-        if addr.gt(&(ram_config::SIZE as WordType)) {
+        if !Self::contains_access::<T>(addr) {
             return Err(MemError::StoreFault);
         }
 
@@ -138,6 +147,14 @@ impl Ram {
         }
     }
 
+    fn contains_access<T>(addr: WordType) -> bool {
+        let Ok(start) = usize::try_from(addr) else {
+            return false;
+        };
+        start
+            .checked_add(size_of::<T>())
+            .is_some_and(|end| end <= ram_config::SIZE)
+    }
     #[cfg(test)]
     pub fn get_raw_ptr(&mut self) -> *mut u8 {
         self.data.as_mut_ptr()
@@ -223,5 +240,38 @@ mod tests {
         assert_eq!(ram.data[5], 0x33);
         assert_eq!(ram.data[6], 0x22);
         assert_eq!(ram.data[7], 0x11);
+    }
+
+    #[test]
+    fn test_read_write_reject_end_and_crossing_accesses() {
+        let mut ram = Ram::new();
+        let last_word = ram_config::SIZE as WordType - size_of::<u64>() as WordType;
+
+        ram.write::<u64>(last_word, 0x1122_3344_5566_7788).unwrap();
+        assert_eq!(ram.read::<u64>(last_word).unwrap(), 0x1122_3344_5566_7788);
+
+        assert_eq!(
+            ram.read::<u8>(ram_config::SIZE as WordType),
+            Err(MemError::LoadFault)
+        );
+        assert_eq!(
+            ram.read::<u64>(ram_config::SIZE as WordType - 4),
+            Err(MemError::LoadFault)
+        );
+        assert_eq!(
+            ram.write::<u8>(ram_config::SIZE as WordType, 0xaa),
+            Err(MemError::StoreFault)
+        );
+        assert_eq!(
+            ram.write::<u64>(ram_config::SIZE as WordType - 4, 0),
+            Err(MemError::StoreFault)
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_insert_section_rejects_crossing_end() {
+        let mut ram = Ram::new();
+        ram.insert_section(&[1, 2], ram_config::SIZE as WordType - 1);
     }
 }

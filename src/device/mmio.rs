@@ -173,18 +173,16 @@ impl MemoryMapIO {
         if !check_align::<T>(p_addr) {
             return Err(MemError::LoadMisaligned);
         }
-        let start = self.map[device_index].start;
-        if p_addr >= start + self.map[device_index].size {
-            // out of range
-            Err(MemError::LoadFault)
-        } else {
-            // in range
-            let device = &mut self.map[device_index].device;
-            device
-                .borrow_mut()
-                .read(p_addr - start, size_of::<T>() as u32)
-                .map(|x| x.truncate_to())
+        if !self.can_access::<T>(device_index, p_addr) {
+            return Err(MemError::LoadFault);
         }
+
+        let start = self.map[device_index].start;
+        let device = &mut self.map[device_index].device;
+        device
+            .borrow_mut()
+            .read(p_addr - start, size_of::<T>() as u32)
+            .map(|x| x.truncate_to())
     }
 
     // write data to specific device.
@@ -200,17 +198,25 @@ impl MemoryMapIO {
         if !check_align::<T>(p_addr) {
             return Err(MemError::StoreMisaligned);
         }
-        let st = self.map[device_index].start;
-        if p_addr >= st + self.map[device_index].size {
-            // out of range
-            Err(MemError::StoreFault)
-        } else {
-            // in range
-            let device = &mut self.map[device_index].device;
-            device
-                .borrow_mut()
-                .write(p_addr - st, size_of::<T>() as u32, data.truncate_to())
+        if !self.can_access::<T>(device_index, p_addr) {
+            return Err(MemError::StoreFault);
         }
+
+        let start = self.map[device_index].start;
+        let device = &mut self.map[device_index].device;
+        device
+            .borrow_mut()
+            .write(p_addr - start, size_of::<T>() as u32, data.truncate_to())
+    }
+
+    fn can_access<T>(&self, device_index: usize, p_addr: WordType) -> bool {
+        let item = &self.map[device_index];
+        let Some(offset) = p_addr.checked_sub(item.start) else {
+            return false;
+        };
+        offset
+            .checked_add(size_of::<T>() as WordType)
+            .is_some_and(|end| end <= item.size)
     }
 }
 
@@ -292,5 +298,43 @@ mod test {
         }
         assert_eq!(data.len(), 1);
         assert_eq!(data[0], 'a' as u8);
+    }
+
+    struct MockDevice;
+
+    impl DeviceTrait for MockDevice {
+        fn read(&mut self, _addr: WordType, _len: u32) -> Result<u64, MemError> {
+            Ok(0)
+        }
+
+        fn write(&mut self, _addr: WordType, _len: u32, _data: u64) -> Result<(), MemError> {
+            Ok(())
+        }
+
+        fn sync(&mut self) {}
+
+        fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+            None
+        }
+    }
+
+    #[test]
+    fn mmio_rejects_accesses_crossing_device_end() {
+        let ram = Rc::new(UnsafeCell::new(Ram::new()));
+        let table = vec![MemoryMapItem::new(
+            0x1000,
+            4,
+            Rc::new(RefCell::new(MockDevice)),
+        )];
+
+        let mut mmio = MemoryMapIO::from_mmio_items(ram, table);
+
+        assert_eq!(mmio.read_by_type::<u32>(0x1000), Ok(0));
+        assert_eq!(mmio.write_by_type::<u32>(0x1000, 0), Ok(()));
+        assert_eq!(mmio.read_by_type::<u64>(0x1000), Err(MemError::LoadFault));
+        assert_eq!(
+            mmio.write_by_type::<u64>(0x1000, 0),
+            Err(MemError::StoreFault)
+        );
     }
 }

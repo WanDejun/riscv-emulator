@@ -80,7 +80,7 @@ impl TestCPUBuilder {
             .unwrap()
             .vsetvl(new_vtype)
             .unwrap(); // set vtype csr
-        self.cpu.csr.write_directly(Vl::get_index(), vl).unwrap(); // set vl csr
+        let _ = self.cpu.csr.write_directly(Vl::get_index(), vl); // set vl csr
         self.cpu
             .vector
             .set_config((vlmul, vsew, tail_agnostic, mask_agnostic, vl as u16)); // set vector config

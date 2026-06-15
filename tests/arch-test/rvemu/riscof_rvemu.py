@@ -18,8 +18,7 @@ logger = logging.getLogger()
 class rvemu(pluginTemplate):
     __model__ = "rvemu"
 
-    # TODO: please update the below to indicate family, version, etc of your DUT.
-    __version__ = "XXX"
+    __version__ = "0.1.0"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

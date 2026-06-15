@@ -43,7 +43,3 @@ divisior = input_frequency / (16 × target_frequency)
 即每 (input_frequency) / (16 * divisior) 采集一个输入, 切换一个输出. 每 input_frequency / divisior 进行一次输入采集, 16个值取均值.
 
 ## FIFO
-
-### TODO
-
-- [ ] TODO

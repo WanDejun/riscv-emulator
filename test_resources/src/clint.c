@@ -15,24 +15,25 @@ uint64_t bit_at(int pos) {
 
 static volatile unsigned char success = 0;
 
-void trap_handler(TrapContext* trap_ctx) {
-    // Machine timer interrupt
-    if (read_csr_mcause() == (bit_at(XLEN - 1) | 7)) {
-        Log(INFO, "Machine timer interrupt!");
-        write_csr_mip(0);
-        success = 1;
-    }
-
-    __traps_return(trap_ctx);
-}
-
 uint64_t read_u64_volatile(uint64_t addr) {
     return *(volatile uint64_t*)addr;
-}   
+}
 
 uint64_t write_u64_volatile(uint64_t addr, uint64_t value) {
     *(volatile uint64_t*)addr = value;
     return value;
+}
+
+void trap_handler(TrapContext* trap_ctx) {
+    // Machine timer interrupt
+    if (read_csr_mcause() == (bit_at(XLEN - 1) | 7)) {
+        Log(INFO, "Machine timer interrupt!");
+        uint64_t mtime = read_u64_volatile(CLINT_BASE + MTIME_OFFSET);
+        write_u64_volatile(CLINT_BASE + MTIMECMP_OFFSET, mtime + 4096);
+        success = 1;
+    }
+
+    __traps_return(trap_ctx);
 }
 
 int main() {
@@ -47,8 +48,6 @@ int main() {
         // do nothing
     }
 
-    TEST_END(__BASE_FILE__);
-
-    PowerOff();
+    pass();
     return 0;
 }

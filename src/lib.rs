@@ -81,6 +81,9 @@ impl EmulatorConfig {
         Self { devices: vec![] }
     }
 }
+
+// TODO: Don't use a global variable as we should make everything configurable at board level,
+// there's no need to bypass many layers to set config.
 lazy_static! {
     pub static ref EMULATOR_CONFIG: Mutex<EmulatorConfig> = Mutex::new(EmulatorConfig::new());
 }

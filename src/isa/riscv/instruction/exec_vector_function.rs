@@ -58,7 +58,10 @@ where
                 let vta = ((configfield.vtype >> 6) & 1) != 0;
                 let vma = ((configfield.vtype >> 7) & 1) != 0;
 
-                cpu.csr.write_directly(Vl::get_index(), vl).unwrap();
+                cpu.csr
+                    .write_directly(Vl::get_index(), vl)
+                    .then(|| ())
+                    .unwrap();
                 cpu.vector.set_config((vlmul, vsew, vta, vma, vl as u16));
                 cpu.write_reg(vd, vl);
 
@@ -159,7 +162,10 @@ fn finish_vector_memory_access(
         Ok(()) => {
             // A completed vector memory instruction always leaves no pending
             // partial progress to resume.
-            cpu.csr.write_directly(Vstart::get_index(), 0).unwrap();
+            cpu.csr
+                .write_directly(Vstart::get_index(), 0)
+                .then(|| ())
+                .unwrap();
             Ok(())
         }
         Err(err) => {
@@ -168,6 +174,7 @@ fn finish_vector_memory_access(
             if let Some(index) = err.fault_index() {
                 cpu.csr
                     .write_directly(Vstart::get_index(), index as WordType)
+                    .then(|| ())
                     .unwrap();
             }
             Err(err.exception())

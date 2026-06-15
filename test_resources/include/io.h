@@ -19,6 +19,9 @@ void print_hex(unsigned long long val, int width, char pad_char);
 void print_oct(unsigned long long val, int width, char pad_char);
 void vprintf(const char* fmt, va_list ap);
 void printf(const char* fmt, ...);
+void test_start(const char* name);
+void pass(void);
+void fail(void);
 
 // input
 long long input_dec();
@@ -26,27 +29,4 @@ uint8_t input_char();
 int scanf(const char* fmt, ...);
 
 
-#define TEST_START(x)                                                                    \
-    do {                                                                                 \
-        print_str("========== START ");                                                  \
-        print_str(x);                                                                    \
-        print_str(" ==========\n");                                                      \
-    } while(0)
-#define TEST_END(x)                                                                      \
-    do {                                                                                 \
-        print_str("========== END ");                                                    \
-        print_str(x);                                                                    \
-        print_str(" ==========\n");                                                      \
-    } while(0)                                                       
-
-#define PASS                                                                             \
-    do {                                                                                 \
-        print_str("\x1b[32mPASS\x1b[0m\n");                                              \
-        PowerOff();                                                                      \
-    } while (0)
-
-#define FAIL                                                                             \
-    do {                                                                                 \
-        print_str("\x1b[30mFAIL\x1b[0m\n");                                              \
-        PowerOff();                                                                      \
-    } while (0)
+#define TEST_START(x) test_start(x)

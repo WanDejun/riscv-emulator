@@ -53,7 +53,7 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} --features "riscv64,native-cli"
+        run: cargo build --release --target ${{ matrix.target }} --features "riscv64,native-cli,multithreading"
 
       - name: Rename binary (unix)
         if: matrix.os != 'windows-latest'

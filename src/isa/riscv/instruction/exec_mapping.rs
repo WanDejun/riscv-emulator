@@ -159,7 +159,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             PrivilegeLevel::U => Err(Exception::UserEnvCall),
             PrivilegeLevel::S => Err(Exception::SupervisorEnvCall),
             PrivilegeLevel::M => Err(Exception::MachineEnvCall),
-            _ => todo!(),
+            PrivilegeLevel::V => unreachable!(),
         },
 
         // We are executing in order, so don't need to do anything.

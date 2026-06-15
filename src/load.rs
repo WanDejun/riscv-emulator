@@ -1,4 +1,4 @@
-use xmas_elf::symbol_table::Entry;
+use xmas_elf::symbol_table::{Entry, Entry32, Entry64};
 
 use crate::{config::arch_config::WordType, ram::Ram, ram_config::BASE_ADDR, utils::BiMap};
 
@@ -83,7 +83,7 @@ impl ELFLoader {
         None
     }
 
-    fn parse_symtab(&self, entries: &[xmas_elf::symbol_table::Entry64]) -> Option<SymTab> {
+    fn parse_symtab<T: Entry>(&self, entries: &[T]) -> Option<SymTab> {
         let mut func_table = BiMap::<String, u64>::new();
 
         for entry in entries {
@@ -105,14 +105,15 @@ impl ELFLoader {
             if let Ok(name) = sh.get_name(&elf)
                 && name == ".symtab"
             {
-                // TODO: Handle 32 bit ELF files
-                if let xmas_elf::sections::SectionData::SymbolTable64(symtab) =
-                    sh.get_data(&elf).ok()?
-                {
-                    return Some(self.parse_symtab(&symtab)?);
-                } else {
-                    return None;
-                }
+                return match sh.get_data(&elf).ok()? {
+                    xmas_elf::sections::SectionData::SymbolTable32(symtab) => {
+                        self.parse_symtab::<Entry32>(symtab)
+                    }
+                    xmas_elf::sections::SectionData::SymbolTable64(symtab) => {
+                        self.parse_symtab::<Entry64>(symtab)
+                    }
+                    _ => None,
+                };
             }
         }
 

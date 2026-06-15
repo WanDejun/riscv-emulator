@@ -626,7 +626,22 @@ mod test {
                 .is_err()
         ); // over max context index
 
-        // TODO: test claim/complete.
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
+        plic.set_priority(2, 4).unwrap();
+        plic.set_enable_word(0, 0, 1 << 2).unwrap();
+        plic.trigger_interrupt(2);
+        assert_eq!(plic.try_get_interrupt(0), Some(2));
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 2);
+        plic.set_claim_complete(0, 2).unwrap();
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
+        assert!(
+            plic.get_claim_complete(VIRT_MAX_CONTEXTS as WordType)
+                .is_err()
+        );
+        assert!(
+            plic.set_claim_complete(VIRT_MAX_CONTEXTS as WordType, 0)
+                .is_err()
+        );
     }
 
     #[test]

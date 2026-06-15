@@ -56,8 +56,9 @@ impl<'a, B: Board> SingleThreadBase for GdbDebugger<'a, B> {
         data: &mut [u8],
     ) -> target::TargetResult<usize, Self> {
         for (addr, value_ref) in (start_addr..).zip(data.iter_mut()) {
-            if let Ok(val) = self.dbg.read_memory::<u8>(Address::Virt(addr)) {
-                *value_ref = val;
+            match self.dbg.read_memory::<u8>(Address::Virt(addr)) {
+                Ok(val) => *value_ref = val,
+                Err(_) => return Err(().into()),
             }
         }
 
@@ -218,5 +219,21 @@ impl<'a, B: Board> target::ext::base::singlethread::SingleThreadSingleStep for G
         self.exec_mode = ExecMode::Step;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::board::virt::VirtBoard;
+    use gdbstub::target::ext::base::singlethread::SingleThreadBase;
+
+    #[test]
+    fn read_addrs_fails_when_any_byte_is_unreadable() {
+        let mut board = VirtBoard::from_binary(&[]);
+        let mut debugger = GdbDebugger::new(&mut board);
+        let mut data = [0xaa; 4];
+
+        assert!(SingleThreadBase::read_addrs(&mut debugger, 0, &mut data).is_err());
     }
 }
