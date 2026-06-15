@@ -157,11 +157,11 @@ pub mod native {
         fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
             let mut guard = target.receive_guard();
 
-            if !event::poll(Duration::from_millis(0)).unwrap() {
+            if !event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 return false;
             }
 
-            let Event::Key(k) = event::read().unwrap() else {
+            let Ok(Event::Key(k)) = event::read() else {
                 return false;
             };
 

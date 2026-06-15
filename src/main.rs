@@ -266,6 +266,9 @@ fn main() {
                 log::error!("Failed to dump signature: {}", e);
             }
         }
+
+        drop(board);
+
         println!("Used time: {}s", now.elapsed().as_secs_f32());
     }
 }

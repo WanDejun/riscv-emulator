@@ -137,6 +137,8 @@ impl RVBoardBuilder {
 
         #[cfg(feature = "native-cli")]
         {
+            use std::io::IsTerminal;
+
             // TODO: make this configurable
             // uart <-> std I/O
             use crate::device::fast_uart::terminal_io::native;
@@ -145,10 +147,18 @@ impl RVBoardBuilder {
             let mut ctx = native::TerminalIOContext {};
             let mut uart_port1 = uart_port1.clone();
 
+            let input_term = std::io::stdin().is_terminal();
+
             self.device_poller
                 .add_event(Box::new(PollingFnWrapper::new(move || {
-                    ctx.drain_to(&mut uart_port1);
+                    // stdin -> uart
+                    if input_term {
+                        ctx.drain_to(&mut uart_port1);
+                    }
+
+                    // uart -> stdout
                     uart_port1.drain_to(&mut ctx);
+
                     None
                 })));
         }
