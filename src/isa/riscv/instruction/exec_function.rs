@@ -32,6 +32,19 @@ pub(in super::super) trait ExecUnaryTrait<OUT, IN = WordType> {
     fn exec(a: IN) -> OUT;
 }
 
+pub(in super::super) struct ExecMove<T = WordType> {
+    _marker: PhantomData<T>,
+}
+
+impl<T> ExecUnaryTrait<Result<T, Exception>, T> for ExecMove<T>
+where
+    T: Copy,
+{
+    fn exec(a: T) -> Result<T, Exception> {
+        Ok(a)
+    }
+}
+
 // XXX: Remeber that `imm` has been sign_extended in decoder.
 
 /// Process arithmetic instructions with `rs1`, (`rs2` or `imm`) and `rd` in RV32I/RV64I.

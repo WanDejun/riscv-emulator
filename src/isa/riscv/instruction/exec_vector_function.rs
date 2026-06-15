@@ -8,7 +8,7 @@ use crate::{
                 csr_macro::{Vl, Vstart, Vtype},
             },
             executor::RVCPU,
-            instruction::{RVInstrInfo, normal_vector_exec},
+            instruction::{RVInstrInfo, exec_function::ExecMove, normal_vector_exec},
             trap::Exception,
             vector::{
                 VectorMemException,
@@ -20,6 +20,7 @@ use crate::{
                     VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
                     VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
                 },
+                types::Vsew,
             },
         },
     },
@@ -810,6 +811,98 @@ where
     })
 }
 
+pub(super) fn vec_integer_move_op_v(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            if vs2 != 0 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_integer_v::<ExecMove<u64>>(vs1, vd, Vsew::E64, Vsew::E64, false)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_move_op_vx(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            if vs2 != 0 {
+                return Err(Exception::IllegalInstruction);
+            }
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .exec_integer_scalar_move::<ExecMove<u64>, u64>(x1 as u64, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_move_op_vi(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: simm5,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            if vs2 != 0 {
+                return Err(Exception::IllegalInstruction);
+            }
+            let imm = sign_extend(simm5 as WordType, 5);
+            cpu.vector
+                .exec_integer_scalar_move::<ExecMove<u64>, u64>(imm as u64, vd)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_whole_register_move_op_v<const LMUL: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu| {
+        let expected_rs1 = match LMUL {
+            1 => 0,
+            2 => 1,
+            4 => 3,
+            8 => 7,
+            _ => return Err(Exception::IllegalInstruction),
+        };
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            ..
+        } = info
+        {
+            if rs1 != expected_rs1 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_whole_register_move::<ExecMove<u64>>(vs2, vd, LMUL)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
 pub(super) fn vec_integer_mask_op_vv<OpIMVV>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
@@ -1079,6 +1172,29 @@ mod test {
             },
             |checker| checker.reg_vec(3, &expected).pc(0x2004),
         );
+    }
+
+    #[test]
+    fn whole_register_move_rejects_bad_rs1_encoding() {
+        let mut cpu = TestCPUBuilder::new()
+            .vector_status(Vlmul::M1, Vsew::E8, false, false)
+            .pc(0x2000)
+            .build();
+
+        let err = vec_whole_register_move_op_v::<2>(
+            RVInstrInfo::V {
+                rs1: 0,
+                rs2: 8,
+                rd: 16,
+                vm: true,
+                func6: 0,
+            },
+            &mut cpu,
+        )
+        .unwrap_err();
+
+        assert_eq!(err, Exception::IllegalInstruction);
+        assert_eq!(cpu.pc, 0x2000);
     }
 
     #[test]

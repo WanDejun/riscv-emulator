@@ -1,9 +1,10 @@
 use crate::{
     config::arch_config::WordType,
     isa::riscv::{
+        instruction::exec_function::ExecUnaryTrait,
         trap::Exception,
         vector::{
-            VecOpMask, Vector,
+            VLEN_BYTE, VecOpMask, Vector,
             types::{VGFRef, VGFRefMut, Vsew},
         },
     },
@@ -415,6 +416,68 @@ impl Vector {
             return Err(Exception::IllegalInstruction);
         };
         self.exec_integer_v::<OpIV>(vs2, vd, src_eew, dst_eew, enable_mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_scalar_move<OpIV, T>(
+        &mut self,
+        src: T,
+        vd: u8,
+    ) -> Result<(), Exception>
+    where
+        OpIV: ExecUnaryTrait<Result<T, Exception>, T>,
+        T: Copy + Default,
+    {
+        let lmul = self.config.vlmul.get_lmul();
+        let Some(eew) = Vsew::from_byte_width(size_of::<T>() as u8) else {
+            return Err(Exception::IllegalInstruction);
+        };
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            self.config.vl,
+            false,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+        );
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, 1)?,
+            eew.into_byte_width(),
+            lmul,
+            1,
+        );
+        for (index, element) in vd_ref.iter_mut().enumerate() {
+            mask.element_load(element, OpIV::exec(src)?, index);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_whole_register_move<OpIV>(
+        &mut self,
+        vs2: u8,
+        vd: u8,
+        lmul: u8,
+    ) -> Result<(), Exception>
+    where
+        OpIV: VectorOpIntegerV,
+    {
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new(
+            &self.vector_regfile,
+            (VLEN_BYTE * lmul as usize / size_of::<u64>()) as u16,
+            false,
+            false,
+            false,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, Vsew::E64.into_byte_width(), lmul, 1);
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut(lmul, vd, 1)?,
+            Vsew::E64.into_byte_width(),
+            lmul,
+            1,
+        );
+        OpIV::exec(&vs2_ref, &mut vd_ref, &mask)
     }
 
     #[inline]

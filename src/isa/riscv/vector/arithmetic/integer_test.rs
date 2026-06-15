@@ -126,6 +126,62 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+#[test]
+fn test_vector_op_move_v_uses_u64_width() {
+    const LMUL: Vlmul = Vlmul::M2;
+    let param = TestOpParameter::new_v(8, 24, Vsew::E64, Vsew::E64);
+    let source = [
+        0x0102_0304_0506_0708_u64,
+        0x1112_1314_1516_1718,
+        0x2122_2324_2526_2728,
+        0x3132_3334_3536_3738,
+    ];
+
+    run_test_integer_v::<ExecMove<u64>, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, Vsew::E8, false, false, source.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), &source)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &source),
+    );
+}
+
+#[test]
+fn test_vector_scalar_move_uses_u64_width() {
+    const LMUL: Vlmul = Vlmul::M1;
+    let value = 0xfeed_face_cafe_beef_u64;
+    let expected = [value; VLEN_BYTE / size_of::<u64>()];
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(LMUL, Vsew::E8, false, false, expected.len() as u16)
+        .build();
+
+    vector
+        .exec_integer_scalar_move::<ExecMove<u64>, u64>(value, 24)
+        .unwrap();
+
+    VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 24, &expected);
+}
+
+#[test]
+fn test_vector_whole_register_move_copies_group() {
+    const LMUL: Vlmul = Vlmul::M4;
+    let source: Vec<u64> = (0..(VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u64>()))
+        .map(|i| 0x1000_0000_0000_0000_u64 + i as u64)
+        .collect();
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(Vlmul::M1, Vsew::E8, false, false, 0)
+        .reg(LMUL.get_lmul(), 8, &source)
+        .build();
+
+    vector
+        .exec_whole_register_move::<ExecMove<u64>>(8, 16, LMUL.get_lmul())
+        .unwrap();
+
+    VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), 16, &source);
+}
+
 fn run_test_integer_vvm<OpIVVM, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIVVM: VectorOpIntegerVVM,

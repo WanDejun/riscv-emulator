@@ -440,10 +440,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNMSUB_VV => vec_integer_op_vvv::<VectorOpNmsub>, // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
 
         RiscvInstr::VMERGE_VVM | RiscvInstr::VMV_V_V => {
-            |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        unimplemented!() // Handle VMV_V_V
+                        vec_integer_move_op_v(inst_info, cpu)
                     } else {
                         unimplemented!() // Handle VMERGE_VVM
                     }
@@ -528,10 +528,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNMSUB_VX => vec_integer_op_vxv::<VectorOpNmsub>, // vd[i] = -(x[rs1] * vd[i]) + vs2[i]
 
         RiscvInstr::VMERGE_VXM | RiscvInstr::VMV_V_X => {
-            |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        unimplemented!() // Handle VMV_V_X
+                        vec_integer_move_op_vx(inst_info, cpu)
                     } else {
                         unimplemented!() // Handle VMERGE_VXM
                     }
@@ -591,10 +591,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMADC_VIM => vec_integer_mask_op_vim::<VectorOpMadc>,
 
         RiscvInstr::VMERGE_VIM | RiscvInstr::VMV_V_I => {
-            |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        unimplemented!() // Handle VMV_V_X
+                        vec_integer_move_op_vi(inst_info, cpu)
                     } else {
                         unimplemented!() // Handle VMERGE_VXM
                     }
@@ -618,10 +618,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::VRGATHER_VI => unimplemented!(), // Vector Gather Instructions
 
-        RiscvInstr::VMV1R_V => unimplemented!(), // Whole Vector Register Move
-        RiscvInstr::VMV2R_V => unimplemented!(),
-        RiscvInstr::VMV4R_V => unimplemented!(),
-        RiscvInstr::VMV8R_V => unimplemented!(),
+        RiscvInstr::VMV1R_V => vec_whole_register_move_op_v::<1>, // Whole Vector Register Move
+        RiscvInstr::VMV2R_V => vec_whole_register_move_op_v::<2>,
+        RiscvInstr::VMV4R_V => vec_whole_register_move_op_v::<4>,
+        RiscvInstr::VMV8R_V => vec_whole_register_move_op_v::<8>,
 
         //-------- OPMVV (func3 = 0b010) --------
         RiscvInstr::VWADD_VV => vec_widening_integer_op_vv::<VectorOpWadd>, // Widening Integer Add/Subtract

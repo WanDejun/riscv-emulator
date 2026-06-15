@@ -50,7 +50,9 @@ impl VectorRegFile {
         let lmul = lmul * seg;
         debug_assert!(idx < 32);
         debug_assert!(align_of::<T>() <= align_of::<VectorRegFile>());
-        assert!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8);
+        if unlikely(!(lmul == 1 || lmul == 2 || lmul == 4 || lmul == 8)) {
+            return Err(Exception::IllegalInstruction);
+        }
 
         if idx % lmul != 0 {
             Err(Exception::IllegalInstruction)

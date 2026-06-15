@@ -5,7 +5,7 @@ use crate::{
     isa::riscv::{
         instruction::exec_function::{
             ExecAdd, ExecAddu, ExecAnd, ExecDivSigned, ExecDivUnsigned, ExecEqual, ExecMax,
-            ExecMaxu, ExecMin, ExecMinu, ExecMulHighSigned, ExecMulHighSignedUnsigned,
+            ExecMaxu, ExecMin, ExecMinu, ExecMove, ExecMulHighSigned, ExecMulHighSignedUnsigned,
             ExecMulHighUnsigned, ExecMulLow, ExecNotEqual, ExecOr, ExecRemSigned, ExecRemUnsigned,
             ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub, ExecSubu, ExecTrait,
             ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
@@ -1587,6 +1587,25 @@ impl_vector_op_integer_vxv_ternary!(VectorOpMacc, ExecMacc);
 impl_vector_op_integer_vxv_ternary!(VectorOpNmsac, ExecNmsac);
 impl_vector_op_integer_vxv_ternary!(VectorOpMadd, ExecMadd);
 impl_vector_op_integer_vxv_ternary!(VectorOpNmsub, ExecNmsub);
+
+impl<T> VectorOpIntegerV for ExecMove<T>
+where
+    T: Copy + Default,
+{
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        assert!(vs2.sew == size_of::<T>() as u8 && vd.sew == size_of::<T>() as u8);
+        let vs2 = vs2.as_slice::<T>();
+        for (index, element) in vd.iter_mut().enumerate() {
+            mask.element_load(
+                element,
+                <ExecMove<T> as ExecUnaryTrait<Result<T, Exception>, T>>::exec(vs2[index])?,
+                index,
+            );
+        }
+
+        Ok(())
+    }
+}
 
 impl_vector_op_widening_interger_vv_binary!(VectorOpWadd, ExecWideningAdd, signed);
 impl_vector_op_widening_interger_vv_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
