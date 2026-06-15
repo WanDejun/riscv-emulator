@@ -1,0 +1,1052 @@
+use super::*;
+use crate::isa::riscv::vector::{
+    VLEN_BYTE,
+    tester::{VectorBuilder, VectorChecker},
+    types::{Vlmul, Vsew},
+};
+
+fn run_test_integer_vv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpIntegerVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_vx<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpIntegerVX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_vv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpWideningIntegerVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_vx<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpWideningIntegerVX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_wv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpWideningIntegerWV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_wx<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpWideningIntegerWX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_v<OpIV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIV: VectorOpIntegerV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_vvm<OpIVVM, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVVM: VectorOpIntegerVVM,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVVM::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_mask_vv<OpIMVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIMVV: VectorOpIntegerMaskVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIMVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_mask_vx<OpIMVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIMVX: VectorOpIntegerMaskVX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIMVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_mask_vvm<OpIMVVM, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIMVVM: VectorOpIntegerMaskVVM,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIMVVM::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn mask_from_bits<I>(bits: I) -> Vec<u8>
+where
+    I: IntoIterator<Item = bool>,
+{
+    let mut mask = vec![0; VLEN_BYTE];
+    for (index, bit) in bits.into_iter().enumerate() {
+        write_mask_bit(&mut mask, index, bit);
+    }
+    mask
+}
+
+fn mask_bit(mask: &[u8], index: usize) -> bool {
+    read_mask_bit(mask, index)
+}
+
+fn signed_div_u64(lhs: u64, rhs: u64) -> u64 {
+    if rhs == 0 {
+        u64::MAX
+    } else {
+        as_signed_i128(lhs).wrapping_div(as_signed_i128(rhs)) as u64
+    }
+}
+
+fn signed_rem_u64(lhs: u64, rhs: u64) -> u64 {
+    if rhs == 0 {
+        lhs
+    } else {
+        as_signed_i128(lhs).wrapping_rem(as_signed_i128(rhs)) as u64
+    }
+}
+
+fn run_vv_binary_u32<OpIVV>(vs1: &[u32], vs2: &[u32], expected: &[u32])
+where
+    OpIVV: VectorOpIntegerVV,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+
+    run_test_integer_vv::<OpIVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+    );
+}
+
+fn run_vv_binary_u64<OpIVV>(vs1: &[u64], vs2: &[u64], expected: &[u64])
+where
+    OpIVV: VectorOpIntegerVV,
+{
+    const LMUL: Vlmul = Vlmul::M4;
+    const SEW: Vsew = Vsew::E64;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+
+    run_test_integer_vv::<OpIVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+    );
+}
+
+fn run_vx_binary_u32<OpIVX>(scalar: WordType, vs2: &[u32], expected: &[u32])
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vx(scalar, 8, 24);
+
+    run_test_integer_vx::<OpIVX, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+    );
+}
+
+fn run_vx_binary_u64<OpIVX>(scalar: WordType, vs2: &[u64], expected: &[u64])
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    const LMUL: Vlmul = Vlmul::M4;
+    const SEW: Vsew = Vsew::E64;
+    let param = TestOpParameter::new_vx(scalar, 8, 24);
+
+    run_test_integer_vx::<OpIVX, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+    );
+}
+
+fn run_vvm_binary_u8<OpIVVM>(vs1: &[u8], vs2: &[u8], carry: &[u8], expected: &[u8])
+where
+    OpIVVM: VectorOpIntegerVVM,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_vvm(8, 16, 24);
+
+    run_test_integer_vvm::<OpIVVM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(1, param.v0(), carry)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), expected),
+    );
+}
+
+fn run_mask_vv_u8<OpIMVV>(vs1: &[u8], vs2: &[u8], expected: &[u8])
+where
+    OpIMVV: VectorOpIntegerMaskVV,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_mask_vv(8, 16, 24);
+
+    run_test_integer_mask_vv::<OpIMVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vs2.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(1, param.vd(), expected),
+    );
+}
+
+fn run_mask_vx_u8<OpIMVX>(scalar: WordType, vs2: &[u8], expected: &[u8])
+where
+    OpIMVX: VectorOpIntegerMaskVX,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_mask_vx(scalar, 8, 24);
+
+    run_test_integer_mask_vx::<OpIMVX, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vs2.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(1, param.vd(), expected),
+    );
+}
+
+fn run_mask_vvm_u8<OpIMVVM>(vs1: &[u8], vs2: &[u8], carry: &[u8], expected: &[u8])
+where
+    OpIMVVM: VectorOpIntegerMaskVVM,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_mask_vvm(8, 16, 24);
+
+    run_test_integer_mask_vvm::<OpIMVVM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vs2.len() as u16)
+                .reg(1, param.v0(), carry)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(1, param.vd(), expected),
+    );
+}
+
+fn run_widening_vv_i16_to_i32<OpIVV>(vs1: &[i16], vs2: &[i16], expected: &[i32])
+where
+    OpIVV: VectorOpWideningIntegerVV,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+
+    run_test_widening_integer_vv::<OpIVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), expected),
+    );
+}
+
+fn u32_bits_to_i32(values: Vec<u32>) -> Vec<i32> {
+    values.into_iter().map(|value| value as i32).collect()
+}
+
+fn run_widening_vx_i16_to_i32<OpIVX>(x1: WordType, vs2: &[i16], expected: &[i32])
+where
+    OpIVX: VectorOpWideningIntegerVX,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx(x1, 16, 24);
+
+    run_test_widening_integer_vx::<OpIVX, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), expected),
+    );
+}
+
+fn run_widening_wv_i16_to_i32<OpIVV>(vs1: &[i16], vs2: &[i32], expected: &[i32])
+where
+    OpIVV: VectorOpWideningIntegerWV,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+
+    run_test_widening_integer_wv::<OpIVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), vs1)
+                .reg(LMUL.get_lmul() * 2, param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), expected),
+    );
+}
+
+fn run_widening_wx_i16_to_i32<OpIVX>(x1: WordType, vs2: &[i32], expected: &[i32])
+where
+    OpIVX: VectorOpWideningIntegerWX,
+{
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx(x1, 16, 24);
+
+    run_test_widening_integer_wx::<OpIVX, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul() * 2, param.vs2(), vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), expected),
+    );
+}
+
+#[test]
+fn test_vector_op_add_vv() {
+    const LMUL: Vlmul = Vlmul::M2;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let vs1: Vec<u32> = (0..elem_count).map(|i| (i as u32) * 7 + 3).collect();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| u32::MAX.wrapping_sub((i as u32) * 5))
+        .collect();
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| lhs.wrapping_add(*rhs))
+        .collect();
+
+    run_test_integer_vv::<VectorOpAdd, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_widening_add_sub() {
+    let vs1 = [-5_i16, 7, i16::MAX, -1, 0, 1234, -3000, 99];
+    let vs2 = [10_i16, -20, 1, i16::MIN, -9, -1234, 4000, -100];
+
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| (*lhs as i32).wrapping_add(*rhs as i32))
+        .collect();
+    run_widening_vv_i16_to_i32::<VectorOpWadd>(&vs1, &vs2, &expected);
+
+    let expected = u32_bits_to_i32(
+        vs1.iter()
+            .zip(vs2.iter())
+            .map(|(rhs, lhs)| (*lhs as u16 as u32).wrapping_add(*rhs as u16 as u32))
+            .collect(),
+    );
+    run_widening_vv_i16_to_i32::<VectorOpWaddu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| (*lhs as i32).wrapping_sub(*rhs as i32))
+        .collect();
+    run_widening_vv_i16_to_i32::<VectorOpWsub>(&vs1, &vs2, &expected);
+
+    let wide_vs2 = [100_i32, -200, i32::MAX, i32::MIN, 77, -88, 9000, -9000];
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(wide_vs2.iter())
+        .map(|(rhs, lhs)| lhs.wrapping_add(*rhs as i32))
+        .collect();
+    run_widening_wv_i16_to_i32::<VectorOpWadd>(&vs1, &wide_vs2, &expected);
+
+    let expected: Vec<i32> = wide_vs2
+        .iter()
+        .map(|lhs| lhs.wrapping_sub(-3_i16 as i32))
+        .collect();
+    run_widening_wx_i16_to_i32::<VectorOpWsub>(-3_i16 as WordType, &wide_vs2, &expected);
+
+    let expected: Vec<i32> = vs2
+        .iter()
+        .map(|lhs| (*lhs as i32).wrapping_add(9_i16 as i32))
+        .collect();
+    run_widening_vx_i16_to_i32::<VectorOpWadd>(9, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_widening_mul() {
+    let vs1 = [-5_i16, 7, -1, 0x7fff, -300, 123, -32768, 11];
+    let vs2 = [10_i16, -20, -3, 2, 400, -321, -2, 0x7fff];
+
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| (*lhs as i32).wrapping_mul(*rhs as i32))
+        .collect();
+    run_widening_vv_i16_to_i32::<VectorOpWmul>(&vs1, &vs2, &expected);
+
+    let expected = u32_bits_to_i32(
+        vs1.iter()
+            .zip(vs2.iter())
+            .map(|(rhs, lhs)| (*lhs as u16 as u32).wrapping_mul(*rhs as u16 as u32))
+            .collect(),
+    );
+    run_widening_vv_i16_to_i32::<VectorOpWmulu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| (*lhs as i32).wrapping_mul(*rhs as u16 as i32))
+        .collect();
+    run_widening_vv_i16_to_i32::<VectorOpWmulsu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<i32> = vs2
+        .iter()
+        .map(|lhs| (*lhs as i32).wrapping_mul((-2_i16) as i32))
+        .collect();
+    run_widening_vx_i16_to_i32::<VectorOpWmul>(-2_i16 as WordType, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_integer_vv_binary() {
+    let elem_count = VLEN_BYTE / size_of::<u32>();
+    let vs1: Vec<u32> = (0..elem_count)
+        .map(|i| 0x8000_0011u32.wrapping_add((i as u32) * 0x1020_304))
+        .collect();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0xfedc_ba98u32.wrapping_sub((i as u32) * 0x0101_0101))
+        .collect();
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| lhs.wrapping_add(*rhs))
+        .collect();
+    run_vv_binary_u32::<VectorOpAddu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| lhs.wrapping_sub(*rhs))
+        .collect();
+    run_vv_binary_u32::<VectorOpSub>(&vs1, &vs2, &expected);
+    run_vv_binary_u32::<VectorOpSubu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| lhs & rhs)
+        .collect();
+    run_vv_binary_u32::<VectorOpAnd>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| lhs.wrapping_shl(rhs & 31))
+        .collect();
+    run_vv_binary_u32::<VectorOpSll>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| lhs.wrapping_shr(rhs & 31))
+        .collect();
+    run_vv_binary_u32::<VectorOpSrl>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| (as_signed_i128(*lhs) >> (rhs & 31)) as u32)
+        .collect();
+    run_vv_binary_u32::<VectorOpSra>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| {
+            if as_signed_i128(*lhs) > as_signed_i128(*rhs) {
+                *lhs
+            } else {
+                *rhs
+            }
+        })
+        .collect();
+    run_vv_binary_u32::<VectorOpMax>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| if lhs > rhs { *lhs } else { *rhs })
+        .collect();
+    run_vv_binary_u32::<VectorOpMaxu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| {
+            if as_signed_i128(*lhs) < as_signed_i128(*rhs) {
+                *lhs
+            } else {
+                *rhs
+            }
+        })
+        .collect();
+    run_vv_binary_u32::<VectorOpMin>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| if lhs < rhs { *lhs } else { *rhs })
+        .collect();
+    run_vv_binary_u32::<VectorOpMinu>(&vs1, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_add_vx() {
+    const LMUL: Vlmul = Vlmul::M2;
+    const SEW: Vsew = Vsew::E16;
+    const SCALAR: WordType = 0x12f0;
+    let param = TestOpParameter::new_vx(SCALAR, 8, 10);
+
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u16> = (0..elem_count)
+        .map(|i| u16::MAX.wrapping_sub((i as u16) * 17))
+        .collect();
+    let scalar = param.x1() as u16;
+    let expected: Vec<u16> = vs2.iter().map(|value| value.wrapping_add(scalar)).collect();
+
+    run_test_integer_vx::<VectorOpAdd, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_integer_vx_binary() {
+    let elem_count = VLEN_BYTE / size_of::<u32>();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0x8000_00f0u32.wrapping_add((i as u32) * 0x0110_0101))
+        .collect();
+    let scalar = 0x1234_0005u64;
+    let scalar_u32 = scalar as u32;
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| value.wrapping_add(scalar_u32))
+        .collect();
+    run_vx_binary_u32::<VectorOpAddu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| value.wrapping_sub(scalar_u32))
+        .collect();
+    run_vx_binary_u32::<VectorOpSub>(scalar, &vs2, &expected);
+    run_vx_binary_u32::<VectorOpSubu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| scalar_u32.wrapping_sub(*value))
+        .collect();
+    run_vx_binary_u32::<VectorOpRevSub>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2.iter().map(|value| value & scalar_u32).collect();
+    run_vx_binary_u32::<VectorOpAnd>(scalar, &vs2, &expected);
+
+    let shift = scalar_u32 & 31;
+    let expected: Vec<u32> = vs2.iter().map(|value| value.wrapping_shl(shift)).collect();
+    run_vx_binary_u32::<VectorOpSll>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2.iter().map(|value| value.wrapping_shr(shift)).collect();
+    run_vx_binary_u32::<VectorOpSrl>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| (as_signed_i128(*value) >> shift) as u32)
+        .collect();
+    run_vx_binary_u32::<VectorOpSra>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| {
+            if as_signed_i128(*value) > as_signed_i128(scalar_u32) {
+                *value
+            } else {
+                scalar_u32
+            }
+        })
+        .collect();
+    run_vx_binary_u32::<VectorOpMax>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| {
+            if *value > scalar_u32 {
+                *value
+            } else {
+                scalar_u32
+            }
+        })
+        .collect();
+    run_vx_binary_u32::<VectorOpMaxu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| {
+            if as_signed_i128(*value) < as_signed_i128(scalar_u32) {
+                *value
+            } else {
+                scalar_u32
+            }
+        })
+        .collect();
+    run_vx_binary_u32::<VectorOpMin>(scalar, &vs2, &expected);
+
+    let expected: Vec<u32> = vs2
+        .iter()
+        .map(|value| {
+            if *value < scalar_u32 {
+                *value
+            } else {
+                scalar_u32
+            }
+        })
+        .collect();
+    run_vx_binary_u32::<VectorOpMinu>(scalar, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_mul_div_e64() {
+    let vs2 = [
+        0,
+        1,
+        2,
+        u64::MAX,
+        0x8000_0000_0000_0000,
+        0x7fff_ffff_ffff_ffff,
+        0x1234_5678_9abc_def0,
+        0xfedc_ba98_7654_3210,
+    ];
+    let vs1 = [
+        0,
+        1,
+        u64::MAX,
+        2,
+        u64::MAX,
+        0x8000_0000_0000_0000,
+        3,
+        0x1000_0000_0000_0001,
+    ];
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| lhs.wrapping_mul(*rhs))
+        .collect();
+    run_vv_binary_u64::<VectorOpMul>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| ((as_signed_i128(*lhs) * as_signed_i128(*rhs)) >> 64) as u64)
+        .collect();
+    run_vv_binary_u64::<VectorOpMulh>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(lhs, rhs)| (((*lhs as u128) * (*rhs as u128)) >> 64) as u64)
+        .collect();
+    run_vv_binary_u64::<VectorOpMulhu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| ((as_signed_i128(*lhs) * (*rhs as u128 as i128)) >> 64) as u64)
+        .collect();
+    run_vv_binary_u64::<VectorOpMulhsu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| signed_div_u64(*lhs, *rhs))
+        .collect();
+    run_vv_binary_u64::<VectorOpDiv>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| if *rhs == 0 { u64::MAX } else { lhs / rhs })
+        .collect();
+    run_vv_binary_u64::<VectorOpDivu>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| signed_rem_u64(*lhs, *rhs))
+        .collect();
+    run_vv_binary_u64::<VectorOpRem>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u64> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(rhs, lhs)| if *rhs == 0 { *lhs } else { lhs % rhs })
+        .collect();
+    run_vv_binary_u64::<VectorOpRemu>(&vs1, &vs2, &expected);
+
+    let scalar = 0xffff_ffff_ffff_fffb;
+    let expected: Vec<u64> = vs2.iter().map(|value| value.wrapping_mul(scalar)).collect();
+    run_vx_binary_u64::<VectorOpMul>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2
+        .iter()
+        .map(|value| ((as_signed_i128(*value) * as_signed_i128(scalar)) >> 64) as u64)
+        .collect();
+    run_vx_binary_u64::<VectorOpMulh>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2
+        .iter()
+        .map(|value| (((*value as u128) * (scalar as u128)) >> 64) as u64)
+        .collect();
+    run_vx_binary_u64::<VectorOpMulhu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2
+        .iter()
+        .map(|value| ((as_signed_i128(*value) * (scalar as u128 as i128)) >> 64) as u64)
+        .collect();
+    run_vx_binary_u64::<VectorOpMulhsu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2
+        .iter()
+        .map(|value| signed_div_u64(*value, scalar))
+        .collect();
+    run_vx_binary_u64::<VectorOpDiv>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2.iter().map(|value| value / scalar).collect();
+    run_vx_binary_u64::<VectorOpDivu>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2
+        .iter()
+        .map(|value| signed_rem_u64(*value, scalar))
+        .collect();
+    run_vx_binary_u64::<VectorOpRem>(scalar, &vs2, &expected);
+
+    let expected: Vec<u64> = vs2.iter().map(|value| value % scalar).collect();
+    run_vx_binary_u64::<VectorOpRemu>(scalar, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_adc_sbc_vvm() {
+    let elem_count = VLEN_BYTE;
+    let vs1: Vec<u8> = (0..elem_count)
+        .map(|i| 0x11u8.wrapping_add((i as u8).wrapping_mul(13)))
+        .collect();
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| 0xf0u8.wrapping_sub((i as u8).wrapping_mul(7)))
+        .collect();
+    let carry = mask_from_bits((0..elem_count).map(|i| i % 3 == 1));
+
+    let expected: Vec<u8> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .enumerate()
+        .map(|(index, (vs1, vs2))| {
+            vs2.wrapping_add(*vs1)
+                .wrapping_add(mask_bit(&carry, index) as u8)
+        })
+        .collect();
+    run_vvm_binary_u8::<VectorOpAdc>(&vs1, &vs2, &carry, &expected);
+
+    let expected: Vec<u8> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .enumerate()
+        .map(|(index, (vs1, vs2))| {
+            vs2.wrapping_sub(*vs1)
+                .wrapping_sub(mask_bit(&carry, index) as u8)
+        })
+        .collect();
+    run_vvm_binary_u8::<VectorOpSbc>(&vs1, &vs2, &carry, &expected);
+}
+
+#[test]
+fn test_vector_op_mask_vv() {
+    let elem_count = VLEN_BYTE;
+    let vs1: Vec<u8> = (0..elem_count)
+        .map(|i| [3, 7, 7, 10, 0xf0, 0x80, 0xff, 1][i % 8])
+        .collect();
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| [3, 8, 6, 10, 0x10, 0x7f, 0xfe, 2][i % 8])
+        .collect();
+
+    let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 == vs1));
+    run_mask_vv_u8::<VectorOpMseq>(&vs1, &vs2, &expected);
+
+    let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 != vs1));
+    run_mask_vv_u8::<VectorOpMsne>(&vs1, &vs2, &expected);
+
+    let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).map(|(vs1, vs2)| vs2 < vs1));
+    run_mask_vv_u8::<VectorOpMsltu>(&vs1, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_mask_vv_honors_mask_and_tail() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_mask_vv(8, 16, 24).with_enable_mask(true);
+    let elem_count = VLEN_BYTE;
+    let vl = 8;
+    let vs1: Vec<u8> = (0..elem_count)
+        .map(|i| [1, 2, 3, 4, 5, 6, 7, 8][i % 8])
+        .collect();
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| [1, 9, 3, 0, 5, 0, 7, 0][i % 8])
+        .collect();
+    let pred_mask = mask_from_bits((0..elem_count).map(|i| i % 2 == 0));
+    let mut expected = vec![0xff; VLEN_BYTE];
+    for index in 0..vl {
+        if mask_bit(&pred_mask, index) {
+            write_mask_bit(&mut expected, index, vs2[index] == vs1[index]);
+        }
+    }
+
+    run_test_integer_mask_vv::<VectorOpMseq, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(1, param.vd(), &[0xffu8; VLEN_BYTE])
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(1, param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_mask_vx() {
+    let elem_count = VLEN_BYTE;
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| [0x10, 0x40, 0x80, 0xff, 0x7f, 0x01, 0x40, 0x41][i % 8])
+        .collect();
+
+    let scalar = 0x40;
+    let expected = mask_from_bits(vs2.iter().map(|value| *value == scalar as u8));
+    run_mask_vx_u8::<VectorOpMseq>(scalar, &vs2, &expected);
+
+    let expected = mask_from_bits(vs2.iter().map(|value| *value != scalar as u8));
+    run_mask_vx_u8::<VectorOpMsne>(scalar, &vs2, &expected);
+
+    let expected = mask_from_bits(vs2.iter().map(|value| *value < scalar as u8));
+    run_mask_vx_u8::<VectorOpMsltu>(scalar, &vs2, &expected);
+
+    let expected = mask_from_bits(vs2.iter().map(|value| (scalar as u8) > *value));
+    run_mask_vx_u8::<VectorOpMsgtu>(scalar, &vs2, &expected);
+
+    let signed_scalar = 0x7f;
+    let expected = mask_from_bits(
+        vs2.iter()
+            .map(|value| as_signed_i128(signed_scalar as u8) > as_signed_i128(*value)),
+    );
+    run_mask_vx_u8::<VectorOpMsgt>(signed_scalar, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_madc_msbc_mask_vvm() {
+    let elem_count = VLEN_BYTE;
+    let vs1: Vec<u8> = (0..elem_count)
+        .map(|i| [1, 2, 0xff, 0x80, 0x7f, 0x10, 0xf0, 0x55][i % 8])
+        .collect();
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| [0xff, 1, 1, 0x80, 0x80, 0xef, 0x20, 0x54][i % 8])
+        .collect();
+    let carry = mask_from_bits((0..elem_count).map(|i| i % 2 == 0));
+
+    let expected = mask_from_bits(vs1.iter().zip(vs2.iter()).enumerate().map(
+        |(index, (vs1, vs2))| {
+            (*vs2 as u16 + *vs1 as u16 + mask_bit(&carry, index) as u16) > u8::MAX as u16
+        },
+    ));
+    run_mask_vvm_u8::<VectorOpMadc>(&vs1, &vs2, &carry, &expected);
+
+    let expected = mask_from_bits(
+        vs1.iter()
+            .zip(vs2.iter())
+            .enumerate()
+            .map(|(index, (vs1, vs2))| {
+                (*vs2 as u16) < (*vs1 as u16 + mask_bit(&carry, index) as u16)
+            }),
+    );
+    run_mask_vvm_u8::<VectorOpMsbc>(&vs1, &vs2, &carry, &expected);
+}
+
+#[test]
+fn test_vector_op_adc_vvm_honors_tail() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_vvm(8, 16, 24);
+    let elem_count = VLEN_BYTE;
+    let vl = 5;
+    let vs1: Vec<u8> = (0..elem_count).map(|i| i as u8).collect();
+    let vs2: Vec<u8> = (0..elem_count)
+        .map(|i| 0x80u8.wrapping_add(i as u8))
+        .collect();
+    let carry = mask_from_bits((0..elem_count).map(|i| i % 2 == 1));
+    let mut expected = vec![0xaa; elem_count];
+    for index in 0..vl {
+        expected[index] = vs2[index]
+            .wrapping_add(vs1[index])
+            .wrapping_add(mask_bit(&carry, index) as u8);
+    }
+    for value in expected.iter_mut().skip(vl) {
+        *value = 0;
+    }
+
+    run_test_integer_vvm::<VectorOpAdc, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, true, vl as u16)
+                .reg(1, param.v0(), &carry)
+                .reg(LMUL.get_lmul(), param.vd(), &[0xaau8; VLEN_BYTE])
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_zext_vf2() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SRC_SEW: Vsew = Vsew::E8;
+    const DST_SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_v(8, 10, SRC_SEW, DST_SEW);
+
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u8> = (0..VLEN_BYTE * LMUL.get_lmul() as usize)
+        .map(|i| 0x80u8.wrapping_add(i as u8))
+        .collect();
+    let expected: Vec<u16> = vs2
+        .iter()
+        .take(elem_count)
+        .map(|value| *value as u16)
+        .collect();
+
+    run_test_integer_v::<VectorOpZextVf2, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, DST_SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}

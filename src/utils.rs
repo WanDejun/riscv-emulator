@@ -379,6 +379,9 @@ pub trait UnsignedInteger:
     + TruncateTo<u32>
     + TruncateTo<u64>
     + TruncateTo<u128>
+    + num_traits::WrappingAdd
+    + num_traits::WrappingSub
+    + num_traits::WrappingMul
 {
     const MAX: Self;
     const MIN: Self;

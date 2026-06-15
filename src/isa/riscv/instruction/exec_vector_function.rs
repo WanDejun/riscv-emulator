@@ -12,10 +12,12 @@ use crate::{
             trap::Exception,
             vector::{
                 VectorMemException,
-                integer::{
+                arithmetic::{
                     VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
                     VectorOpIntegerMaskVXM, VectorOpIntegerV, VectorOpIntegerVV,
                     VectorOpIntegerVVM, VectorOpIntegerVX, VectorOpIntegerVXM,
+                    VectorOpWideningIntegerVV, VectorOpWideningIntegerVX,
+                    VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
                 },
             },
         },
@@ -488,6 +490,104 @@ where
         {
             let x1 = cpu.reg_file.read(rs1, 0).0;
             cpu.vector.exec_integer_vx::<OpIVX>(x1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_widening_integer_op_vv<OpIVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVV: VectorOpWideningIntegerVV,
+{
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_widening_integer_vv::<OpIVV>(vs1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_widening_integer_op_vx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpWideningIntegerVX,
+{
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .exec_widening_integer_vx::<OpIVX>(x1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_widening_integer_op_wv<OpIVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVV: VectorOpWideningIntegerWV,
+{
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_widening_integer_wv::<OpIVV>(vs1, vs2, vd, !vm)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_widening_integer_op_wx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpWideningIntegerWX,
+{
+    normal_vector_exec(cpu, |cpu| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .exec_widening_integer_wx::<OpIVX>(x1, vs2, vd, !vm)
         } else {
             unreachable!()
         }

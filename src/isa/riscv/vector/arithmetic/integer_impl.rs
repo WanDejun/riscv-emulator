@@ -1,0 +1,1250 @@
+#[cfg(test)]
+use crate::isa::riscv::vector::{Vector, tester::TestOpParameter};
+use crate::{
+    config::arch_config::WordType,
+    isa::riscv::{
+        instruction::exec_function::{
+            ExecAdd, ExecAddu, ExecAnd, ExecDivSigned, ExecDivUnsigned, ExecEqual, ExecMax,
+            ExecMaxu, ExecMin, ExecMinu, ExecMulHighSigned, ExecMulHighSignedUnsigned,
+            ExecMulHighUnsigned, ExecMulLow, ExecNotEqual, ExecOr, ExecRemSigned, ExecRemUnsigned,
+            ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub, ExecSubu, ExecTrait,
+            ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
+        },
+        trap::Exception,
+        vector::{
+            VecOpMask,
+            types::{VGFRef, VGFRefMut},
+        },
+    },
+    utils::{UnsignedInteger, as_signed_i128},
+};
+
+trait ExecTernaryTrait<OUT, IN = WordType> {
+    fn exec(a: IN, b: IN, c: bool) -> OUT;
+}
+
+trait WideningIntegerBinaryExec<T> {
+    fn exec(a: T, b: T) -> Result<T, Exception>;
+}
+
+struct ExecAdc;
+struct ExecSbc;
+struct ExecAdcCarryNoCarry;
+struct ExecSbcBorrowNoBorrow;
+struct ExecAdcCarry;
+struct ExecSbcBorrow;
+struct ExecWideningAdd;
+struct ExecWideningSub;
+struct ExecWideningMul;
+
+impl<T> WideningIntegerBinaryExec<T> for ExecWideningAdd
+where
+    T: num_traits::WrappingAdd,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_add(&b))
+    }
+}
+
+impl<T> WideningIntegerBinaryExec<T> for ExecWideningSub
+where
+    T: num_traits::WrappingSub,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_sub(&b))
+    }
+}
+
+impl<T> WideningIntegerBinaryExec<T> for ExecWideningMul
+where
+    T: num_traits::WrappingMul,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a.wrapping_mul(&b))
+    }
+}
+
+impl<T> ExecTernaryTrait<Result<T, Exception>, T> for ExecAdc
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T, c: bool) -> Result<T, Exception> {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        Ok(T::truncate_from(a + b + c as u128))
+    }
+}
+
+impl<T> ExecTernaryTrait<Result<T, Exception>, T> for ExecSbc
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T, c: bool) -> Result<T, Exception> {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        Ok(T::truncate_from(a.wrapping_sub(b + c as u128)))
+    }
+}
+
+impl<T> ExecTernaryTrait<Result<bool, Exception>, T> for ExecAdcCarry
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T, c: bool) -> Result<bool, Exception> {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        Ok((a + b + c as u128) >> T::BITS != 0)
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecAdcCarryNoCarry
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        (a + b) >> T::BITS != 0
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecSbcBorrowNoBorrow
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        a < b
+    }
+}
+
+impl<T> ExecTernaryTrait<Result<bool, Exception>, T> for ExecSbcBorrow
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T, c: bool) -> Result<bool, Exception> {
+        let a: u128 = a.into();
+        let b: u128 = b.into();
+        Ok(a < b + c as u128)
+    }
+}
+
+struct ExecUnsignedLessEqual;
+struct ExecSignedLess;
+struct ExecSignedLessEqual;
+struct ExecUnsignedGreater;
+struct ExecSignedGreater;
+struct ExecUnsignedGreaterX;
+struct ExecSignedGreaterX;
+
+impl<T> ExecTrait<bool, T> for ExecUnsignedLessEqual
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> bool {
+        a <= b
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecSignedLess
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(a) < as_signed_i128(b)
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecSignedLessEqual
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(a) <= as_signed_i128(b)
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecUnsignedGreater
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> bool {
+        a > b
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecSignedGreater
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(a) > as_signed_i128(b)
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecUnsignedGreaterX
+where
+    T: UnsignedInteger,
+{
+    fn exec(a: T, b: T) -> bool {
+        b > a
+    }
+}
+
+impl<T> ExecTrait<bool, T> for ExecSignedGreaterX
+where
+    T: UnsignedInteger + Into<u128>,
+{
+    fn exec(a: T, b: T) -> bool {
+        as_signed_i128(b) > as_signed_i128(a)
+    }
+}
+
+#[inline(always)]
+fn read_mask_bit(mask: &[u8], index: usize) -> bool {
+    (mask[index / 8] & (1 << (index % 8))) != 0
+}
+
+#[inline(always)]
+fn write_mask_bit(mask: &mut [u8], index: usize, value: bool) {
+    let byte = &mut mask[index / 8];
+    let bit = 1 << (index % 8);
+    if value {
+        *byte |= bit;
+    } else {
+        *byte &= !bit;
+    }
+}
+
+macro_rules! dispatch_integer_sew {
+    ($sew:expr, |$ty:ident| $body:block) => {
+        match $sew {
+            1 => {
+                type $ty = u8;
+                $body
+            }
+            2 => {
+                type $ty = u16;
+                $body
+            }
+            4 => {
+                type $ty = u32;
+                $body
+            }
+            8 => {
+                type $ty = u64;
+                $body
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
+// OPIVV
+pub(in crate::isa::riscv) trait VectorOpIntegerVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask())
+    }
+}
+
+// OPIVX
+pub(in crate::isa::riscv) trait VectorOpIntegerVX {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vx::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask())
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_vv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerVX {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_vx::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerWV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_wv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerWX {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_wx::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+// OPIV(Unary)
+pub(in crate::isa::riscv) trait VectorOpIntegerV {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_v::<Self>(
+            param.vs2(),
+            param.vd(),
+            param.src_eew(),
+            param.dst_eew(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerVVM {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vvm::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerVXM {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vxm::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_mask_vv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVX {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_mask_vx::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVVM {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_mask_vvm::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_mask_vxm::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.v0(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+macro_rules! impl_vector_op_integer_vv_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vs1.sew == vd.sew);
+                let sew = vd.sew;
+
+                dispatch_integer_sew!(sew, |T| {
+                    let vs1 = vs1.as_slice::<T>();
+                    let vs2 = vs2.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            $exec_ty::<T>::exec(vs2[index], vs1[index])?,
+                            index,
+                        );
+                    }
+                });
+
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_vx_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                let sew = vd.sew;
+
+                dispatch_integer_sew!(sew, |T| {
+                    let scalar = x1 as T;
+                    let vs2 = vs2.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(element, $exec_ty::<T>::exec(vs2[index], scalar)?, index);
+                    }
+                });
+
+                Ok(())
+            }
+        }
+    };
+}
+
+fn vector_op_widening_vv_binary<Src1, Src2, Dst, Exec>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Src1: Copy,
+    Src2: Copy,
+    Dst: Copy + Default + From<Src1> + From<Src2>,
+    Exec: WideningIntegerBinaryExec<Dst>,
+{
+    let vs1 = vs1.as_slice::<Src1>();
+    let vs2 = vs2.as_slice::<Src2>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(
+            element,
+            Exec::exec(Dst::from(vs2[index]), Dst::from(vs1[index]))?,
+            index,
+        );
+    }
+    Ok(())
+}
+
+fn vector_op_widening_vx_binary<Scalar, Src2, Dst, Exec>(
+    scalar: Scalar,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Scalar: Copy,
+    Src2: Copy,
+    Dst: Copy + Default + From<Scalar> + From<Src2>,
+    Exec: WideningIntegerBinaryExec<Dst>,
+{
+    let scalar = Dst::from(scalar);
+    let vs2 = vs2.as_slice::<Src2>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, Exec::exec(Dst::from(vs2[index]), scalar)?, index);
+    }
+    Ok(())
+}
+
+fn vector_op_widening_wv_binary<Src1, Dst, Exec>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Src1: Copy,
+    Dst: Copy + Default + From<Src1>,
+    Exec: WideningIntegerBinaryExec<Dst>,
+{
+    let vs1 = vs1.as_slice::<Src1>();
+    let vs2 = vs2.as_slice::<Dst>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(
+            element,
+            Exec::exec(vs2[index], Dst::from(vs1[index]))?,
+            index,
+        );
+    }
+    Ok(())
+}
+
+fn vector_op_widening_wx_binary<Scalar, Dst, Exec>(
+    scalar: Scalar,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Scalar: Copy,
+    Dst: Copy + Default + From<Scalar>,
+    Exec: WideningIntegerBinaryExec<Dst>,
+{
+    let scalar = Dst::from(scalar);
+    let vs2 = vs2.as_slice::<Dst>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, Exec::exec(vs2[index], scalar)?, index);
+    }
+    Ok(())
+}
+
+macro_rules! dispatch_widening_integer_sew {
+    ($src_sew:expr, |$i_src:ident, $i_dst:ident, $u_src:ident, $u_dst:ident| $body:block) => {
+        match $src_sew {
+            1 => {
+                type $i_src = i8;
+                type $i_dst = i16;
+                type $u_src = u8;
+                type $u_dst = u16;
+                $body
+            }
+            2 => {
+                type $i_src = i16;
+                type $i_dst = i32;
+                type $u_src = u16;
+                type $u_dst = u32;
+                $body
+            }
+            4 => {
+                type $i_src = i32;
+                type $i_dst = i64;
+                type $u_src = u32;
+                type $u_dst = u64;
+                $body
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_interger_vv_binary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vv_binary::<ISrc, ISrc, IDst, $exec_ty>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vv_binary::<USrc, USrc, UDst, $exec_ty>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, signed_unsigned) => {
+        impl VectorOpWideningIntegerVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vv_binary::<USrc, ISrc, IDst, $exec_ty>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_interger_vx_binary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vx_binary::<ISrc, ISrc, IDst, $exec_ty>(
+                        x1 as ISrc, vs2, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vx_binary::<USrc, USrc, UDst, $exec_ty>(
+                        x1 as USrc, vs2, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, signed_unsigned) => {
+        impl VectorOpWideningIntegerVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vx_binary::<USrc, ISrc, IDst, $exec_ty>(
+                        x1 as USrc, vs2, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_interger_wv_binary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerWV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew * 2 == vs2.sew && vs2.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs1.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_wv_binary::<ISrc, IDst, $exec_ty>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerWV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew * 2 == vs2.sew && vs2.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs1.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_wv_binary::<USrc, UDst, $exec_ty>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_interger_wx_binary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerWX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                dispatch_widening_integer_sew!(vd.sew / 2, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_wx_binary::<ISrc, IDst, $exec_ty>(x1 as ISrc, vs2, vd, mask)
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerWX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                dispatch_widening_integer_sew!(vd.sew / 2, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_wx_binary::<USrc, UDst, $exec_ty>(x1 as USrc, vs2, vd, mask)
+                })
+            }
+        }
+    };
+}
+
+/// Generate a `VectorOpIntegerV` implementation for unary extension operations (e.g., `vzext.vf2`, `vsext.vf4`).
+///
+/// This macro dispatches on `(src_sew, dst_sew)` pairs to call the appropriate type-specific executor,
+/// converting source vector elements (`$src_ty`) to wider destination elements (`$dst_ty`).
+///
+/// # Parameters
+/// - `$op_ty`: The marker type for the vector operation (e.g., `VectorOpZextVf2`).
+/// - `$exec_ty`: The executor struct implementing `ExecUnaryTrait` (e.g., `ExecZext`, `ExecSext`).
+/// - `$factor`: The extension factor (`dst_sew / src_sew`, e.g., `2` for vf2).
+/// - `[...]`: A list of `(src_sew, dst_sew, src_ty, dst_ty)` tuples defining valid type pairs.
+macro_rules! impl_vector_op_integer_v_unary_ext {
+    ($op_ty:ty, $exec_ty:ident, $factor:literal, [$(($src_sew:literal, $dst_sew:literal, $src_ty:ty, $dst_ty:ty)),+ $(,)?]) => {
+        impl VectorOpIntegerV for $op_ty {
+            fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+                let src_sew = vs2.sew;
+                let dst_sew = vd.sew;
+                assert!(dst_sew == src_sew * $factor);
+
+                match (src_sew, dst_sew) {
+                    $(
+                        ($src_sew, $dst_sew) => {
+                            let vs2 = vs2.as_slice::<$src_ty>();
+                            for (index, element) in vd.iter_mut().enumerate() {
+                                mask.element_load(
+                                    element,
+                                    $exec_ty::<$dst_ty, $src_ty>::exec(vs2[index])?,
+                                    index,
+                                );
+                            }
+                        }
+                    )+
+                    _ => unreachable!(),
+                }
+
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_vvm_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVVM for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                v0: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vs1.sew == vd.sew);
+                let carry = v0.as_slice::<u8>();
+                dispatch_integer_sew!(vd.sew, |T| {
+                    let vs1 = vs1.as_slice::<T>();
+                    let vs2 = vs2.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], vs1[index], read_mask_bit(carry, index))?,
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_vxm_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVXM for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                v0: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                let carry = v0.as_slice::<u8>();
+                dispatch_integer_sew!(vd.sew, |T| {
+                    let scalar = x1 as T;
+                    let vs2 = vs2.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], scalar, read_mask_bit(carry, index))?,
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_mask_vv_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerMaskVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew);
+                let mask = vd.as_mut_slice::<u8>();
+                dispatch_integer_sew!(vs2.sew, |T| {
+                    let vs1 = vs1.as_slice::<T>();
+                    let vs2 = vs2.as_slice::<T>();
+                    for index in 0..vs2.len() {
+                        op_mask.mask_bit_load(mask, index, $exec_ty::exec(vs2[index], vs1[index]));
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_mask_vx_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerMaskVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                let mask = vd.as_mut_slice::<u8>();
+                dispatch_integer_sew!(vs2.sew, |T| {
+                    let scalar = x1 as T;
+                    let vs2 = vs2.as_slice::<T>();
+                    for index in 0..vs2.len() {
+                        op_mask.mask_bit_load(mask, index, $exec_ty::exec(vs2[index], scalar));
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_mask_vvm_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerMaskVVM for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                v0: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew);
+                let carry = v0.as_slice::<u8>();
+                let mask = vd.as_mut_slice::<u8>();
+                dispatch_integer_sew!(vs2.sew, |T| {
+                    let vs1 = vs1.as_slice::<T>();
+                    let vs2 = vs2.as_slice::<T>();
+                    for index in 0..vs2.len() {
+                        op_mask.mask_bit_load(
+                            mask,
+                            index,
+                            $exec_ty::exec(vs2[index], vs1[index], read_mask_bit(carry, index))?,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_mask_vxm_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerMaskVXM for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                v0: &VGFRef,
+                vd: &mut VGFRefMut,
+                op_mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                let carry = v0.as_slice::<u8>();
+                let mask = vd.as_mut_slice::<u8>();
+                dispatch_integer_sew!(vs2.sew, |T| {
+                    let scalar = x1 as T;
+                    let vs2 = vs2.as_slice::<T>();
+                    for index in 0..vs2.len() {
+                        op_mask.mask_bit_load(
+                            mask,
+                            index,
+                            $exec_ty::exec(vs2[index], scalar, read_mask_bit(carry, index))?,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+pub(in crate::isa::riscv) struct VectorOpAdd;
+pub(in crate::isa::riscv) struct VectorOpAddu;
+pub(in crate::isa::riscv) struct VectorOpSub;
+pub(in crate::isa::riscv) struct VectorOpSubu;
+pub(in crate::isa::riscv) struct VectorOpRevSub;
+pub(in crate::isa::riscv) struct VectorOpAnd;
+pub(in crate::isa::riscv) struct VectorOpOr;
+pub(in crate::isa::riscv) struct VectorOpXor;
+pub(in crate::isa::riscv) struct VectorOpSll;
+pub(in crate::isa::riscv) struct VectorOpSrl;
+pub(in crate::isa::riscv) struct VectorOpSra;
+pub(in crate::isa::riscv) struct VectorOpAdc;
+pub(in crate::isa::riscv) struct VectorOpSbc;
+pub(in crate::isa::riscv) struct VectorOpMadc;
+pub(in crate::isa::riscv) struct VectorOpMsbc;
+pub(in crate::isa::riscv) struct VectorOpMseq;
+pub(in crate::isa::riscv) struct VectorOpMsne;
+pub(in crate::isa::riscv) struct VectorOpMsltu;
+pub(in crate::isa::riscv) struct VectorOpMslt;
+pub(in crate::isa::riscv) struct VectorOpMsleu;
+pub(in crate::isa::riscv) struct VectorOpMsle;
+pub(in crate::isa::riscv) struct VectorOpMsgtu;
+pub(in crate::isa::riscv) struct VectorOpMsgt;
+pub(in crate::isa::riscv) struct VectorOpMax;
+pub(in crate::isa::riscv) struct VectorOpMaxu;
+pub(in crate::isa::riscv) struct VectorOpMin;
+pub(in crate::isa::riscv) struct VectorOpMinu;
+pub(in crate::isa::riscv) struct VectorOpMul;
+pub(in crate::isa::riscv) struct VectorOpMulh;
+pub(in crate::isa::riscv) struct VectorOpMulhu;
+pub(in crate::isa::riscv) struct VectorOpMulhsu;
+pub(in crate::isa::riscv) struct VectorOpWadd;
+pub(in crate::isa::riscv) struct VectorOpWaddu;
+pub(in crate::isa::riscv) struct VectorOpWsub;
+pub(in crate::isa::riscv) struct VectorOpWsubu;
+pub(in crate::isa::riscv) struct VectorOpWmul;
+pub(in crate::isa::riscv) struct VectorOpWmulu;
+pub(in crate::isa::riscv) struct VectorOpWmulsu;
+pub(in crate::isa::riscv) struct VectorOpDiv;
+pub(in crate::isa::riscv) struct VectorOpDivu;
+pub(in crate::isa::riscv) struct VectorOpRem;
+pub(in crate::isa::riscv) struct VectorOpRemu;
+pub(in crate::isa::riscv) struct VectorOpZextVf2;
+pub(in crate::isa::riscv) struct VectorOpZextVf4;
+pub(in crate::isa::riscv) struct VectorOpZextVf8;
+pub(in crate::isa::riscv) struct VectorOpSextVf2;
+pub(in crate::isa::riscv) struct VectorOpSextVf4;
+pub(in crate::isa::riscv) struct VectorOpSextVf8;
+
+impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
+impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
+impl_vector_op_integer_vv_binary!(VectorOpSub, ExecSub);
+impl_vector_op_integer_vv_binary!(VectorOpSubu, ExecSubu);
+impl_vector_op_integer_vv_binary!(VectorOpAnd, ExecAnd);
+impl_vector_op_integer_vv_binary!(VectorOpOr, ExecOr);
+impl_vector_op_integer_vv_binary!(VectorOpXor, ExecXor);
+impl_vector_op_integer_vv_binary!(VectorOpSll, ExecSLL);
+impl_vector_op_integer_vv_binary!(VectorOpSrl, ExecSRL);
+impl_vector_op_integer_vv_binary!(VectorOpSra, ExecSRA);
+impl_vector_op_integer_vv_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vv_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vv_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vv_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vv_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vv_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
+
+impl_vector_op_integer_vx_binary!(VectorOpAdd, ExecAdd);
+impl_vector_op_integer_vx_binary!(VectorOpAddu, ExecAddu);
+impl_vector_op_integer_vx_binary!(VectorOpSub, ExecSub);
+impl_vector_op_integer_vx_binary!(VectorOpSubu, ExecSubu);
+impl_vector_op_integer_vx_binary!(VectorOpRevSub, ExecRevSub);
+impl_vector_op_integer_vx_binary!(VectorOpAnd, ExecAnd);
+impl_vector_op_integer_vx_binary!(VectorOpOr, ExecOr);
+impl_vector_op_integer_vx_binary!(VectorOpXor, ExecXor);
+impl_vector_op_integer_vx_binary!(VectorOpSll, ExecSLL);
+impl_vector_op_integer_vx_binary!(VectorOpSrl, ExecSRL);
+impl_vector_op_integer_vx_binary!(VectorOpSra, ExecSRA);
+impl_vector_op_integer_vx_binary!(VectorOpMax, ExecMax);
+impl_vector_op_integer_vx_binary!(VectorOpMaxu, ExecMaxu);
+impl_vector_op_integer_vx_binary!(VectorOpMin, ExecMin);
+impl_vector_op_integer_vx_binary!(VectorOpMinu, ExecMinu);
+impl_vector_op_integer_vx_binary!(VectorOpMul, ExecMulLow);
+impl_vector_op_integer_vx_binary!(VectorOpMulh, ExecMulHighSigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhu, ExecMulHighUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpMulhsu, ExecMulHighSignedUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpDiv, ExecDivSigned);
+impl_vector_op_integer_vx_binary!(VectorOpDivu, ExecDivUnsigned);
+impl_vector_op_integer_vx_binary!(VectorOpRem, ExecRemSigned);
+impl_vector_op_integer_vx_binary!(VectorOpRemu, ExecRemUnsigned);
+
+impl_vector_op_widening_interger_vv_binary!(VectorOpWadd, ExecWideningAdd, signed);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWsub, ExecWideningSub, signed);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWsubu, ExecWideningSub, unsigned);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWmul, ExecWideningMul, signed);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWmulu, ExecWideningMul, unsigned);
+impl_vector_op_widening_interger_vv_binary!(VectorOpWmulsu, ExecWideningMul, signed_unsigned);
+
+impl_vector_op_widening_interger_vx_binary!(VectorOpWadd, ExecWideningAdd, signed);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWsub, ExecWideningSub, signed);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWsubu, ExecWideningSub, unsigned);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWmul, ExecWideningMul, signed);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWmulu, ExecWideningMul, unsigned);
+impl_vector_op_widening_interger_vx_binary!(VectorOpWmulsu, ExecWideningMul, signed_unsigned);
+
+impl_vector_op_widening_interger_wv_binary!(VectorOpWadd, ExecWideningAdd, signed);
+impl_vector_op_widening_interger_wv_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
+impl_vector_op_widening_interger_wv_binary!(VectorOpWsub, ExecWideningSub, signed);
+impl_vector_op_widening_interger_wv_binary!(VectorOpWsubu, ExecWideningSub, unsigned);
+
+impl_vector_op_widening_interger_wx_binary!(VectorOpWadd, ExecWideningAdd, signed);
+impl_vector_op_widening_interger_wx_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
+impl_vector_op_widening_interger_wx_binary!(VectorOpWsub, ExecWideningSub, signed);
+impl_vector_op_widening_interger_wx_binary!(VectorOpWsubu, ExecWideningSub, unsigned);
+
+impl_vector_op_integer_vvm_binary!(VectorOpAdc, ExecAdc);
+impl_vector_op_integer_vxm_binary!(VectorOpAdc, ExecAdc);
+impl_vector_op_integer_vvm_binary!(VectorOpSbc, ExecSbc);
+impl_vector_op_integer_vxm_binary!(VectorOpSbc, ExecSbc);
+
+impl_vector_op_integer_mask_vv_binary!(VectorOpMadc, ExecAdcCarryNoCarry);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMadc, ExecAdcCarryNoCarry);
+impl_vector_op_integer_mask_vvm_binary!(VectorOpMadc, ExecAdcCarry);
+impl_vector_op_integer_mask_vxm_binary!(VectorOpMadc, ExecAdcCarry);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsbc, ExecSbcBorrowNoBorrow);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsbc, ExecSbcBorrowNoBorrow);
+impl_vector_op_integer_mask_vvm_binary!(VectorOpMsbc, ExecSbcBorrow);
+impl_vector_op_integer_mask_vxm_binary!(VectorOpMsbc, ExecSbcBorrow);
+
+impl_vector_op_integer_mask_vv_binary!(VectorOpMseq, ExecEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMseq, ExecEqual);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsne, ExecNotEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsne, ExecNotEqual);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsltu, ExecUnsignedLess);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsltu, ExecUnsignedLess);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMslt, ExecSignedLess);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMslt, ExecSignedLess);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsleu, ExecUnsignedLessEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsleu, ExecUnsignedLessEqual);
+impl_vector_op_integer_mask_vv_binary!(VectorOpMsle, ExecSignedLessEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsle, ExecSignedLessEqual);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsgtu, ExecUnsignedGreaterX);
+impl_vector_op_integer_mask_vx_binary!(VectorOpMsgt, ExecSignedGreaterX);
+
+impl_vector_op_integer_v_unary_ext!(
+    VectorOpZextVf2,
+    ExecZext,
+    2,
+    [(1, 2, u8, u16), (2, 4, u16, u32), (4, 8, u32, u64)] // (src_sew, dst_sew, src_ty, dst_ty), extend from src to dst.
+);
+impl_vector_op_integer_v_unary_ext!(
+    VectorOpZextVf4,
+    ExecZext,
+    4,
+    [(1, 4, u8, u32), (2, 8, u16, u64)]
+);
+impl_vector_op_integer_v_unary_ext!(VectorOpZextVf8, ExecZext, 8, [(1, 8, u8, u64)]);
+impl_vector_op_integer_v_unary_ext!(
+    VectorOpSextVf2,
+    ExecSext,
+    2,
+    [(1, 2, u8, u16), (2, 4, u16, u32), (4, 8, u32, u64)]
+);
+impl_vector_op_integer_v_unary_ext!(
+    VectorOpSextVf4,
+    ExecSext,
+    4,
+    [(1, 4, u8, u32), (2, 8, u16, u64)]
+);
+impl_vector_op_integer_v_unary_ext!(VectorOpSextVf8, ExecSext, 8, [(1, 8, u8, u64)]);
+
+#[cfg(test)]
+#[path = "integer_test.rs"]
+mod test;

@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-pub mod integer;
+pub mod arithmetic;
 #[cfg(test)]
 mod tester;
 pub mod types;

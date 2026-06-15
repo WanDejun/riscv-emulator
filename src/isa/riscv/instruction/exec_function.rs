@@ -245,7 +245,7 @@ pub(in super::super) struct ExecAdd<T = WordType> {
 
 impl<T> ExecTrait<Result<T, Exception>, T> for ExecAdd<T>
 where
-    T: num_traits::WrappingAdd,
+    T: UnsignedInteger,
 {
     fn exec(a: T, b: T) -> Result<T, Exception> {
         Ok(a.wrapping_add(&b))

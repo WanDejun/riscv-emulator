@@ -16,7 +16,7 @@ use crate::{
                 instr_table::RiscvInstr,
             },
             trap::{Exception, trap_controller::TrapController},
-            vector::integer::*,
+            vector::arithmetic::*,
         },
     },
 };
@@ -624,18 +624,18 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMV8R_V => unimplemented!(),
 
         //-------- OPMVV (func3 = 0b010) --------
-        RiscvInstr::VWADD_VV => unimplemented!(), // Widening Integer Add/Subtract
-        RiscvInstr::VWADD_WV => unimplemented!(),
-        RiscvInstr::VWADDU_VV => unimplemented!(),
-        RiscvInstr::VWADDU_WV => unimplemented!(),
-        RiscvInstr::VWSUB_VV => unimplemented!(),
-        RiscvInstr::VWSUB_WV => unimplemented!(),
-        RiscvInstr::VWSUBU_VV => unimplemented!(),
-        RiscvInstr::VWSUBU_WV => unimplemented!(),
+        RiscvInstr::VWADD_VV => vec_widening_integer_op_vv::<VectorOpWadd>, // Widening Integer Add/Subtract
+        RiscvInstr::VWADD_WV => vec_widening_integer_op_wv::<VectorOpWadd>,
+        RiscvInstr::VWADDU_VV => vec_widening_integer_op_vv::<VectorOpWaddu>,
+        RiscvInstr::VWADDU_WV => vec_widening_integer_op_wv::<VectorOpWaddu>,
+        RiscvInstr::VWSUB_VV => vec_widening_integer_op_vv::<VectorOpWsub>,
+        RiscvInstr::VWSUB_WV => vec_widening_integer_op_wv::<VectorOpWsub>,
+        RiscvInstr::VWSUBU_VV => vec_widening_integer_op_vv::<VectorOpWsubu>,
+        RiscvInstr::VWSUBU_WV => vec_widening_integer_op_wv::<VectorOpWsubu>,
 
-        RiscvInstr::VWMUL_VV => unimplemented!(), // Widening Integer Multiply Instructions
-        RiscvInstr::VWMULU_VV => unimplemented!(),
-        RiscvInstr::VWMULSU_VV => unimplemented!(),
+        RiscvInstr::VWMUL_VV => vec_widening_integer_op_vv::<VectorOpWmul>, // Widening Integer Multiply Instructions
+        RiscvInstr::VWMULU_VV => vec_widening_integer_op_vv::<VectorOpWmulu>,
+        RiscvInstr::VWMULSU_VV => vec_widening_integer_op_vv::<VectorOpWmulsu>,
 
         RiscvInstr::VZEXT_VF2 => vec_integer_ext_op_v::<VectorOpZextVf2, 2>, // Vector Sign/Zero Extension Instructions (for floating-point formats)
         RiscvInstr::VZEXT_VF4 => vec_integer_ext_op_v::<VectorOpZextVf4, 4>,
@@ -676,18 +676,18 @@ pub(in crate::isa::riscv) fn get_exec_func(
         // RiscvInstr::VFMV_F_S => unimplemented!(),
 
         //-------- OPMVX (func3 = 0b110) --------
-        RiscvInstr::VWADD_VX => unimplemented!(), // Widening Integer Add/Subtract
-        RiscvInstr::VWADD_WX => unimplemented!(),
-        RiscvInstr::VWADDU_VX => unimplemented!(),
-        RiscvInstr::VWADDU_WX => unimplemented!(),
-        RiscvInstr::VWSUB_VX => unimplemented!(),
-        RiscvInstr::VWSUB_WX => unimplemented!(),
-        RiscvInstr::VWSUBU_VX => unimplemented!(),
-        RiscvInstr::VWSUBU_WX => unimplemented!(),
+        RiscvInstr::VWADD_VX => vec_widening_integer_op_vx::<VectorOpWadd>, // Widening Integer Add/Subtract
+        RiscvInstr::VWADD_WX => vec_widening_integer_op_wx::<VectorOpWadd>,
+        RiscvInstr::VWADDU_VX => vec_widening_integer_op_vx::<VectorOpWaddu>,
+        RiscvInstr::VWADDU_WX => vec_widening_integer_op_wx::<VectorOpWaddu>,
+        RiscvInstr::VWSUB_VX => vec_widening_integer_op_vx::<VectorOpWsub>,
+        RiscvInstr::VWSUB_WX => vec_widening_integer_op_wx::<VectorOpWsub>,
+        RiscvInstr::VWSUBU_VX => vec_widening_integer_op_vx::<VectorOpWsubu>,
+        RiscvInstr::VWSUBU_WX => vec_widening_integer_op_wx::<VectorOpWsubu>,
 
-        RiscvInstr::VWMUL_VX => unimplemented!(), // Widening Integer Multiply Instructions
-        RiscvInstr::VWMULU_VX => unimplemented!(),
-        RiscvInstr::VWMULSU_VX => unimplemented!(),
+        RiscvInstr::VWMUL_VX => vec_widening_integer_op_vx::<VectorOpWmul>, // Widening Integer Multiply Instructions
+        RiscvInstr::VWMULU_VX => vec_widening_integer_op_vx::<VectorOpWmulu>,
+        RiscvInstr::VWMULSU_VX => vec_widening_integer_op_vx::<VectorOpWmulsu>,
 
         RiscvInstr::VWMACCU_VX => unimplemented!(), // Widening Integer Multiply-Add Instructions
         RiscvInstr::VWMACC_VX => unimplemented!(),
