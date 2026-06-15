@@ -27,6 +27,14 @@ trait WideningIntegerBinaryExec<T> {
     fn exec(a: T, b: T) -> Result<T, Exception>;
 }
 
+trait IntegerMultiplyAddExec<T> {
+    fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception>;
+}
+
+trait WideningIntegerMultiplyAddExec<Src1, Src2, Dst> {
+    fn exec(vs2: Src2, vs1: Src1, vd: Dst) -> Result<Dst, Exception>;
+}
+
 struct ExecAdc;
 struct ExecSbc;
 struct ExecAdcCarryNoCarry;
@@ -36,7 +44,13 @@ struct ExecSbcBorrow;
 struct ExecWideningAdd;
 struct ExecWideningSub;
 struct ExecWideningMul;
+struct ExecMacc;
+struct ExecNmsac;
+struct ExecMadd;
+struct ExecNmsub;
+struct ExecWmacc;
 
+// res<2*sew> = widen(a) + widen(b)
 impl<T> WideningIntegerBinaryExec<T> for ExecWideningAdd
 where
     T: num_traits::WrappingAdd,
@@ -46,6 +60,7 @@ where
     }
 }
 
+// res<2*sew> = widen(a) - widen(b)
 impl<T> WideningIntegerBinaryExec<T> for ExecWideningSub
 where
     T: num_traits::WrappingSub,
@@ -55,6 +70,7 @@ where
     }
 }
 
+// res<2*sew> = widen(a) * widen(b)
 impl<T> WideningIntegerBinaryExec<T> for ExecWideningMul
 where
     T: num_traits::WrappingMul,
@@ -64,6 +80,61 @@ where
     }
 }
 
+// res<sew> = vs1<sew> * vs2<sew> + vd<sew>
+impl<T> IntegerMultiplyAddExec<T> for ExecMacc
+where
+    T: num_traits::WrappingAdd + num_traits::WrappingMul,
+{
+    fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception> {
+        Ok(vs1.wrapping_mul(&vs2).wrapping_add(&vd))
+    }
+}
+
+// res<sew> = -(vs1<sew> * vs2<sew>) + vd<sew>
+impl<T> IntegerMultiplyAddExec<T> for ExecNmsac
+where
+    T: num_traits::WrappingAdd + num_traits::WrappingMul + num_traits::WrappingNeg,
+{
+    fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception> {
+        Ok(vs1.wrapping_mul(&vs2).wrapping_neg().wrapping_add(&vd))
+    }
+}
+
+// res<sew> = vs1<sew> * vd<sew> + vs2<sew>
+impl<T> IntegerMultiplyAddExec<T> for ExecMadd
+where
+    T: num_traits::WrappingAdd + num_traits::WrappingMul,
+{
+    fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception> {
+        Ok(vs1.wrapping_mul(&vd).wrapping_add(&vs2))
+    }
+}
+
+// res<sew> = -(vs1<sew> * vd<sew>) + vs2<sew>
+impl<T> IntegerMultiplyAddExec<T> for ExecNmsub
+where
+    T: num_traits::WrappingAdd + num_traits::WrappingMul + num_traits::WrappingNeg,
+{
+    fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception> {
+        Ok(vs1.wrapping_mul(&vd).wrapping_neg().wrapping_add(&vs2))
+    }
+}
+
+// res<2*sew> = widen(vs1<sew>) * widen(vs2<sew>) + vd<2*sew>
+impl<Src1, Src2, Dst> WideningIntegerMultiplyAddExec<Src1, Src2, Dst> for ExecWmacc
+where
+    Src1: Copy,
+    Src2: Copy,
+    Dst: Copy + From<Src1> + From<Src2> + num_traits::WrappingAdd + num_traits::WrappingMul,
+{
+    fn exec(vs2: Src2, vs1: Src1, vd: Dst) -> Result<Dst, Exception> {
+        Ok(Dst::from(vs1)
+            .wrapping_mul(&Dst::from(vs2))
+            .wrapping_add(&vd))
+    }
+}
+
+// res<sew> = a<sew> + b<sew> + c<bit>
 impl<T> ExecTernaryTrait<Result<T, Exception>, T> for ExecAdc
 where
     T: UnsignedInteger + Into<u128>,
@@ -75,6 +146,7 @@ where
     }
 }
 
+// res<sew> = a<sew> - b<sew> - c<bit>
 impl<T> ExecTernaryTrait<Result<T, Exception>, T> for ExecSbc
 where
     T: UnsignedInteger + Into<u128>,
@@ -86,6 +158,7 @@ where
     }
 }
 
+// v0<bit> = carry_out(a<sew> + b<sew> + c<bit>)
 impl<T> ExecTernaryTrait<Result<bool, Exception>, T> for ExecAdcCarry
 where
     T: UnsignedInteger + Into<u128>,
@@ -97,6 +170,7 @@ where
     }
 }
 
+// v0<bit> = carry_out(a<sew> + b<sew>)
 impl<T> ExecTrait<bool, T> for ExecAdcCarryNoCarry
 where
     T: UnsignedInteger + Into<u128>,
@@ -108,6 +182,7 @@ where
     }
 }
 
+// v0<bit> = borrow_out(a<sew> - b<sew>)
 impl<T> ExecTrait<bool, T> for ExecSbcBorrowNoBorrow
 where
     T: UnsignedInteger + Into<u128>,
@@ -119,6 +194,7 @@ where
     }
 }
 
+// v0<bit> = borrow_out(a<sew> - b<sew> - c<bit>)
 impl<T> ExecTernaryTrait<Result<bool, Exception>, T> for ExecSbcBorrow
 where
     T: UnsignedInteger + Into<u128>,
@@ -138,6 +214,7 @@ struct ExecSignedGreater;
 struct ExecUnsignedGreaterX;
 struct ExecSignedGreaterX;
 
+// v0<bit> = a<sew> <= b<sew>
 impl<T> ExecTrait<bool, T> for ExecUnsignedLessEqual
 where
     T: UnsignedInteger,
@@ -147,6 +224,7 @@ where
     }
 }
 
+// v0<bit> = signed(a<sew>) < signed(b<sew>)
 impl<T> ExecTrait<bool, T> for ExecSignedLess
 where
     T: UnsignedInteger + Into<u128>,
@@ -156,6 +234,7 @@ where
     }
 }
 
+// v0<bit> = signed(a<sew>) <= signed(b<sew>)
 impl<T> ExecTrait<bool, T> for ExecSignedLessEqual
 where
     T: UnsignedInteger + Into<u128>,
@@ -165,6 +244,7 @@ where
     }
 }
 
+// v0<bit> = a<sew> > b<sew>
 impl<T> ExecTrait<bool, T> for ExecUnsignedGreater
 where
     T: UnsignedInteger,
@@ -174,6 +254,7 @@ where
     }
 }
 
+// v0<bit> = signed(a<sew>) > signed(b<sew>)
 impl<T> ExecTrait<bool, T> for ExecSignedGreater
 where
     T: UnsignedInteger + Into<u128>,
@@ -183,6 +264,7 @@ where
     }
 }
 
+// v0<bit> = b<sew> > a<sew>
 impl<T> ExecTrait<bool, T> for ExecUnsignedGreaterX
 where
     T: UnsignedInteger,
@@ -192,6 +274,7 @@ where
     }
 }
 
+// v0<bit> = signed(b<sew>) > signed(a<sew>)
 impl<T> ExecTrait<bool, T> for ExecSignedGreaterX
 where
     T: UnsignedInteger + Into<u128>,
@@ -277,6 +360,42 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVX {
     }
 }
 
+pub(in crate::isa::riscv) trait VectorOpIntegerVVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vvv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask())
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerVXV {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_vxv::<Self>(param.x1(), param.vs2(), param.vd(), param.enable_mask())
+    }
+}
+
 pub(in crate::isa::riscv) trait VectorOpWideningIntegerVV {
     fn exec(
         vs1: &VGFRef,
@@ -292,6 +411,52 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerVV {
     {
         vector.exec_widening_integer_vv::<Self>(
             param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerVVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_vvv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpWideningIntegerVXV {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_widening_integer_vxv::<Self>(
+            param.x1(),
             param.vs2(),
             param.vd(),
             param.enable_mask(),
@@ -580,6 +745,64 @@ macro_rules! impl_vector_op_integer_vx_binary {
     };
 }
 
+macro_rules! impl_vector_op_integer_vvv_ternary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vs1.sew == old_vd.sew && old_vd.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| {
+                    let vs1 = vs1.as_slice::<T>();
+                    let vs2 = vs2.as_slice::<T>();
+                    let old_vd = old_vd.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], vs1[index], old_vd[index])?,
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_vxv_ternary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerVXV for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == old_vd.sew && old_vd.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| {
+                    let scalar = x1 as T;
+                    let vs2 = vs2.as_slice::<T>();
+                    let old_vd = old_vd.as_slice::<T>();
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            $exec_ty::exec(vs2[index], scalar, old_vd[index])?,
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
 fn vector_op_widening_vv_binary<Src1, Src2, Dst, Exec>(
     vs1: &VGFRef,
     vs2: &VGFRef,
@@ -598,6 +821,57 @@ where
         mask.element_load(
             element,
             Exec::exec(Dst::from(vs2[index]), Dst::from(vs1[index]))?,
+            index,
+        );
+    }
+    Ok(())
+}
+
+fn vector_op_widening_vvv_ternary<Src1, Src2, Dst, Exec>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    old_vd: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Src1: Copy,
+    Src2: Copy,
+    Dst: Copy + Default,
+    Exec: WideningIntegerMultiplyAddExec<Src1, Src2, Dst>,
+{
+    let vs1 = vs1.as_slice::<Src1>();
+    let vs2 = vs2.as_slice::<Src2>();
+    let old_vd = old_vd.as_slice::<Dst>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(
+            element,
+            Exec::exec(vs2[index], vs1[index], old_vd[index])?,
+            index,
+        );
+    }
+    Ok(())
+}
+
+fn vector_op_widening_vxv_ternary<Scalar, Src2, Dst, Exec>(
+    scalar: Scalar,
+    vs2: &VGFRef,
+    old_vd: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Scalar: Copy,
+    Src2: Copy,
+    Dst: Copy + Default,
+    Exec: WideningIntegerMultiplyAddExec<Scalar, Src2, Dst>,
+{
+    let vs2 = vs2.as_slice::<Src2>();
+    let old_vd = old_vd.as_slice::<Dst>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(
+            element,
+            Exec::exec(vs2[index], scalar, old_vd[index])?,
             index,
         );
     }
@@ -666,6 +940,9 @@ where
     Ok(())
 }
 
+// =================================================
+//         Widening Integer Operations
+// =================================================
 macro_rules! dispatch_widening_integer_sew {
     ($src_sew:expr, |$i_src:ident, $i_dst:ident, $u_src:ident, $u_dst:ident| $body:block) => {
         match $src_sew {
@@ -790,6 +1067,138 @@ macro_rules! impl_vector_op_widening_interger_vx_binary {
                 dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
                     vector_op_widening_vx_binary::<USrc, ISrc, IDst, $exec_ty>(
                         x1 as USrc, vs2, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_integer_vvv_ternary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerVVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vvv_ternary::<ISrc, ISrc, IDst, $exec_ty>(
+                        vs1, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerVVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vvv_ternary::<USrc, USrc, UDst, $exec_ty>(
+                        vs1, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, signed_unsigned) => {
+        impl VectorOpWideningIntegerVVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vvv_ternary::<USrc, ISrc, IDst, $exec_ty>(
+                        vs1, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_widening_integer_vxv_ternary {
+    ($op_ty:ty, $exec_ty:ident, signed) => {
+        impl VectorOpWideningIntegerVXV for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vxv_ternary::<ISrc, ISrc, IDst, $exec_ty>(
+                        x1 as ISrc, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned) => {
+        impl VectorOpWideningIntegerVXV for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vxv_ternary::<USrc, USrc, UDst, $exec_ty>(
+                        x1 as USrc, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, signed_unsigned) => {
+        impl VectorOpWideningIntegerVXV for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vxv_ternary::<USrc, ISrc, IDst, $exec_ty>(
+                        x1 as USrc, vs2, old_vd, vd, mask,
+                    )
+                })
+            }
+        }
+    };
+    ($op_ty:ty, $exec_ty:ident, unsigned_signed) => {
+        impl VectorOpWideningIntegerVXV for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                old_vd: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vd.sew == vs2.sew * 2 && old_vd.sew == vd.sew);
+                dispatch_widening_integer_sew!(vs2.sew, |ISrc, IDst, USrc, UDst| {
+                    vector_op_widening_vxv_ternary::<ISrc, USrc, IDst, $exec_ty>(
+                        x1 as ISrc, vs2, old_vd, vd, mask,
                     )
                 })
             }
@@ -1098,6 +1507,10 @@ pub(in crate::isa::riscv) struct VectorOpMul;
 pub(in crate::isa::riscv) struct VectorOpMulh;
 pub(in crate::isa::riscv) struct VectorOpMulhu;
 pub(in crate::isa::riscv) struct VectorOpMulhsu;
+pub(in crate::isa::riscv) struct VectorOpMacc;
+pub(in crate::isa::riscv) struct VectorOpNmsac;
+pub(in crate::isa::riscv) struct VectorOpMadd;
+pub(in crate::isa::riscv) struct VectorOpNmsub;
 pub(in crate::isa::riscv) struct VectorOpWadd;
 pub(in crate::isa::riscv) struct VectorOpWaddu;
 pub(in crate::isa::riscv) struct VectorOpWsub;
@@ -1105,6 +1518,10 @@ pub(in crate::isa::riscv) struct VectorOpWsubu;
 pub(in crate::isa::riscv) struct VectorOpWmul;
 pub(in crate::isa::riscv) struct VectorOpWmulu;
 pub(in crate::isa::riscv) struct VectorOpWmulsu;
+pub(in crate::isa::riscv) struct VectorOpWmacc;
+pub(in crate::isa::riscv) struct VectorOpWmaccu;
+pub(in crate::isa::riscv) struct VectorOpWmaccsu;
+pub(in crate::isa::riscv) struct VectorOpWmaccus;
 pub(in crate::isa::riscv) struct VectorOpDiv;
 pub(in crate::isa::riscv) struct VectorOpDivu;
 pub(in crate::isa::riscv) struct VectorOpRem;
@@ -1138,6 +1555,10 @@ impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
 impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
 impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
 impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
+impl_vector_op_integer_vvv_ternary!(VectorOpMacc, ExecMacc);
+impl_vector_op_integer_vvv_ternary!(VectorOpNmsac, ExecNmsac);
+impl_vector_op_integer_vvv_ternary!(VectorOpMadd, ExecMadd);
+impl_vector_op_integer_vvv_ternary!(VectorOpNmsub, ExecNmsub);
 
 impl_vector_op_integer_vx_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vx_binary!(VectorOpAddu, ExecAddu);
@@ -1162,6 +1583,10 @@ impl_vector_op_integer_vx_binary!(VectorOpDiv, ExecDivSigned);
 impl_vector_op_integer_vx_binary!(VectorOpDivu, ExecDivUnsigned);
 impl_vector_op_integer_vx_binary!(VectorOpRem, ExecRemSigned);
 impl_vector_op_integer_vx_binary!(VectorOpRemu, ExecRemUnsigned);
+impl_vector_op_integer_vxv_ternary!(VectorOpMacc, ExecMacc);
+impl_vector_op_integer_vxv_ternary!(VectorOpNmsac, ExecNmsac);
+impl_vector_op_integer_vxv_ternary!(VectorOpMadd, ExecMadd);
+impl_vector_op_integer_vxv_ternary!(VectorOpNmsub, ExecNmsub);
 
 impl_vector_op_widening_interger_vv_binary!(VectorOpWadd, ExecWideningAdd, signed);
 impl_vector_op_widening_interger_vv_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
@@ -1178,6 +1603,15 @@ impl_vector_op_widening_interger_vx_binary!(VectorOpWsubu, ExecWideningSub, unsi
 impl_vector_op_widening_interger_vx_binary!(VectorOpWmul, ExecWideningMul, signed);
 impl_vector_op_widening_interger_vx_binary!(VectorOpWmulu, ExecWideningMul, unsigned);
 impl_vector_op_widening_interger_vx_binary!(VectorOpWmulsu, ExecWideningMul, signed_unsigned);
+
+impl_vector_op_widening_integer_vvv_ternary!(VectorOpWmacc, ExecWmacc, signed);
+impl_vector_op_widening_integer_vvv_ternary!(VectorOpWmaccu, ExecWmacc, unsigned);
+impl_vector_op_widening_integer_vvv_ternary!(VectorOpWmaccsu, ExecWmacc, signed_unsigned);
+
+impl_vector_op_widening_integer_vxv_ternary!(VectorOpWmacc, ExecWmacc, signed);
+impl_vector_op_widening_integer_vxv_ternary!(VectorOpWmaccu, ExecWmacc, unsigned);
+impl_vector_op_widening_integer_vxv_ternary!(VectorOpWmaccsu, ExecWmacc, signed_unsigned);
+impl_vector_op_widening_integer_vxv_ternary!(VectorOpWmaccus, ExecWmacc, unsigned_signed);
 
 impl_vector_op_widening_interger_wv_binary!(VectorOpWadd, ExecWideningAdd, signed);
 impl_vector_op_widening_interger_wv_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);

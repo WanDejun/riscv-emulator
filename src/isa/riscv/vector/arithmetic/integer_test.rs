@@ -27,6 +27,28 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_integer_vvv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpIntegerVVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_vxv<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpIntegerVXV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_widening_integer_vv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIVV: VectorOpWideningIntegerVV,
@@ -35,6 +57,28 @@ where
 {
     let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
     OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_vvv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpWideningIntegerVVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_widening_integer_vxv<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpWideningIntegerVXV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
@@ -507,6 +551,210 @@ fn test_vector_op_widening_mul() {
         .map(|lhs| (*lhs as i32).wrapping_mul((-2_i16) as i32))
         .collect();
     run_widening_vx_i16_to_i32::<VectorOpWmul>(-2_i16 as WordType, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_integer_multiply_add() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let vs1 = [3_u32, 0xffff_fffe, 7, 0x8000_0000];
+    let vs2 = [10_u32, 5, 0xffff_ffff, 2];
+    let old_vd = [100_u32, 9, 20, 0x8000_0001];
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .zip(old_vd.iter())
+        .map(|((vs1, vs2), vd)| vs1.wrapping_mul(*vs2).wrapping_add(*vd))
+        .collect();
+    run_test_integer_vvv::<VectorOpMacc, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .zip(old_vd.iter())
+        .map(|((vs1, vs2), vd)| vs1.wrapping_mul(*vs2).wrapping_neg().wrapping_add(*vd))
+        .collect();
+    run_test_integer_vvv::<VectorOpNmsac, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .zip(old_vd.iter())
+        .map(|((vs1, vs2), vd)| vs1.wrapping_mul(*vd).wrapping_add(*vs2))
+        .collect();
+    run_test_integer_vvv::<VectorOpMadd, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+
+    let scalar_param = TestOpParameter::new_vx(0xffff_fffd, 16, 24);
+    let scalar = scalar_param.x1() as u32;
+    let expected: Vec<u32> = vs2
+        .iter()
+        .zip(old_vd.iter())
+        .map(|(vs2, vd)| scalar.wrapping_mul(*vd).wrapping_neg().wrapping_add(*vs2))
+        .collect();
+    run_test_integer_vxv::<VectorOpNmsub, _, _>(
+        scalar_param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), scalar_param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), scalar_param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), scalar_param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_integer_multiply_add_honors_mask_and_tail() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vv(8, 16, 24).with_enable_mask(true);
+    let vs1 = [2_i16, 3, 4, 5, 6, 7, 8, 9];
+    let vs2 = [10_i16, 20, 30, 40, 50, 60, 70, 80];
+    let old_vd = [100_i16, 101, 102, 103, 104, 105, 106, 107];
+    let pred_mask = mask_from_bits([true, false, true, false, true, true, true, true]);
+    let vl = 5;
+    let mut expected = old_vd;
+    for index in 0..vl {
+        if mask_bit(&pred_mask, index) {
+            expected[index] = vs1[index]
+                .wrapping_mul(vs2[index])
+                .wrapping_add(old_vd[index]);
+        }
+    }
+
+    run_test_integer_vvv::<VectorOpMacc, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_widening_multiply_add() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let vs1 = [-5_i16, 7, -1, 0x7fff, -300, 123, -32768, 11];
+    let vs2 = [10_i16, -20, -3, 2, 400, -321, -2, 0x7fff];
+    let old_vd = [100_i32, -200, i32::MAX, i32::MIN, 77, -88, 9000, -9000];
+
+    let expected: Vec<i32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .zip(old_vd.iter())
+        .map(|((vs1, vs2), vd)| (*vs1 as i32).wrapping_mul(*vs2 as i32).wrapping_add(*vd))
+        .collect();
+    run_test_widening_integer_vvv::<VectorOpWmacc, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul() * 2, param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), &expected),
+    );
+
+    let expected = u32_bits_to_i32(
+        vs1.iter()
+            .zip(vs2.iter())
+            .zip(old_vd.iter())
+            .map(|((vs1, vs2), vd)| {
+                (*vs1 as u16 as u32)
+                    .wrapping_mul(*vs2 as u16 as u32)
+                    .wrapping_add(*vd as u32)
+            })
+            .collect(),
+    );
+    run_test_widening_integer_vvv::<VectorOpWmaccu, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul() * 2, param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, param.vd(), &expected),
+    );
+
+    let scalar_param = TestOpParameter::new_vx((-3_i16) as WordType, 16, 24);
+    let expected: Vec<i32> = vs2
+        .iter()
+        .zip(old_vd.iter())
+        .map(|(vs2, vd)| (-3_i16 as i32).wrapping_mul(*vs2 as i32).wrapping_add(*vd))
+        .collect();
+    run_test_widening_integer_vxv::<VectorOpWmacc, _, _>(
+        scalar_param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), scalar_param.vs2(), &vs2)
+                .reg(LMUL.get_lmul() * 2, scalar_param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, scalar_param.vd(), &expected),
+    );
+
+    let scalar_param = TestOpParameter::new_vx((-3_i16) as WordType, 16, 24);
+    let expected: Vec<i32> = vs2
+        .iter()
+        .zip(old_vd.iter())
+        .map(|(vs2, vd)| {
+            (-3_i16 as i32)
+                .wrapping_mul(*vs2 as u16 as i32)
+                .wrapping_add(*vd)
+        })
+        .collect();
+    run_test_widening_integer_vxv::<VectorOpWmaccus, _, _>(
+        scalar_param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, expected.len() as u16)
+                .reg(LMUL.get_lmul(), scalar_param.vs2(), &vs2)
+                .reg(LMUL.get_lmul() * 2, scalar_param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul() * 2, scalar_param.vd(), &expected),
+    );
 }
 
 #[test]

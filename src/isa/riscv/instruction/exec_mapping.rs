@@ -434,10 +434,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMINU_VV => vec_integer_op_vv::<VectorOpMinu>,
 
         //  Single-Width Integer Multiply-Add Instructions
-        RiscvInstr::VMACC_VV => unimplemented!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
-        RiscvInstr::VNMSAC_VV => unimplemented!(), // vd[i] = -(vs1[i] * vs2[i]) + vd[i]
-        RiscvInstr::VMADD_VV => unimplemented!(), // vd[i] = (vs1[i] * vd[i]) + vs2[i]
-        RiscvInstr::VNMSUB_VV => unimplemented!(), // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
+        RiscvInstr::VMACC_VV => vec_integer_op_vvv::<VectorOpMacc>, // vd[i] = (vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VNMSAC_VV => vec_integer_op_vvv::<VectorOpNmsac>, // vd[i] = -(vs1[i] * vs2[i]) + vd[i]
+        RiscvInstr::VMADD_VV => vec_integer_op_vvv::<VectorOpMadd>, // vd[i] = (vs1[i] * vd[i]) + vs2[i]
+        RiscvInstr::VNMSUB_VV => vec_integer_op_vvv::<VectorOpNmsub>, // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
 
         RiscvInstr::VMERGE_VVM | RiscvInstr::VMV_V_V => {
             |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
@@ -522,10 +522,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMINU_VX => vec_integer_op_vx::<VectorOpMinu>,
 
         //  Single-Width Integer Multiply-Add Instructions
-        RiscvInstr::VMACC_VX => unimplemented!(), // vd[i] = (vs1[i] * vs2[i]) + vd[i]
-        RiscvInstr::VNMSAC_VX => unimplemented!(), // vd[i] = -(vs1[i] * vs2[i]) + vd[i]
-        RiscvInstr::VMADD_VX => unimplemented!(), // vd[i] = (vs1[i] * vd[i]) + vs2[i]
-        RiscvInstr::VNMSUB_VX => unimplemented!(), // vd[i] = -(vs1[i] * vd[i]) + vs2[i]
+        RiscvInstr::VMACC_VX => vec_integer_op_vxv::<VectorOpMacc>, // vd[i] = (x[rs1] * vs2[i]) + vd[i]
+        RiscvInstr::VNMSAC_VX => vec_integer_op_vxv::<VectorOpNmsac>, // vd[i] = -(x[rs1] * vs2[i]) + vd[i]
+        RiscvInstr::VMADD_VX => vec_integer_op_vxv::<VectorOpMadd>, // vd[i] = (x[rs1] * vd[i]) + vs2[i]
+        RiscvInstr::VNMSUB_VX => vec_integer_op_vxv::<VectorOpNmsub>, // vd[i] = -(x[rs1] * vd[i]) + vs2[i]
 
         RiscvInstr::VMERGE_VXM | RiscvInstr::VMV_V_X => {
             |inst_info: RVInstrInfo, _cpu: &mut RVCPU| {
@@ -644,9 +644,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSEXT_VF4 => vec_integer_ext_op_v::<VectorOpSextVf4, 4>,
         RiscvInstr::VSEXT_VF8 => vec_integer_ext_op_v::<VectorOpSextVf8, 8>,
 
-        RiscvInstr::VWMACCU_VV => unimplemented!(), // Widening Integer Multiply-Add Instructions
-        RiscvInstr::VWMACC_VV => unimplemented!(),
-        RiscvInstr::VWMACCSU_VV => unimplemented!(),
+        RiscvInstr::VWMACCU_VV => vec_widening_integer_op_vvv::<VectorOpWmaccu>, // Widening Integer Multiply-Add Instructions
+        RiscvInstr::VWMACC_VV => vec_widening_integer_op_vvv::<VectorOpWmacc>,
+        RiscvInstr::VWMACCSU_VV => vec_widening_integer_op_vvv::<VectorOpWmaccsu>,
 
         RiscvInstr::VCOMPRESS_VM => unimplemented!(), // Vector Compress, Expand, and Slide Instructions
 
@@ -689,10 +689,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VWMULU_VX => vec_widening_integer_op_vx::<VectorOpWmulu>,
         RiscvInstr::VWMULSU_VX => vec_widening_integer_op_vx::<VectorOpWmulsu>,
 
-        RiscvInstr::VWMACCU_VX => unimplemented!(), // Widening Integer Multiply-Add Instructions
-        RiscvInstr::VWMACC_VX => unimplemented!(),
-        RiscvInstr::VWMACCSU_VX => unimplemented!(),
-        RiscvInstr::VWMACCUS_VX => unimplemented!(),
+        RiscvInstr::VWMACCU_VX => vec_widening_integer_op_vxv::<VectorOpWmaccu>, // Widening Integer Multiply-Add Instructions
+        RiscvInstr::VWMACC_VX => vec_widening_integer_op_vxv::<VectorOpWmacc>,
+        RiscvInstr::VWMACCSU_VX => vec_widening_integer_op_vxv::<VectorOpWmaccsu>,
+        RiscvInstr::VWMACCUS_VX => vec_widening_integer_op_vxv::<VectorOpWmaccus>,
         //-------- OPFVV (func3 = 0b001) --------
         //-------- OPFVF (func3 = 0b101) --------
         // _ => unimplemented!(),
