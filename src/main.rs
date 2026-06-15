@@ -238,6 +238,8 @@ fn main() {
             fs::File::create(sig_path).expect("Failed to create signature file");
         }
 
+        crossterm::terminal::enable_raw_mode().unwrap();
+
         let now = Instant::now();
         loop {
             if board.status() == riscv_emulator::board::BoardStatus::Halt {

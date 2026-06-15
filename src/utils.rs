@@ -630,21 +630,6 @@ pub(crate) const fn make_mask(left: usize, right: usize) -> WordType {
     BIT_ONES_ARRAY[width] << left
 }
 
-pub fn disable_terminal_raw_mode() {
-    #[cfg(not(feature = "web"))]
-    {
-        let _ = crossterm::terminal::disable_raw_mode();
-    }
-}
-
-#[macro_export]
-macro_rules! emulator_panic {
-    ($($arg:tt)*) => {{
-        $crate::utils::disable_terminal_raw_mode();
-
-        panic!($($arg)*);
-    }};
-}
 #[cfg(test)]
 mod test {
     use super::*;

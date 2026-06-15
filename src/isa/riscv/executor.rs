@@ -304,7 +304,6 @@ impl RVCPU {
 
     pub fn power_off(&mut self) -> Result<(), Exception> {
         self.memory.sync();
-        crate::utils::disable_terminal_raw_mode();
         Ok(())
     }
 }

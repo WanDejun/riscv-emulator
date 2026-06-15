@@ -34,7 +34,6 @@ use crate::{
         },
     },
     device_poller::DevicePoller,
-    emulator_panic,
     isa::riscv::{
         executor::RVCPU,
         mmu::VirtAddrManager,
@@ -194,7 +193,7 @@ impl RVBoardBuilder {
                     .get()
                 }
                 dev_type => {
-                    emulator_panic!("unsupport device: {:#?}", dev_type);
+                    panic!("unsupport device: {:#?}", dev_type);
                 }
             };
             let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));

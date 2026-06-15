@@ -220,12 +220,18 @@ impl<'a, B: Board> Handler<'a, B> {
 
     fn handle_continue(&mut self, steps: u64) -> Result<CommandOutput, String> {
         #[cfg(not(test))]
-        CliCoordinator::global().resume_uart();
+        {
+            CliCoordinator::global().resume_uart();
+            crossterm::terminal::enable_raw_mode().unwrap();
+        }
 
         let rst = self.dbg.continue_until_step(steps);
 
         #[cfg(not(test))]
-        CliCoordinator::global().pause_uart();
+        {
+            CliCoordinator::global().pause_uart();
+            crossterm::terminal::disable_raw_mode().unwrap();
+        }
 
         let (event, actual_steps) = match rst {
             Ok(rst) => rst,
