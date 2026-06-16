@@ -328,8 +328,9 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.history.push_back((self.read_pc(), instr));
     }
 
-    pub fn pc_history(&self) -> impl DoubleEndedIterator<Item = (WordType, Option<RawInstrType>)> {
-        self.history.iter().copied()
+    /// Get the latest k history.
+    pub fn pc_history(&self, k: usize) -> impl Iterator<Item = (WordType, Option<RawInstrType>)> {
+        self.history.iter().copied().rev().take(k).rev()
     }
 
     pub fn curr_ftrace(&self) -> Option<FuncTrace> {

@@ -201,8 +201,8 @@ impl<'a, B: Board> Handler<'a, B> {
     fn handle_history(&mut self, count: usize) -> Result<CommandOutput, String> {
         let history: Vec<_> = self
             .dbg
-            .pc_history()
-            .take(count)
+            .pc_history(count)
+            .into_iter()
             .map(|(addr, raw)| DbgInstrLine {
                 addr,
                 raw,
