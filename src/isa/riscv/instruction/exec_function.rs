@@ -723,6 +723,32 @@ where
     }
 }
 
+pub(in super::super) struct ExecNand<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecNand<T>
+where
+    T: std::ops::BitAnd<Output = T> + std::ops::Not<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(!(a & b))
+    }
+}
+
+pub(in super::super) struct ExecAndn<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecAndn<T>
+where
+    T: std::ops::BitAnd<Output = T> + std::ops::Not<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a & !b)
+    }
+}
+
 pub(in super::super) struct ExecOr<T = WordType> {
     phantom: PhantomData<T>,
 }
@@ -736,6 +762,32 @@ where
     }
 }
 
+pub(in super::super) struct ExecNor<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecNor<T>
+where
+    T: std::ops::BitOr<Output = T> + std::ops::Not<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(!(a | b))
+    }
+}
+
+pub(in super::super) struct ExecOrn<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecOrn<T>
+where
+    T: std::ops::BitOr<Output = T> + std::ops::Not<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(a | !b)
+    }
+}
+
 pub(in super::super) struct ExecXor<T = WordType> {
     phantom: PhantomData<T>,
 }
@@ -746,6 +798,19 @@ where
 {
     fn exec(a: T, b: T) -> Result<T, Exception> {
         Ok(a ^ b)
+    }
+}
+
+pub(in super::super) struct ExecXnor<T = WordType> {
+    phantom: PhantomData<T>,
+}
+
+impl<T> ExecTrait<Result<T, Exception>, T> for ExecXnor<T>
+where
+    T: std::ops::BitXor<Output = T> + std::ops::Not<Output = T>,
+{
+    fn exec(a: T, b: T) -> Result<T, Exception> {
+        Ok(!(a ^ b))
     }
 }
 

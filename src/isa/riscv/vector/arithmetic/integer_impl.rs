@@ -4,11 +4,12 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         instruction::exec_function::{
-            ExecAdd, ExecAddu, ExecAnd, ExecDivSigned, ExecDivUnsigned, ExecEqual, ExecMax,
-            ExecMaxu, ExecMin, ExecMinu, ExecMove, ExecMulHighSigned, ExecMulHighSignedUnsigned,
-            ExecMulHighUnsigned, ExecMulLow, ExecNotEqual, ExecOr, ExecRemSigned, ExecRemUnsigned,
-            ExecRevSub, ExecSLL, ExecSRA, ExecSRL, ExecSext, ExecSub, ExecSubu, ExecTrait,
-            ExecUnaryTrait, ExecUnsignedLess, ExecXor, ExecZext,
+            ExecAdd, ExecAddu, ExecAnd, ExecAndn, ExecDivSigned, ExecDivUnsigned, ExecEqual,
+            ExecMax, ExecMaxu, ExecMin, ExecMinu, ExecMove, ExecMulHighSigned,
+            ExecMulHighSignedUnsigned, ExecMulHighUnsigned, ExecMulLow, ExecNand, ExecNor,
+            ExecNotEqual, ExecOr, ExecOrn, ExecRemSigned, ExecRemUnsigned, ExecRevSub, ExecSLL,
+            ExecSRA, ExecSRL, ExecSext, ExecSub, ExecSubu, ExecTrait, ExecUnaryTrait,
+            ExecUnsignedLess, ExecXnor, ExecXor, ExecZext,
         },
         trap::Exception,
         vector::{
@@ -31,6 +32,10 @@ trait IntegerMultiplyAddExec<T> {
     fn exec(vs2: T, vs1: T, vd: T) -> Result<T, Exception>;
 }
 
+trait BitBinaryExec {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception>;
+}
+
 trait WideningIntegerMultiplyAddExec<Src1, Src2, Dst> {
     fn exec(vs2: Src2, vs1: Src1, vd: Dst) -> Result<Dst, Exception>;
 }
@@ -49,6 +54,62 @@ struct ExecNmsac;
 struct ExecMadd;
 struct ExecNmsub;
 struct ExecWmacc;
+
+// res<bit> = a<bit> & b<bit>
+impl BitBinaryExec for ExecAnd<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecAnd<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = !(a<bit> & b<bit>)
+impl BitBinaryExec for ExecNand<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecNand<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = a<bit> & !b<bit>
+impl BitBinaryExec for ExecAndn<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecAndn<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = a<bit> ^ b<bit>
+impl BitBinaryExec for ExecXor<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecXor<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = a<bit> | b<bit>
+impl BitBinaryExec for ExecOr<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecOr<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = !(a<bit> | b<bit>)
+impl BitBinaryExec for ExecNor<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecNor<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = a<bit> | !b<bit>
+impl BitBinaryExec for ExecOrn<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecOrn<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
+
+// res<bit> = !(a<bit> ^ b<bit>)
+impl BitBinaryExec for ExecXnor<bool> {
+    fn exec(vs2: bool, vs1: bool) -> Result<bool, Exception> {
+        <ExecXnor<bool> as ExecTrait<Result<bool, Exception>, bool>>::exec(vs2, vs1)
+    }
+}
 
 // res<2*sew> = widen(a) + widen(b)
 impl<T> WideningIntegerBinaryExec<T> for ExecWideningAdd
@@ -339,6 +400,26 @@ pub(in crate::isa::riscv) trait VectorOpIntegerVV {
         Self: Sized,
     {
         vector.exec_integer_vv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask(), 0)
+    }
+}
+
+// OPIVV mask-register logical operations. Mask bits are packed into one vector
+// register, so these operations treat the register as bit storage rather than
+// using the current SEW/LMUL data grouping.
+pub(in crate::isa::riscv) trait VectorOpBitVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_bit_vv::<Self>(param.vs1(), param.vs2(), param.vd(), param.enable_mask(), 0)
     }
 }
 
@@ -731,6 +812,55 @@ macro_rules! impl_vector_op_integer_vv_binary {
                         );
                     }
                 });
+
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_bit_vv_binary {
+    ($op_ty:ty, $exec_ty:ty) => {
+        impl VectorOpBitVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                debug_assert!(vs1.sew == size_of::<u32>() as u8);
+                debug_assert!(vs2.sew == size_of::<u32>() as u8);
+                debug_assert!(vd.sew == size_of::<u32>() as u8);
+
+                // The architectural mask register is a bit array. `u32` is only
+                // a local chunking type here: it gives aligned 32-bit batches
+                // while the inner loop still applies mask/tail/vstart per bit.
+                let vs1 = vs1.as_slice::<u32>();
+                let vs2 = vs2.as_slice::<u32>();
+                let mut result = vd.as_slice::<u32>().to_vec();
+                debug_assert!(vs1.len() == vs2.len() && vs2.len() == result.len());
+
+                let bits_per_chunk = u32::BITS as usize;
+                let bit_capacity = result.len() * bits_per_chunk;
+                let bit_start = mask.first_pending_index().min(bit_capacity);
+                let bit_end = mask.write_end(bit_capacity);
+                for index in bit_start..bit_end {
+                    let chunk_index = index / bits_per_chunk;
+                    let bit = 1u32 << (index % bits_per_chunk);
+                    let vs1_bit = (vs1[chunk_index] & bit) != 0;
+                    let vs2_bit = (vs2[chunk_index] & bit) != 0;
+                    let value = <$exec_ty as BitBinaryExec>::exec(vs2_bit, vs1_bit)?;
+
+                    let Some(value) = mask.mask_value(value, index) else {
+                        continue;
+                    };
+                    if value {
+                        result[chunk_index] |= bit;
+                    } else {
+                        result[chunk_index] &= !bit;
+                    }
+                }
+                vd.as_mut_slice::<u32>().copy_from_slice(&result);
 
                 Ok(())
             }
@@ -1501,8 +1631,13 @@ pub(in crate::isa::riscv) struct VectorOpSub;
 pub(in crate::isa::riscv) struct VectorOpSubu;
 pub(in crate::isa::riscv) struct VectorOpRevSub;
 pub(in crate::isa::riscv) struct VectorOpAnd;
+pub(in crate::isa::riscv) struct VectorOpNand;
+pub(in crate::isa::riscv) struct VectorOpAndn;
 pub(in crate::isa::riscv) struct VectorOpOr;
+pub(in crate::isa::riscv) struct VectorOpNor;
+pub(in crate::isa::riscv) struct VectorOpOrn;
 pub(in crate::isa::riscv) struct VectorOpXor;
+pub(in crate::isa::riscv) struct VectorOpXnor;
 pub(in crate::isa::riscv) struct VectorOpSll;
 pub(in crate::isa::riscv) struct VectorOpSrl;
 pub(in crate::isa::riscv) struct VectorOpSra;
@@ -1574,6 +1709,14 @@ impl_vector_op_integer_vv_binary!(VectorOpDiv, ExecDivSigned);
 impl_vector_op_integer_vv_binary!(VectorOpDivu, ExecDivUnsigned);
 impl_vector_op_integer_vv_binary!(VectorOpRem, ExecRemSigned);
 impl_vector_op_integer_vv_binary!(VectorOpRemu, ExecRemUnsigned);
+impl_vector_op_bit_vv_binary!(VectorOpAnd, ExecAnd<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpNand, ExecNand<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpAndn, ExecAndn<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpXor, ExecXor<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpOr, ExecOr<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpNor, ExecNor<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpOrn, ExecOrn<bool>);
+impl_vector_op_bit_vv_binary!(VectorOpXnor, ExecXnor<bool>);
 impl_vector_op_integer_vvv_ternary!(VectorOpMacc, ExecMacc);
 impl_vector_op_integer_vvv_ternary!(VectorOpNmsac, ExecNmsac);
 impl_vector_op_integer_vvv_ternary!(VectorOpMadd, ExecMadd);

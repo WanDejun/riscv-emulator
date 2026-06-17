@@ -162,12 +162,34 @@ impl VecOpMask {
         };
         let offset = index / 8;
         let inner_bit = 1 << (index % 8);
-        (mask_bit[offset] & inner_bit) == inner_bit
+        // A valid mask register holds VLEN bits. Some callers can iterate over
+        // flattened segmented fields; do not let an out-of-range mask probe
+        // panic while higher-level segmented mask semantics are being refined.
+        mask_bit
+            .get(offset)
+            .is_some_and(|byte| (byte & inner_bit) == inner_bit)
     }
 
     #[inline(always)]
     fn is_active_body(&self, index: usize) -> bool {
         index >= self.start && self.bit(index) && index < self.length as usize
+    }
+
+    #[inline(always)]
+    pub fn first_pending_index(&self) -> usize {
+        self.start
+    }
+
+    #[inline(always)]
+    pub fn write_end(&self, capacity: usize) -> usize {
+        // Tail-agnostic operations must still visit tail elements so they can
+        // materialize the agnostic value. Tail-undisturbed operations can stop
+        // at `vl` because every later destination element is preserved.
+        if self.tail_agnostic {
+            capacity
+        } else {
+            (self.length as usize).min(capacity)
+        }
     }
 
     #[inline(always)]
@@ -178,7 +200,7 @@ impl VecOpMask {
     }
 
     #[inline(always)]
-    fn mask_value<T>(&self, value: T, index: usize) -> Option<T>
+    pub fn mask_value<T>(&self, value: T, index: usize) -> Option<T>
     where
         T: Default,
     {
@@ -208,9 +230,8 @@ impl VecOpMask {
     {
         // All vector load-like writes go through this helper so tail/mask policy
         // is applied consistently across memory and integer operations.
-        match self.mask_value(value, index) {
-            Some(v) => element.set(v),
-            None => (),
+        if let Some(v) = self.mask_value(value, index) {
+            element.set(v);
         }
     }
 
@@ -351,7 +372,7 @@ impl Vector {
         let lmul = self.config.vlmul.get_lmul();
         let mask = VecOpMask::new(
             &self.vector_regfile,
-            self.config.vl as u16 * seg as u16,
+            self.config.vl * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
@@ -469,7 +490,7 @@ impl Vector {
         let lmul = self.config.vlmul.get_lmul();
         let mask = VecOpMask::new(
             &self.vector_regfile,
-            self.config.vl as u16 * seg as u16,
+            self.config.vl * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
@@ -542,7 +563,7 @@ impl Vector {
         );
         let mask = VecOpMask::new(
             &self.vector_regfile,
-            self.config.vl as u16 * seg as u16,
+            self.config.vl * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,
@@ -608,7 +629,7 @@ impl Vector {
         );
         let mask = VecOpMask::new(
             &self.vector_regfile,
-            self.config.vl as u16 * seg as u16,
+            self.config.vl * seg as u16,
             enable_mask,
             self.config.mask_agnostic,
             self.config.tail_agnostic,

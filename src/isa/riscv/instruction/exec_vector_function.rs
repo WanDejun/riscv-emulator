@@ -13,12 +13,13 @@ use crate::{
             vector::{
                 VectorMemException,
                 arithmetic::{
-                    VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
-                    VectorOpIntegerMaskVXM, VectorOpIntegerV, VectorOpIntegerVV,
-                    VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX, VectorOpIntegerVXM,
-                    VectorOpIntegerVXV, VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
-                    VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
-                    VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
+                    VectorOpBitVV, VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM,
+                    VectorOpIntegerMaskVX, VectorOpIntegerMaskVXM, VectorOpIntegerV,
+                    VectorOpIntegerVV, VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX,
+                    VectorOpIntegerVXM, VectorOpIntegerVXV, VectorOpWideningIntegerVV,
+                    VectorOpWideningIntegerVVV, VectorOpWideningIntegerVX,
+                    VectorOpWideningIntegerVXV, VectorOpWideningIntegerWV,
+                    VectorOpWideningIntegerWX,
                 },
                 types::Vsew,
             },
@@ -62,7 +63,7 @@ where
 
                 cpu.csr
                     .write_directly(Vl::get_index(), vl)
-                    .then(|| ())
+                    .then_some(())
                     .unwrap();
                 cpu.vector.set_config((vlmul, vsew, vta, vma, vl as u16));
                 cpu.write_reg(vd, vl);
@@ -161,7 +162,7 @@ fn finish_vector_memory_access(
             // partial progress to resume.
             cpu.csr
                 .write_directly(Vstart::get_index(), 0)
-                .then(|| ())
+                .then_some(())
                 .unwrap();
             Ok(())
         }
@@ -171,7 +172,7 @@ fn finish_vector_memory_access(
             if let Some(index) = err.fault_index() {
                 cpu.csr
                     .write_directly(Vstart::get_index(), index as WordType)
-                    .then(|| ())
+                    .then_some(())
                     .unwrap();
             }
             Err(err.exception())
@@ -478,6 +479,26 @@ where
                 .exec_integer_vv::<OpIVV>(vs1, vs2, vd, !vm, vstart)
         } else {
             unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_bit_op_vv<OpIVV>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    OpIVV: VectorOpBitVV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector.exec_bit_vv::<OpIVV>(vs1, vs2, vd, !vm, vstart)
+        } else {
+            std::unreachable!();
         }
     })
 }

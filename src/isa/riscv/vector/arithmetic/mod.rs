@@ -45,6 +45,38 @@ impl Vector {
     }
 
     #[inline]
+    pub(in crate::isa::riscv) fn exec_bit_vv<OpIVV>(
+        &mut self,
+        vs1: u8,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVV: VectorOpBitVV,
+    {
+        // Mask-register logical instructions always operate on one architectural
+        // mask register. They ignore the current SEW/LMUL grouping, so use one
+        // register and `u32` chunks only as an internal packed-bit transport.
+        let sew = size_of::<u32>() as u8;
+        let vs1_data = self.vector_regfile.get_ref(1, 1, vs1)?.to_vec();
+        let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs1_ref = VGFRef::new(&vs1_data, sew, 1, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, sew, 1, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(1, vd, 1)?, sew, 1, 1);
+        OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
     pub(in crate::isa::riscv) fn exec_integer_vx<OpIVX>(
         &mut self,
         x1: WordType,

@@ -650,14 +650,14 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::VCOMPRESS_VM => unimplemented!(), // Vector Compress, Expand, and Slide Instructions
 
-        RiscvInstr::VMAND_MM => unimplemented!(), // Mask-Register Logical Instructions
-        RiscvInstr::VMNAND_MM => unimplemented!(),
-        RiscvInstr::VMANDN_MM => unimplemented!(),
-        RiscvInstr::VMXOR_MM => unimplemented!(),
-        RiscvInstr::VMOR_MM => unimplemented!(),
-        RiscvInstr::VMNOR_MM => unimplemented!(),
-        RiscvInstr::VMORN_MM => unimplemented!(),
-        RiscvInstr::VMXNOR_MM => unimplemented!(),
+        RiscvInstr::VMAND_MM => vec_bit_op_vv::<VectorOpAnd>, // Mask-Register Logical Instructions
+        RiscvInstr::VMNAND_MM => vec_bit_op_vv::<VectorOpNand>,
+        RiscvInstr::VMANDN_MM => vec_bit_op_vv::<VectorOpAndn>,
+        RiscvInstr::VMXOR_MM => vec_bit_op_vv::<VectorOpXor>,
+        RiscvInstr::VMOR_MM => vec_bit_op_vv::<VectorOpOr>,
+        RiscvInstr::VMNOR_MM => vec_bit_op_vv::<VectorOpNor>,
+        RiscvInstr::VMORN_MM => vec_bit_op_vv::<VectorOpOrn>,
+        RiscvInstr::VMXNOR_MM => vec_bit_op_vv::<VectorOpXnor>,
 
         RiscvInstr::VCPOP_M => unimplemented!(), //count population in mask vcpop.m
 

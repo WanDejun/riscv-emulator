@@ -78,7 +78,7 @@ where
     // Precise memory traps return before this point and preserve their fault index.
     cpu.csr
         .write_directly(Vstart::get_index(), 0)
-        .then(|| ())
+        .then_some(())
         .unwrap();
 
     // TODO: updata vector registers status.

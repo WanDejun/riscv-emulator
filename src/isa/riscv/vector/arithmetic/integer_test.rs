@@ -16,6 +16,17 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_bit_vv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpBitVV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_integer_vx<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIVX: VectorOpIntegerVX,
@@ -905,6 +916,129 @@ fn test_vector_op_integer_vv_binary() {
         .map(|(lhs, rhs)| if lhs < rhs { *lhs } else { *rhs })
         .collect();
     run_vv_binary_u32::<VectorOpMinu>(&vs1, &vs2, &expected);
+}
+
+fn run_bit_binary_u32<OpIVV>(vs1: &[u32], vs2: &[u32], expected: &[u32])
+where
+    OpIVV: VectorOpBitVV,
+{
+    let param = TestOpParameter::new_vv(3, 5, 7);
+    run_test_bit_vv::<OpIVV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(Vlmul::M8, Vsew::E64, false, false, (VLEN_BYTE * 8) as u16)
+                .reg(1, param.vs1(), vs1)
+                .reg(1, param.vs2(), vs2)
+        },
+        |checker| checker.reg(1, param.vd(), expected),
+    );
+}
+
+#[test]
+fn test_vector_op_bit_vv_binary() {
+    let elem_count = VLEN_BYTE / size_of::<u32>();
+    let vs1: Vec<u32> = (0..elem_count)
+        .map(|i| 0x55aa_00ffu32.rotate_left((i * 5) as u32))
+        .collect();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0xcc33_f0f0u32.rotate_right((i * 3) as u32))
+        .collect();
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| vs2 & vs1)
+        .collect();
+    run_bit_binary_u32::<VectorOpAnd>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| !(vs2 & vs1))
+        .collect();
+    run_bit_binary_u32::<VectorOpNand>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| vs2 & !vs1)
+        .collect();
+    run_bit_binary_u32::<VectorOpAndn>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| vs2 ^ vs1)
+        .collect();
+    run_bit_binary_u32::<VectorOpXor>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| vs2 | vs1)
+        .collect();
+    run_bit_binary_u32::<VectorOpOr>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| !(vs2 | vs1))
+        .collect();
+    run_bit_binary_u32::<VectorOpNor>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| vs2 | !vs1)
+        .collect();
+    run_bit_binary_u32::<VectorOpOrn>(&vs1, &vs2, &expected);
+
+    let expected: Vec<u32> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(vs1, vs2)| !(vs2 ^ vs1))
+        .collect();
+    run_bit_binary_u32::<VectorOpXnor>(&vs1, &vs2, &expected);
+}
+
+#[test]
+fn test_vector_op_bit_vv_honors_mask_tail_and_vstart() {
+    let param = TestOpParameter::new_vv(3, 5, 7).with_enable_mask(true);
+    let vs1 = [0x1234_5678u32, 0xf0f0_0f0f, 0xaaaa_5555, 0x0101_8080];
+    let vs2 = [0xffff_0000u32, 0x3333_cccc, 0x0f0f_f0f0, 0x8000_0001];
+    let old_vd = [0x5555_aaaau32, 0x0123_4567, 0xffff_ffff, 0xdead_beef];
+    let mask = mask_from_bits((0..VLEN_BYTE * 8).map(|index| index % 3 != 0));
+    let mut expected = old_vd;
+    for index in 0..VLEN_BYTE * 8 {
+        let chunk = index / u32::BITS as usize;
+        let bit = 1u32 << (index % u32::BITS as usize);
+        let value = (vs2[chunk] & bit) != 0 && (vs1[chunk] & bit) == 0;
+
+        if index < 17 {
+            continue;
+        } else if index >= 70 {
+            expected[chunk] &= !bit;
+        } else if mask_bit(&mask, index) {
+            if value {
+                expected[chunk] |= bit;
+            } else {
+                expected[chunk] &= !bit;
+            }
+        }
+    }
+
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(Vlmul::M8, Vsew::E64, false, true, 70)
+        .reg(1, param.v0(), &mask)
+        .reg(1, param.vs1(), &vs1)
+        .reg(1, param.vs2(), &vs2)
+        .reg(1, param.vd(), &old_vd)
+        .build();
+    vector
+        .exec_bit_vv::<VectorOpAndn>(param.vs1(), param.vs2(), param.vd(), true, 17)
+        .unwrap();
+    VectorChecker::new(&mut vector, &mut mmio).reg(1, param.vd(), &expected);
 }
 
 #[test]
