@@ -236,10 +236,13 @@ impl DeviceTrait for MemoryMapIO {
 
 #[cfg(test)]
 mod test {
-    use crate::device::{
-        config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
-        fast_uart::{FastUart16550, terminal_io::ByteSource},
-        power_manager::PowerManager,
+    use crate::{
+        byte_io::ByteSource,
+        device::{
+            config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
+            fast_uart::FastUart16550,
+            power_manager::PowerManager,
+        },
     };
 
     use super::*;

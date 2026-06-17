@@ -1,8 +1,6 @@
 //! TODO: this module is not fully implemented according to the spec.
 //! Some features are missing, and some behavior may be incorrect due to limited test coverage.
 
-pub mod terminal_io;
-
 use std::{
     cell::RefCell,
     sync::{
@@ -15,11 +13,11 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
+    byte_io::{ByteSink, ByteSource, ChannelIOContext},
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        fast_uart::terminal_io::{ByteSink, ByteSource, ChannelIOContext},
         plic::ExternalInterrupt,
     },
     device_poller::{PollingEventTrait, PollingFnWrapper},
@@ -454,8 +452,7 @@ impl MemMappedDeviceTrait for FastUart16550 {
 mod test {
     use std::collections::VecDeque;
 
-    use crate::device::config::UART_IRQ;
-    use crate::device::fast_uart::terminal_io::ByteSinkExt;
+    use crate::{byte_io::ByteSinkExt, device::config::UART_IRQ};
 
     use super::*;
 

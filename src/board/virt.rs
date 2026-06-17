@@ -13,16 +13,14 @@ use crossbeam::channel;
 use crate::{
     DeviceConfig, EMULATOR_CONFIG,
     board::{Board, BoardStatus},
+    byte_io::{ByteSinkExt, ByteSource},
     device::{
         self, DeviceTrait, IdAllocator,
         aclint::Clint,
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
-        fast_uart::{
-            FastUart16550, UartBytePort,
-            terminal_io::{ByteSinkExt, ByteSource},
-        },
+        fast_uart::{FastUart16550, UartBytePort},
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
             PLIC,
@@ -138,14 +136,14 @@ impl RVBoardBuilder {
 
         #[cfg(feature = "native-cli")]
         {
+            use crate::byte_io::ByteSource;
             use std::io::IsTerminal;
 
             // TODO: make this configurable
             // uart <-> std I/O
-            use crate::device::fast_uart::terminal_io::native;
-            use crate::device_poller::PollingFnWrapper;
+            use crate::{byte_io::TerminalIOContext, device_poller::PollingFnWrapper};
 
-            let mut ctx = native::TerminalIOContext::new();
+            let mut ctx = TerminalIOContext::new();
             let mut uart_port1 = uart_port1.clone();
 
             let input_term = std::io::stdin().is_terminal();

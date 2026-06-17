@@ -26,6 +26,7 @@ mod vclock;
 pub mod gdb;
 
 pub mod board;
+pub mod byte_io;
 pub mod cli_coordinator;
 pub mod config;
 pub mod device;
