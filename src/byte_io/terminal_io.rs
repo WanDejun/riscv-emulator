@@ -1,3 +1,7 @@
+// TODO: Current implementation use `crossterm` to parse ANSI sequence to Rust struct, then we parse it back.
+// It's weird and imcorrect. We should implement a `StdIOContext`,
+// and leave this as a fallback for old version of Windows that doesn't have a terminal emulator.
+
 use super::*;
 use crate::cli_coordinator::CliCoordinator;
 use crate::device::power_manager::{POWER_OFF_CODE, POWER_STATUS};

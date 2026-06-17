@@ -1,7 +1,7 @@
 use std::{
     any::TypeId,
     cell::{RefCell, UnsafeCell},
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     hint::cold_path,
     pin::Pin,
     rc::Rc,
@@ -12,6 +12,7 @@ use crossbeam::channel;
 
 use crate::{
     DeviceConfig, EMULATOR_CONFIG,
+    background::BackgroundExecutor,
     board::{Board, BoardStatus},
     byte_io::{ByteSinkExt, ByteSource},
     device::{
@@ -81,6 +82,7 @@ pub struct RVBoardBuilder {
     mmio_items: Vec<MemoryMapItem>,
     id_allocators: HashMap<TypeId, IdAllocator>,
     device_poller: DevicePoller,
+    background: BackgroundExecutor,
 }
 
 impl RVBoardBuilder {
@@ -93,6 +95,7 @@ impl RVBoardBuilder {
             mmio_items: Vec::new(),
             id_allocators: HashMap::new(),
             device_poller: DevicePoller::new(plic_irq_tx, plic_irq_rx),
+            background: BackgroundExecutor::new(),
         }
     }
 
@@ -250,13 +253,19 @@ impl RVBoardBuilder {
         plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
         plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
 
+        // Hand the device poller's tick to the background executor and start the worker thread.
+        let mut background = self.background;
+        background.add_polling_task(self.device_poller.poll_task());
+        background.start();
+
         VirtBoard {
+            background,
             loader: None,
             cpu,
             clock,
             timer,
 
-            device_poller: self.device_poller.start_polling(),
+            device_poller: self.device_poller,
             clint,
             plic,
             plic_freq_counter: 0,
@@ -268,8 +277,10 @@ impl RVBoardBuilder {
 }
 
 pub struct VirtBoard {
-    // DevicePoller must destruct before other devices.
-    // Unlike C++, in rust: "The fields of a struct are dropped in declaration order."
+    // Background threads must stop before the poller / devices they touch are dropped, so this is
+    // the first field (in rust, "fields of a struct are dropped in declaration order").
+    pub background: BackgroundExecutor,
+
     pub device_poller: DevicePoller,
 
     loader: Option<ELFLoader>,
@@ -323,9 +334,9 @@ impl VirtBoard {
     }
 
     pub fn take_uart_output(&mut self) -> Vec<u8> {
-        let mut deque = VecDeque::new();
-        self.uart_port.drain_to(&mut deque);
-        deque.into_iter().collect()
+        let mut vec = Vec::new();
+        self.uart_port.drain_to(&mut vec);
+        vec
     }
 }
 
@@ -336,6 +347,7 @@ impl Board for VirtBoard {
             self.plic_freq_counter = 0;
 
             // TODO: use external irq lines to trigger plic interrupts.
+            self.background.poll_once();
             self.device_poller.trigger_external_interrupt();
 
             self.plic.borrow_mut().try_get_interrupt(0);

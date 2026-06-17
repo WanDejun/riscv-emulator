@@ -54,7 +54,6 @@ impl PollerCore {
         self.events.lock().unwrap().push(event);
     }
 
-    // TODO: Consider to stop returning interrupt here, let every have a Sender<ExternalInterrupt>.
     fn poll_once_collect(
         events: &Arc<Mutex<Vec<Box<dyn PollingEventTrait>>>>,
     ) -> Vec<ExternalInterrupt> {
@@ -68,6 +67,7 @@ impl PollerCore {
         pending
     }
 
+    #[cfg(feature = "riscv64")]
     fn dispatch_irq(&mut self, id: ExternalInterrupt) {
         if let Some(line) = self.plic_irq_line.as_mut() {
             line.set_irq(id, true);
@@ -76,179 +76,77 @@ impl PollerCore {
         }
     }
 
-    fn dispatch_irqs(&mut self, irqs: Vec<ExternalInterrupt>) {
-        for id in irqs {
-            self.dispatch_irq(id);
-        }
-    }
-
+    #[cfg(feature = "riscv64")]
     fn set_irq_line(&mut self, line: PlicIRQLine) {
         self.plic_irq_line = Some(line);
     }
 }
 
-/// DevicePoller is responsible for polling events from devices and trigger corresponding external interrupts.
+/// Groups the device poll events and ferries the [`ExternalInterrupt`]s they produce to the PLIC.
 ///
-/// - In native targets, the polling is done in a separate thread;
-/// - while in web targets, the polling is done in the main thread (when `trigger_external_interrupt` is called).
-#[doc(inline)]
-pub use imp::DevicePoller;
+/// `DevicePoller` no longer owns a thread. The polling is driven by a
+/// [`BackgroundExecutor`](crate::background::BackgroundExecutor): register [`Self::poll_task`] on
+/// it, then drain the produced interrupts on the main thread via
+/// [`Self::trigger_external_interrupt`].
+///
+/// - With `multithreading`, the executor runs the task on its worker thread and the interrupts
+///   arrive over the channel asynchronously.
+/// - Without it, the executor runs the task inline on `poll_once`, just before the drain.
+pub struct DevicePoller {
+    core: PollerCore,
 
-#[cfg(feature = "multithreading")]
-mod imp {
-    use crossbeam::channel;
-    use std::{thread, time::Duration};
+    /// Sent from the polling task (any thread), received on the main thread.
+    irq_sender: Sender<ExternalInterrupt>,
+    irq_receiver: Receiver<ExternalInterrupt>,
+}
 
-    use super::*;
-
-    pub enum PollerCommand {
-        Exit,
+impl DevicePoller {
+    pub fn new(
+        plic_irq_tx: Sender<ExternalInterrupt>,
+        plic_irq_rx: Receiver<ExternalInterrupt>,
+    ) -> Self {
+        Self {
+            core: PollerCore::new(),
+            irq_sender: plic_irq_tx,
+            irq_receiver: plic_irq_rx,
+        }
     }
 
-    // TODO: Current DevicePoller is in charge of: PLIC IRQ and running background task,
-    // split them into two modules, and change these wired namings.
-    pub struct DevicePoller {
-        core: PollerCore,
-
-        /// Used in polling thread to send interrupt id.
-        irq_sender: Sender<ExternalInterrupt>,
-        irq_receiver: Receiver<ExternalInterrupt>,
-
-        control_sender: Sender<PollerCommand>,
-        /// Used in polling thread to receive control commands.
-        control_receiver: Receiver<PollerCommand>,
-
-        thread_handle: Option<thread::JoinHandle<()>>,
+    pub fn add_event(&mut self, event: Box<dyn PollingEventTrait>) {
+        self.core.add_event(event);
     }
 
-    impl DevicePoller {
-        pub fn new(
-            plic_irq_tx: Sender<ExternalInterrupt>,
-            plic_irq_rx: Receiver<ExternalInterrupt>,
-        ) -> Self {
-            let (control_sender, control_receiver) = channel::unbounded();
-
-            Self {
-                core: PollerCore::new(),
-                irq_sender: plic_irq_tx,
-                irq_receiver: plic_irq_rx,
-                control_sender,
-                control_receiver,
-                thread_handle: None,
+    /// Build the polling task to register on a
+    /// [`BackgroundExecutor`](crate::background::BackgroundExecutor). It polls every registered
+    /// event once and forwards any produced interrupts to the main thread, returning `true` when at
+    /// least one fired so the executor keeps its loop hot.
+    pub fn poll_task(&self) -> impl FnMut() -> bool + Send + 'static {
+        let events = self.core.events.clone();
+        let sender = self.irq_sender.clone();
+        move || {
+            let pending = PollerCore::poll_once_collect(&events);
+            let triggered = !pending.is_empty();
+            for id in pending {
+                let _ = sender.send(id);
             }
-        }
-
-        pub fn add_event(&mut self, event: Box<dyn PollingEventTrait>) {
-            self.core.add_event(event);
-        }
-
-        pub fn start_polling(mut self) -> Self {
-            let events = self.core.events.clone();
-            let sender = self.irq_sender.clone();
-            let control_receiver = self.control_receiver.clone();
-
-            self.thread_handle = Some(thread::spawn(move || {
-                loop {
-                    if let Ok(PollerCommand::Exit) = control_receiver.try_recv() {
-                        log::trace!("exiting poller thread");
-                        PollerCore::poll_once_collect(&events);
-                        return;
-                    }
-
-                    let pending = PollerCore::poll_once_collect(&events);
-                    let triggered = !pending.is_empty();
-                    for id in pending {
-                        let _ = sender.send(id);
-                    }
-
-                    if !triggered {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                }
-            }));
-
-            self
-        }
-
-        pub fn stop_polling(&mut self) {
-            log::trace!("stop polling");
-            let _ = self.control_sender.send(PollerCommand::Exit);
-            self.thread_handle
-                .take()
-                .expect("poller thread never started")
-                .join()
-                .unwrap();
-        }
-
-        pub fn trigger_external_interrupt(&mut self) {
-            while let Ok(id) = self.irq_receiver.try_recv() {
-                self.core.dispatch_irq(id);
-            }
+            triggered
         }
     }
 
-    impl Drop for DevicePoller {
-        fn drop(&mut self) {
-            self.stop_polling();
-        }
-    }
-
-    impl PlicIRQSource for DevicePoller {
-        fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
-            self.core.set_irq_line(line);
+    /// Drain the interrupts produced by the polling task and dispatch them to the PLIC. Call on the
+    /// main thread after
+    /// [`BackgroundExecutor::poll_once`](crate::background::BackgroundExecutor::poll_once).
+    pub fn trigger_external_interrupt(&mut self) {
+        while let Ok(_id) = self.irq_receiver.try_recv() {
+            #[cfg(feature = "riscv64")]
+            self.core.dispatch_irq(_id);
         }
     }
 }
 
-#[cfg(not(feature = "multithreading"))]
-mod imp {
-    use super::*;
-
-    pub struct DevicePoller {
-        core: PollerCore,
-        plic_irq_rx: Receiver<ExternalInterrupt>,
-    }
-
-    impl DevicePoller {
-        pub fn new(
-            _plic_irq_tx: Sender<ExternalInterrupt>,
-            plic_irq_rx: Receiver<ExternalInterrupt>,
-        ) -> Self {
-            Self {
-                core: PollerCore::new(),
-                plic_irq_rx,
-            }
-        }
-
-        pub fn add_event(&mut self, event: Box<dyn PollingEventTrait>) {
-            self.core.add_event(event);
-        }
-
-        pub fn start_polling(self) -> Self {
-            self
-        }
-
-        pub fn stop_polling(&self) {}
-
-        pub fn trigger_external_interrupt(&mut self) {
-            let mut pending = PollerCore::poll_once_collect(&self.core.events);
-            while let Ok(id) = self.plic_irq_rx.try_recv() {
-                pending.push(id);
-            }
-            self.core.dispatch_irqs(pending);
-        }
-    }
-
-    impl Drop for DevicePoller {
-        fn drop(&mut self) {
-            self.stop_polling();
-        }
-    }
-
-    #[cfg(feature = "riscv64")]
-    impl PlicIRQSource for DevicePoller {
-        fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
-            self.core.set_irq_line(line);
-        }
+#[cfg(feature = "riscv64")]
+impl PlicIRQSource for DevicePoller {
+    fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
+        self.core.set_irq_line(line);
     }
 }

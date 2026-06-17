@@ -10,12 +10,9 @@ mod imp {
         Paused,
     }
 
-    /// A coordinator to pause or resume the interaction between [`CliUart`] and the terminal.
+    /// A coordinator to pause or resume the background terminal I/O thread, for debugger.
     /// It is implemented as a global singleton, accessible via [`CliCoordinator::global()`].
-    /// This also ensures the correct status of raw mode.
-    ///
-    /// [`CliUart`]: crate::device::cli_uart::CliUart
-    /// [`spawn_io_thread`]: crate::device::cli_uart::spawn_io_thread
+    // TODO: currently structure cann't make sure output queue empty.
     #[derive(Clone)]
     pub struct CliCoordinator {
         state: Arc<(Mutex<CliThreadState>, Condvar)>,

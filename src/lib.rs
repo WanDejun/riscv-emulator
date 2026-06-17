@@ -25,6 +25,7 @@ mod vclock;
 #[cfg(feature = "native-cli")]
 pub mod gdb;
 
+pub mod background;
 pub mod board;
 pub mod byte_io;
 pub mod cli_coordinator;
