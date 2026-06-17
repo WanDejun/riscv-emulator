@@ -256,6 +256,7 @@ fn main() {
                 break;
             }
         }
+        crossterm::terminal::disable_raw_mode().unwrap();
 
         if let Some(sig_path) = &cli_args.signature {
             if let Err(e) = dump_signature(

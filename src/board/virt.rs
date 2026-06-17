@@ -3,6 +3,7 @@ use std::{
     cell::{RefCell, UnsafeCell},
     collections::{HashMap, VecDeque},
     hint::cold_path,
+    pin::Pin,
     rc::Rc,
     sync::atomic::Ordering,
 };
@@ -144,7 +145,7 @@ impl RVBoardBuilder {
             use crate::device::fast_uart::terminal_io::native;
             use crate::device_poller::PollingFnWrapper;
 
-            let mut ctx = native::TerminalIOContext {};
+            let mut ctx = native::TerminalIOContext::new();
             let mut uart_port1 = uart_port1.clone();
 
             let input_term = std::io::stdin().is_terminal();
@@ -218,7 +219,7 @@ impl RVBoardBuilder {
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), self.mmio_items);
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
-        let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
+        let mut cpu = Box::pin(RVCPU::from_vaddr_manager(vaddr_manager));
 
         // register irq line for timer.
         clint.borrow_mut().set_irq_line(
@@ -275,7 +276,7 @@ pub struct VirtBoard {
 
     loader: Option<ELFLoader>,
 
-    pub cpu: Box<RVCPU>,
+    pub cpu: Pin<Box<RVCPU>>,
     pub clock: VirtualClockRef,
     pub timer: Rc<UnsafeCell<Timer>>,
 

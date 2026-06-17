@@ -38,17 +38,15 @@ pub struct UartBytePort {
 
 impl ByteSink for UartBytePort {
     fn before_receive(&mut self) {
-        log::trace!("[uart] before receive");
         self.uart_io.before_receive();
     }
 
     fn do_receive(&mut self, byte: u8) {
-        log::trace!("[uart] char {:?} received", byte as char);
+        log::trace!("[uart] receive byte 0x{:x} (char {:?})", byte, byte as char);
         self.uart_io.do_receive(byte);
     }
 
     fn after_receive(&mut self, received: bool) {
-        log::trace!("[uart] after receive");
         self.uart_io.after_receive(received);
         if received {
             self.rx_pending.store(true, Ordering::Release);
