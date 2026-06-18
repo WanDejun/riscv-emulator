@@ -9,6 +9,19 @@ use crate::{
     fpu::soft_float::APFloatOf,
 };
 
+#[macro_export]
+macro_rules! debug_unreachable {
+    () => {
+        if cfg!(debug_assertions) {
+            panic!()
+        } else {
+            unsafe {
+                std::hint::unreachable_unchecked();
+            }
+        }
+    };
+}
+
 pub struct BiMap<K, V> {
     pub forward: std::collections::BTreeMap<K, V>,
     pub backward: std::collections::BTreeMap<V, K>,

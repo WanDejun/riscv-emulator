@@ -65,6 +65,78 @@ fn value_str<'a>(value: &'a Value, instr_name: &str, field: &str) -> &'a str {
     })
 }
 
+fn get_instr_type(fields: Vec<&str>, name: &str, _ext: &str) -> &'static str {
+    if fields == ["rd", "rs1", "rs2"] || fields == ["rd", "rs1"] || fields == ["rs1", "rs2"] {
+        "R"
+    } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
+        "R_rm"
+    } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
+        "R4_rm"
+    } else if fields == ["rd", "rs1", "aq", "rl"] || fields == ["rd", "rs1", "rs2", "aq", "rl"] {
+        "A"
+    } else if fields == ["rd", "rs1", "imm12"]
+        || fields == ["rd", "rs1", "shamtd"]
+        || fields == ["rd", "rs1", "shamtw"]
+        || fields == ["rd", "csr", "zimm5"]
+        || fields == ["rd", "rs1", "csr"]
+    {
+        "I"
+    } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {
+        "S"
+    } else if fields == ["bimm12hi", "rs1", "rs2", "bimm12lo"] {
+        "B"
+    } else if fields == ["rd", "imm20"] {
+        "U"
+    } else if fields == ["imm"] {
+        "J"
+    } else if ["fence", "fence_i"].contains(&name) {
+        "I"
+    } else if name == "jal" {
+        "J"
+    } else if fields.is_empty() {
+        "None"
+    }
+    // RVC
+    else if ["c_add", "c_jr", "c_jalr", "c_mv", "c_nop"].contains(&name) {
+        "CR"
+    } else if [
+        "c_addi",
+        "c_addiw",
+        "c_addi16sp",
+        "c_ldsp",
+        "c_lwsp",
+        "c_li",
+        "c_lui",
+        "c_slli",
+        "c_flwsp",
+        "c_fldsp",
+    ]
+    .contains(&name)
+    {
+        "CI"
+    } else if name == "c_addi4spn" {
+        "CIW"
+    } else if ["c_and", "c_or", "c_xor", "c_sub", "c_addw", "c_subw"].contains(&name) {
+        "CA"
+    } else if ["c_beqz", "c_bnez", "c_srai", "c_srli", "c_andi"].contains(&name) {
+        "CB"
+    } else if ["c_j", "c_jal"].contains(&name) {
+        "CJ"
+    } else if ["c_lw", "c_ld", "c_flw", "c_fld"].contains(&name) {
+        "CL"
+    } else if ["c_sw", "c_fsw", "c_fsd", "c_sd"].contains(&name) {
+        "CS"
+    } else if ["c_swsp", "c_sdsp", "c_fswsp", "c_fsdsp"].contains(&name) {
+        "CSS"
+    } else {
+        panic!(
+            "Unknown instruction format for {} with fields: {}",
+            name,
+            fields.join(", ")
+        );
+    }
+}
+
 fn parse_instr<'a>(
     isa_dict: &mut HashMap<&'a str, Vec<String>>,
     ext_to_name: &HashMap<&str, &'a str>,
@@ -90,47 +162,7 @@ fn parse_instr<'a>(
                 .map(|f| value_str(f, name, "variable_fields"))
                 .collect::<Vec<_>>();
 
-            let format = if fields == ["rd", "rs1", "rs2"]
-                || fields == ["rd", "rs1"]
-                || fields == ["rs1", "rs2"]
-            {
-                "R"
-            } else if fields == ["rd", "rs1", "rs2", "rm"] || fields == ["rd", "rs1", "rm"] {
-                "R_rm"
-            } else if fields == ["rd", "rs1", "rs2", "rs3", "rm"] {
-                "R4_rm"
-            } else if fields == ["rd", "rs1", "aq", "rl"]
-                || fields == ["rd", "rs1", "rs2", "aq", "rl"]
-            {
-                "A"
-            } else if fields == ["rd", "rs1", "imm12"]
-                || fields == ["rd", "rs1", "shamtd"]
-                || fields == ["rd", "rs1", "shamtw"]
-                || fields == ["rd", "csr", "zimm5"]
-                || fields == ["rd", "rs1", "csr"]
-            {
-                "I"
-            } else if fields == ["imm12hi", "rs1", "rs2", "imm12lo"] {
-                "S"
-            } else if fields == ["bimm12hi", "rs1", "rs2", "bimm12lo"] {
-                "B"
-            } else if fields == ["rd", "imm20"] {
-                "U"
-            } else if fields == ["imm"] {
-                "J"
-            } else if ["fence", "fence_i"].contains(&name.as_str()) {
-                "I"
-            } else if name == "jal" {
-                "J"
-            } else if fields.is_empty() {
-                "None"
-            } else {
-                panic!(
-                    "Unknown instruction format for {} with fields: {}",
-                    name,
-                    fields.join(", ")
-                );
-            };
+            let format = get_instr_type(fields.clone(), name, ext);
 
             let opcode = get_opcode(encoding);
             let funct3 = get_funct3(encoding);
@@ -189,6 +221,17 @@ fn main() {
         m.insert("rv64_a", "RV64A");
         m.insert("rv_zifencei", "RVZifencei");
 
+        m.insert("rv_c", "RVC");
+        m.insert("rv32_c", "RV32C");
+        m.insert("rv32_c_f", "RV32C_F");
+        m.insert("rv64_c", "RV64C");
+        m.insert("rv_c_d", "RVC_D");
+
+        // Synthetic extension for instructions we define ourselves (see
+        // data/instr_dict_illegal.json), kept separate from the auto-generated
+        // instr_dict.json.
+        m.insert("rv_illegal", "RVIllegal");
+
         #[cfg(feature = "custom-instr")]
         m.insert("rv_custom0", "RVCustom0");
         #[cfg(feature = "custom-instr")]
@@ -204,9 +247,14 @@ fn main() {
     let json_path = PathBuf::from("./data/instr_dict.json");
     parse_instr(&mut isa_dict, &ext_to_name, &json_path);
 
-    let json_path = PathBuf::from("./data/instr_dict_custom.json");
+    let illegal_path = PathBuf::from("./data/instr_dict_illegal.json");
+    parse_instr(&mut isa_dict, &ext_to_name, &illegal_path);
+
     #[cfg(feature = "custom-instr")]
-    parse_instr(&mut isa_dict, &ext_to_name, &json_path);
+    {
+        let json_path = PathBuf::from("./data/instr_dict_custom.json");
+        parse_instr(&mut isa_dict, &ext_to_name, &json_path);
+    }
 
     for (name, arr) in isa_dict.into_iter() {
         output.push_str(&format!(
@@ -226,4 +274,5 @@ fn main() {
     fs::write(&out_path, output).expect("Failed to write rvinstr_gen.rs");
 
     println!("cargo:rerun-if-changed={}", json_path.display());
+    println!("cargo:rerun-if-changed={}", illegal_path.display());
 }

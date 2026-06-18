@@ -7,9 +7,10 @@ use crate::{
     device::MemError,
     fpu::soft_float::SoftFPU,
     isa::{
-        DecoderTrait,
+        InstrLen,
         cache::{Cache, SetCache},
         riscv::{
+            RawInstr,
             csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, instr_table::RiscvInstr},
@@ -74,7 +75,7 @@ impl RVCPU {
         let mut csr = CsrRegFile::new();
 
         // TODO: Record extensions in Decoder.
-        let ext = "ADFIMSU"
+        let ext = "ACDFIMSU"
             .chars()
             .into_iter()
             .map(|c| c as WordType - 'A' as WordType)
@@ -198,16 +199,28 @@ impl RVCPU {
         rst
     }
 
-    fn ifetch(&mut self) -> Result<u32, MemError> {
-        let mut instr_bytes: u32 = self.memory.ifetch::<u16>(self.pc, &mut self.csr)? as u32;
+    fn ifetch(&mut self) -> Result<RawInstr, MemError> {
+        let mut bytes: RawInstr =
+            (self.memory.ifetch::<u16>(self.pc, &mut self.csr)? as u32).into();
 
-        if (instr_bytes & 0b11) == 0b11 {
-            // 32-bit instr
-            let next_half = self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr)? as u32;
-            instr_bytes |= next_half << 16;
+        if bytes.len() == 4 {
+            // 32-bit instr.
+
+            // "The C extension allows 16-bit instructions to be freely intermixed with 32-bit instructions,
+            // with the latter now able to start on any 16-bit boundary."
+
+            // but the next half may sit on the next page, causing a page fault.
+            let next_half = match self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr) {
+                Ok(half) => half as u32,
+                Err(err) => {
+                    self.pending_tval = Some(self.pc + 2);
+                    return Err(err);
+                }
+            };
+            bytes.val |= next_half << 16;
         };
 
-        Ok(instr_bytes)
+        Ok(bytes)
     }
 
     fn step_impl(&mut self) -> Result<(), Exception> {
@@ -221,7 +234,7 @@ impl RVCPU {
             self.icache_cnt += 1;
             decode_instr
         } else {
-            let instr_bytes = match self.ifetch() {
+            let raw_instr = match self.ifetch() {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     TrapController::try_send_trap_signal(
@@ -238,23 +251,26 @@ impl RVCPU {
             // TODO: We have to support C.nop for riscv-arch-test,
             // while currently we don't support the C extension.
             // So a temparary workaround is added here.
-            if (instr_bytes & (make_mask(13, 15) | make_mask(7, 11) | 0b11) as u32) == 0x0001 {
+            if (raw_instr.val & (make_mask(13, 15) | make_mask(7, 11) | 0b11) as u32) == 0x0001 {
                 self.pc = self.pc.wrapping_add(2);
                 return Ok(());
             }
 
-            let decoder_result = self.decoder.decode(instr_bytes);
-            if let None = decoder_result {
-                log::warn!("Illegal instruction: {:#x} at {:#x}", instr_bytes, self.pc);
+            let decoder_result = self.decoder.decode(raw_instr);
+            let Some(decode_instr) = decoder_result else {
+                log::warn!(
+                    "Illegal instruction: {:#x} at {:#x}",
+                    raw_instr.val,
+                    self.pc
+                );
                 TrapController::try_send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
-                    instr_bytes as WordType,
+                    raw_instr.val as WordType,
                 );
                 return Ok(());
-            }
+            };
 
-            let decode_instr = unsafe { decoder_result.unwrap_unchecked() };
             self.icache.put(self.pc, decode_instr.clone());
             decode_instr
         };
@@ -278,11 +294,11 @@ impl RVCPU {
                 // We cannot reuse the fetched raw instruction on the i-cache hit path,
                 // because the raw instruction bytes are not stored in the i-cache.
                 // This is acceptable because `illegal instruction` is a cold path.
-                let instr_bytes = self.ifetch().expect("ifetch should not fail here");
+                let raw_instr = self.ifetch().expect("ifetch should not fail here");
                 TrapController::try_send_trap_signal(
                     self,
                     Trap::Exception(Exception::IllegalInstruction),
-                    instr_bytes as WordType,
+                    raw_instr.val as WordType,
                 );
             }
             Err(nr) => {
@@ -612,6 +628,361 @@ mod tests {
             0xe2068553, // fmv.x.d a0,fa3
             |builder| builder.reg_f64(13, 3.5),
             |checker| checker.reg(10, 3.5f64.to_bits()),
+        );
+    }
+
+    #[test]
+    fn test_rv_c_arith() {
+        run_test_exec(
+            RiscvInstr::C_ADD,
+            RVInstrInfo::CR { rd_rs1: 5, rs2: 6 },
+            |builder| builder.reg(5, 10).reg(6, 20).pc(0x2000),
+            |checker| checker.reg(5, 30).pc(0x2002), // compressed -> pc += 2
+        );
+
+        run_test_exec(
+            RiscvInstr::C_ADDI,
+            RVInstrInfo::CI {
+                rd_rs1: 5,
+                imm: negative_of(3),
+            },
+            |builder| builder.reg(5, 10).pc(0x2000),
+            |checker| checker.reg(5, 7).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_SUB,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 30).reg(9, 12).pc(0x2000),
+            |checker| checker.reg(8, 18).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_AND,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 0b1100).reg(9, 0b1010).pc(0x2000),
+            |checker| checker.reg(8, 0b1000).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_OR,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 0b1100).reg(9, 0b1010).pc(0x2000),
+            |checker| checker.reg(8, 0b1110).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_XOR,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 0b1100).reg(9, 0b1010).pc(0x2000),
+            |checker| checker.reg(8, 0b0110).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_ANDI,
+            RVInstrInfo::CB {
+                rd_rs1: 8,
+                imm: 0b110,
+            },
+            |builder| builder.reg(8, 0b1011).pc(0x2000),
+            |checker| checker.reg(8, 0b0010).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_SLLI,
+            RVInstrInfo::CI { rd_rs1: 5, imm: 4 },
+            |builder| builder.reg(5, 1).pc(0x2000),
+            |checker| checker.reg(5, 16).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SRLI,
+            RVInstrInfo::CB { rd_rs1: 8, imm: 1 },
+            |builder| builder.reg(8, 0x10).pc(0x2000),
+            |checker| checker.reg(8, 0x8).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SRAI,
+            RVInstrInfo::CB { rd_rs1: 8, imm: 1 },
+            |builder| builder.reg(8, negative_of(16)).pc(0x2000),
+            |checker| checker.reg(8, negative_of(8)).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_ADDW,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 0x7fff_ffff).reg(9, 1).pc(0x2000),
+            |checker| checker.reg(8, 0xffff_ffff_8000_0000).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SUBW,
+            RVInstrInfo::CA { rd_rs1: 8, rs2: 9 },
+            |builder| builder.reg(8, 20).reg(9, 5).pc(0x2000),
+            |checker| checker.reg(8, 15).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_ADDI16SP,
+            RVInstrInfo::CI {
+                rd_rs1: 2,
+                imm: negative_of(16),
+            },
+            |builder| builder.reg(2, 0x100).pc(0x2000),
+            |checker| checker.reg(2, 0xf0).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_ADDI4SPN,
+            RVInstrInfo::CIW { rd: 8, imm: 16 },
+            |builder| builder.reg(2, 0x100).pc(0x2000),
+            |checker| checker.reg(8, 0x110).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_MV,
+            RVInstrInfo::CR { rd_rs1: 5, rs2: 6 },
+            |builder| builder.reg(6, 0xabc).pc(0x2000),
+            |checker| checker.reg(5, 0xabc).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_LI,
+            RVInstrInfo::CI {
+                rd_rs1: 5,
+                imm: negative_of(7),
+            },
+            |builder| builder.reg(5, 0xdead).pc(0x2000),
+            |checker| checker.reg(5, negative_of(7)).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_LUI,
+            RVInstrInfo::CI {
+                rd_rs1: 5,
+                imm: 0x12345 << 12,
+            },
+            |builder| builder.reg(5, 0).pc(0x2000),
+            |checker| checker.reg(5, 0x12345000).pc(0x2002),
+        );
+    }
+
+    #[test]
+    fn test_rv_c_load_store() {
+        run_test_exec(
+            RiscvInstr::C_LW,
+            RVInstrInfo::CL {
+                rd: 8,
+                rs1: 9,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .mem_base::<u32>(8, 0x8000_0001)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg(8, 0xffff_ffff_8000_0001).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_LD,
+            RVInstrInfo::CL {
+                rd: 8,
+                rs1: 9,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .mem_base::<u64>(8, 0x1122_3344_5566)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg(8, 0x1122_3344_5566).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_SW,
+            RVInstrInfo::CS {
+                rs1: 9,
+                rs2: 8,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .reg(8, 0xdead)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u32>(8, 0xdead).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SD,
+            RVInstrInfo::CS {
+                rs1: 9,
+                rs2: 8,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .reg(8, 0x1122_3344_5566)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u64>(8, 0x1122_3344_5566).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_LWSP,
+            RVInstrInfo::CI { rd_rs1: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .mem_base::<u32>(8, 0x55)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg(8, 0x55).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_LDSP,
+            RVInstrInfo::CI { rd_rs1: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .mem_base::<u64>(8, 0x99)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg(8, 0x99).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SWSP,
+            RVInstrInfo::CSS { rs2: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .reg(8, 0xbeef)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u32>(8, 0xbeef).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_SDSP,
+            RVInstrInfo::CSS { rs2: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .reg(8, 0xc0ff_ee00)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u64>(8, 0xc0ff_ee00).pc(0x2002),
+        );
+    }
+
+    #[test]
+    fn test_rv_c_branch_jump() {
+        run_test_exec(
+            RiscvInstr::C_BEQZ,
+            RVInstrInfo::CB {
+                rd_rs1: 8,
+                imm: negative_of(4),
+            },
+            |builder| builder.reg(8, 0).pc(0x2000),
+            |checker| checker.pc(0x2000 - 4),
+        );
+        run_test_exec(
+            RiscvInstr::C_BEQZ,
+            RVInstrInfo::CB { rd_rs1: 8, imm: 16 },
+            |builder| builder.reg(8, 1).pc(0x2000),
+            |checker| checker.pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_BNEZ,
+            RVInstrInfo::CB { rd_rs1: 8, imm: 8 },
+            |builder| builder.reg(8, 5).pc(0x2000),
+            |checker| checker.pc(0x2008),
+        );
+        run_test_exec(
+            RiscvInstr::C_BNEZ,
+            RVInstrInfo::CB { rd_rs1: 8, imm: 8 },
+            |builder| builder.reg(8, 0).pc(0x2000),
+            |checker| checker.pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_J,
+            RVInstrInfo::CJ {
+                target: negative_of(0x10),
+            },
+            |builder| builder.pc(0x2000),
+            |checker| checker.pc(0x2000 - 0x10),
+        );
+        run_test_exec(
+            RiscvInstr::C_JAL,
+            RVInstrInfo::CJ { target: 0x20 },
+            |builder| builder.pc(0x2000),
+            |checker| checker.reg(1, 0x2002).pc(0x2020),
+        );
+        run_test_exec(
+            RiscvInstr::C_JALR,
+            RVInstrInfo::CR { rd_rs1: 5, rs2: 0 },
+            |builder| builder.reg(5, 0x3000).pc(0x2000),
+            |checker| checker.reg(1, 0x2002).pc(0x3000),
+        );
+        run_test_exec(
+            RiscvInstr::C_JR,
+            RVInstrInfo::CR { rd_rs1: 5, rs2: 0 },
+            |builder| builder.reg(5, 0x3000).pc(0x2000),
+            |checker| checker.pc(0x3000),
+        );
+    }
+
+    #[test]
+    fn test_rv_c_float() {
+        run_test_exec(
+            RiscvInstr::C_FLD,
+            RVInstrInfo::CL {
+                rd: 8,
+                rs1: 9,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .mem_base::<u64>(8, 3.5f64.to_bits())
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_f64(8, 3.5).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_FSD,
+            RVInstrInfo::CS {
+                rs1: 9,
+                rs2: 8,
+                imm: 8,
+            },
+            |builder| {
+                builder
+                    .reg(9, ram_config::BASE_ADDR)
+                    .reg_f64(8, 2.5)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u64>(8, 2.5f64.to_bits()).pc(0x2002),
+        );
+
+        run_test_exec(
+            RiscvInstr::C_FLDSP,
+            RVInstrInfo::CI { rd_rs1: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .mem_base::<u64>(8, 1.25f64.to_bits())
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_f64(8, 1.25).pc(0x2002),
+        );
+        run_test_exec(
+            RiscvInstr::C_FSDSP,
+            RVInstrInfo::CSS { rs2: 8, imm: 8 },
+            |builder| {
+                builder
+                    .reg(2, ram_config::BASE_ADDR)
+                    .reg_f64(8, 6.0)
+                    .pc(0x2000)
+            },
+            |checker| checker.mem_base::<u64>(8, 6.0f64.to_bits()).pc(0x2002),
         );
     }
 

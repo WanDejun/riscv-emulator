@@ -1,8 +1,8 @@
 use smallvec::SmallVec;
 
 use crate::isa::riscv::{
-    RiscvTypes,
-    decoder::{DecodeInstr, DecoderTrait, decode_info},
+    RawInstr,
+    decoder::{DecodeInstr, decode_info},
     instruction::{
         instr_table::{RVInstrDesc, RiscvInstr},
         *,
@@ -60,15 +60,11 @@ pub(super) struct Decoder {
     )>,
 }
 
-impl DecoderTrait<RiscvTypes> for Decoder {
-    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
+impl Decoder {
+    pub fn from_isa(instrs: impl Iterator<Item = RVInstrDesc>) -> Self {
         let mut decode_table = vec![(PartialDecode::Unknown, SmallMap::new()); 1 << 7];
 
         for desc in instrs {
-            if desc.use_mask {
-                continue;
-            }
-
             let RVInstrDesc {
                 opcode,
                 funct3,
@@ -113,7 +109,9 @@ impl DecoderTrait<RiscvTypes> for Decoder {
         Decoder { decode_table }
     }
 
-    fn decode(&self, instr: u32) -> Option<DecodeInstr> {
+    pub fn decode(&self, instr: RawInstr) -> Option<DecodeInstr> {
+        let instr = instr.val;
+
         let opcode = (instr & 0b1111111) as u8;
         let funct3 = ((instr >> 12) & 0b111) as u8;
         let funct7 = (instr >> 25) as u8;

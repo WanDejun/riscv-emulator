@@ -10,9 +10,9 @@ use crate::{
     config::arch_config::WordType,
     device::MemError,
     isa::{
-        DebugTarget, DecoderTrait, ISATypes,
+        DebugTarget, ISATypes,
         riscv::{
-            RawInstrType, RiscvTypes,
+            RawInstr, RiscvTypes,
             csr_reg::{NamedCsrReg, PrivilegeLevel, csr_macro::Mcycle},
             decoder::DecodeInstr,
             executor::{ExcuteInstrInfo, RVCPU},
@@ -76,12 +76,15 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         self.reg_file.write(idx, value)
     }
 
-    fn read_instr(&mut self, vaddr: WordType) -> Result<u32, MemError> {
-        self.memory.debug_ifetch(vaddr, &mut self.csr)
+    // TODO: This function read `u32` at present
+    fn read_instr(&mut self, vaddr: WordType) -> Result<RawInstr, MemError> {
+        self.memory
+            .debug_ifetch::<u32>(vaddr, &mut self.csr)
+            .map(|x| x.into())
     }
 
-    fn read_instr_directly(&mut self, addr: Address) -> Result<u32, MemError> {
-        self.memory.debug_read(addr)
+    fn read_instr_directly(&mut self, addr: Address) -> Result<RawInstr, MemError> {
+        self.memory.debug_read::<u32>(addr).map(|x| x.into())
     }
 
     fn read_memory<T: UnsignedInteger>(&mut self, addr: Address) -> Result<T, MemError> {
@@ -112,7 +115,7 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         RVCPU::step(self)
     }
 
-    fn decoded_instr(&self, instr: u32) -> Option<DecodeInstr> {
+    fn decoded_instr(&self, instr: RawInstr) -> Option<DecodeInstr> {
         self.decoder.decode(instr)
     }
 
@@ -295,7 +298,7 @@ const MAX_HISTORY: usize = 1024;
 pub struct Debugger<'a, B: Board> {
     breakpoints: Vec<Breakpoint>,
     board: &'a mut B,
-    history: VecDeque<(WordType, Option<RawInstrType>)>,
+    history: VecDeque<(WordType, Option<RawInstr>)>,
     ftrace: FtraceState,
     symtab: Option<SymTab>,
 }
@@ -329,7 +332,7 @@ impl<'a, B: Board> Debugger<'a, B> {
     }
 
     /// Get the latest k history.
-    pub fn pc_history(&self, k: usize) -> impl Iterator<Item = (WordType, Option<RawInstrType>)> {
+    pub fn pc_history(&self, k: usize) -> impl Iterator<Item = (WordType, Option<RawInstr>)> {
         self.history.iter().copied().rev().take(k).rev()
     }
 
@@ -551,7 +554,7 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu().debug_info.last_instr.clone()
     }
 
-    pub fn next_instr(&mut self) -> Option<RawInstrType> {
+    pub fn next_instr(&mut self) -> Option<RawInstr> {
         let pc = self.board.cpu().read_pc();
         self.board.cpu_mut().read_instr(pc).ok()
     }
@@ -590,7 +593,7 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu_mut().fpu.store(idx, value);
     }
 
-    pub fn read_instr(&mut self, addr: WordType) -> Option<RawInstrType> {
+    pub fn read_instr(&mut self, addr: WordType) -> Option<RawInstr> {
         self.board.cpu_mut().read_instr(addr).ok()
     }
 
@@ -626,7 +629,7 @@ impl<'a, B: Board> Debugger<'a, B> {
         self.board.cpu_mut().csr.set_current_privileged(priv_level);
     }
 
-    pub fn decoded_info(&self, raw: RawInstrType) -> Option<<RiscvTypes as ISATypes>::DecodeRst> {
+    pub fn decoded_info(&self, raw: RawInstr) -> Option<<RiscvTypes as ISATypes>::DecodeRst> {
         self.board.cpu().decoded_instr(raw)
     }
 

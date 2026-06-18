@@ -3,6 +3,7 @@ use rustc_apfloat::{FloatConvert, Status};
 use super::normal_float_exec;
 use crate::{
     config::arch_config::WordType,
+    debug_unreachable,
     fpu::{Round, soft_float::*},
     isa::riscv::{
         csr_reg::csr_macro::Fcsr, executor::RVCPU, instruction::RVInstrInfo, trap::Exception,
@@ -57,24 +58,13 @@ where
     F: FloatPoint,
 {
     normal_float_exec(cpu, |cpu| {
-        if let RVInstrInfo::I { rs1, rd, imm } = info {
-            let val = cpu.reg_file.read(rs1, 0).0;
-            let addr = wrapping_add_as_signed(val, imm); // imm has been sign_extended
-            let rst = cpu.memory.read::<F::BitsType>(addr, &mut cpu.csr);
+        let RVInstrInfo::I { rs1, rd, imm } = info else {
+            debug_unreachable!();
+        };
 
-            match rst {
-                Ok(data) => {
-                    cpu.fpu.store_raw::<F>(rd, data.truncate_to());
-                }
-                Err(err) => {
-                    cpu.pending_tval = Some(addr);
-                    return Err(Exception::from_memory_err(err));
-                }
-            }
-        } else {
-            std::unreachable!();
-        }
-        Ok(())
+        let val = cpu.reg_file.read(rs1, 0).0;
+        let addr = wrapping_add_as_signed(val, imm); // imm has been sign_extended
+        super::exec_core::handle_float_load::<F>(cpu, addr, rd)
     })
 }
 
@@ -83,20 +73,14 @@ where
     F: FloatPoint,
 {
     normal_float_exec(cpu, |cpu| {
-        if let RVInstrInfo::S { rs1, rs2, imm } = info {
-            let addr = cpu.reg_file.read(rs1, 0).0;
-            let val: F::BitsType = cpu.fpu.load_raw(rs2).truncate_to();
-            let addr = wrapping_add_as_signed(addr, imm); // imm has been sign_extended
+        let RVInstrInfo::S { rs1, rs2, imm } = info else {
+            debug_unreachable!();
+        };
 
-            let ret = cpu.memory.write(addr, val, &mut cpu.csr);
-            if let Err(err) = ret {
-                cpu.pending_tval = Some(addr);
-                return Err(Exception::from_memory_err(err));
-            }
-        } else {
-            std::unreachable!();
-        }
-        Ok(())
+        let addr = cpu.reg_file.read(rs1, 0).0;
+        let val: F::BitsType = cpu.fpu.load_raw(rs2).truncate_to();
+        let addr = wrapping_add_as_signed(addr, imm); // imm has been sign_extended
+        super::exec_core::handle_float_store::<F>(cpu, addr, val)
     })
 }
 

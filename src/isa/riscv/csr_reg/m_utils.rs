@@ -6,3 +6,9 @@ impl Minstret {
         self.set_minstret(v);
     }
 }
+
+impl Misa {
+    pub fn c_enabled(&self) -> bool {
+        (self.get_extension() & 0b100) != 0
+    }
+}

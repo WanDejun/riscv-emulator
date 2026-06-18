@@ -146,6 +146,7 @@ impl TrapController {
     // ======================================
     //                 Common
     // ======================================
+    // TODO: Remove the `trap_value` argument to reduce confusion.
     pub fn try_send_trap_signal(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) -> bool {
         let level = cpu.csr.privelege_level();
 

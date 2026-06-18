@@ -1,6 +1,9 @@
-use crate::isa::{
-    ISATypes,
-    riscv::{decoder::DecodeInstr, executor::RVCPU, instruction::instr_table::RVInstrDesc},
+use crate::{
+    config::arch_config::WordType,
+    isa::{
+        ISATypes, InstrLen,
+        riscv::{decoder::DecodeInstr, executor::RVCPU, instruction::instr_table::RVInstrDesc},
+    },
 };
 
 mod cpu_tester;
@@ -16,14 +19,26 @@ pub mod trap;
 pub struct RiscvTypes;
 
 impl ISATypes for RiscvTypes {
-    const EBREAK: u32 = 0x00100073;
-
-    type RawInstr = RawInstrType;
+    type RawInstr = RawInstr;
     type ISADesc = RVInstrDesc;
     type DecodeRst = DecodeInstr;
     type StepException = trap::Exception;
-    type Decoder = decoder::Decoder;
     type CPU = RVCPU;
 }
 
-pub type RawInstrType = u32;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawInstr {
+    pub val: u32,
+}
+
+impl From<u32> for RawInstr {
+    fn from(value: u32) -> Self {
+        Self { val: value }
+    }
+}
+
+impl InstrLen for RawInstr {
+    fn len(&self) -> WordType {
+        if self.val & 0b11 == 0b11 { 4 } else { 2 }
+    }
+}
