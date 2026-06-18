@@ -13,6 +13,11 @@ use crate::{
 pub(in crate::isa::riscv) mod integer_impl;
 pub(in crate::isa::riscv) use integer_impl::*;
 
+#[inline]
+fn vector_register_group_overlaps(lhs: u8, lhs_lmul: u8, rhs: u8, rhs_lmul: u8) -> bool {
+    lhs < rhs.saturating_add(rhs_lmul) && rhs < lhs.saturating_add(lhs_lmul)
+}
+
 impl Vector {
     #[inline]
     pub(in crate::isa::riscv) fn exec_integer_vv<OpIVV>(
@@ -39,6 +44,76 @@ impl Vector {
             vstart,
         );
         let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_gather_vv<OpIVV>(
+        &mut self,
+        vs1: u8,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVV: VectorOpIntegerGatherVV,
+    {
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        if vector_register_group_overlaps(vd, lmul, vs1, lmul)
+            || vector_register_group_overlaps(vd, lmul, vs2, lmul)
+        {
+            return Err(Exception::IllegalInstruction);
+        }
+        let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs1_ref = VGFRef::new(&vs1_data, sew, lmul, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_gather_ei16_vv<OpIVV>(
+        &mut self,
+        vs1: u8,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVV: VectorOpIntegerGatherEI16VV,
+    {
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        if vector_register_group_overlaps(vd, lmul, vs1, lmul)
+            || vector_register_group_overlaps(vd, lmul, vs2, lmul)
+        {
+            return Err(Exception::IllegalInstruction);
+        }
+        let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs1_ref = VGFRef::new(&vs1_data, Vsew::E16.into_byte_width(), lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
@@ -90,6 +165,37 @@ impl Vector {
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        OpIVX::exec(x1, &vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_gather_vx<OpIVX>(
+        &mut self,
+        x1: WordType,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVX: VectorOpIntegerVX,
+    {
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        if vector_register_group_overlaps(vd, lmul, vs2, lmul) {
+            return Err(Exception::IllegalInstruction);
+        }
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
@@ -164,6 +270,56 @@ impl Vector {
         let old_vd_ref = VGFRef::new(&vd_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVX::exec(x1, &vs2_ref, &old_vd_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_slideup<OpIVX>(
+        &mut self,
+        offset: WordType,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVX: VectorOpIntegerVXV,
+    {
+        let lmul = self.config.vlmul.get_lmul();
+        if vd < vs2.saturating_add(lmul) && vs2 < vd.saturating_add(lmul) {
+            return Err(Exception::IllegalInstruction);
+        }
+        self.exec_integer_vxv::<OpIVX>(offset, vs2, vd, enable_mask, vstart)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_integer_slidedown<OpIVX>(
+        &mut self,
+        offset: WordType,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        OpIVX: VectorOpIntegerVX,
+    {
+        let lmul = self.config.vlmul.get_lmul();
+        if vector_register_group_overlaps(vd, lmul, vs2, lmul) {
+            return Err(Exception::IllegalInstruction);
+        }
+        let (sew, lmul) = (self.config.vsew.into_byte_width(), lmul);
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        OpIVX::exec(offset, &vs2_ref, &mut vd_ref, &mask)
     }
 
     #[inline]

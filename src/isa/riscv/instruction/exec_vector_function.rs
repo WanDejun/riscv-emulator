@@ -13,13 +13,13 @@ use crate::{
             vector::{
                 VectorMemException,
                 arithmetic::{
-                    VectorOpBitVV, VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM,
-                    VectorOpIntegerMaskVX, VectorOpIntegerMaskVXM, VectorOpIntegerV,
-                    VectorOpIntegerVV, VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX,
-                    VectorOpIntegerVXM, VectorOpIntegerVXV, VectorOpWideningIntegerVV,
-                    VectorOpWideningIntegerVVV, VectorOpWideningIntegerVX,
-                    VectorOpWideningIntegerVXV, VectorOpWideningIntegerWV,
-                    VectorOpWideningIntegerWX,
+                    VectorOpBitVV, VectorOpIntegerGatherEI16VV, VectorOpIntegerGatherVV,
+                    VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
+                    VectorOpIntegerMaskVXM, VectorOpIntegerV, VectorOpIntegerVV,
+                    VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX, VectorOpIntegerVXM,
+                    VectorOpIntegerVXV, VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
+                    VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
+                    VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
                 },
                 types::Vsew,
             },
@@ -568,6 +568,107 @@ where
     })
 }
 
+pub(super) fn vec_integer_slideup_op_vx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVXV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            if vd == vs2 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_integer_slideup::<OpIVX>(x1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_slideup_op_vi<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVXV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: uimm,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_integer_slideup::<OpIVX>(uimm as WordType, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_slidedown_op_vx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .exec_integer_slidedown::<OpIVX>(x1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_slidedown_op_vi<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: uimm,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_integer_slidedown::<OpIVX>(uimm as WordType, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
 pub(super) fn vec_widening_integer_op_vv<OpIVV>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
@@ -758,6 +859,112 @@ where
         {
             cpu.vector
                 .exec_integer_vx::<OpIVX>(uimm as WordType, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_gather_op_vv<OpIVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVV: VectorOpIntegerGatherVV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            if vd == vs2 || vd == vs1 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_integer_gather_vv::<OpIVV>(vs1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_gather_op_ei16_vv<OpIVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVV: VectorOpIntegerGatherEI16VV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            if vd == vs2 || vd == vs1 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_integer_gather_ei16_vv::<OpIVV>(vs1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_gather_op_vx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            if vd == vs2 {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector
+                .exec_integer_gather_vx::<OpIVX>(x1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_gather_op_vi<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: imm,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_integer_gather_vx::<OpIVX>(imm as WordType, vs2, vd, !vm, vstart)
         } else {
             unreachable!()
         }

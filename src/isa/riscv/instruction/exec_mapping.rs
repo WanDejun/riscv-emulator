@@ -471,8 +471,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WV => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WV => unimplemented!(),
 
-        RiscvInstr::VRGATHER_VV => unimplemented!(), // Vector Gather Instructions
-        RiscvInstr::VRGATHEREI16_VV => unimplemented!(),
+        RiscvInstr::VRGATHER_VV => vec_integer_gather_op_vv::<VectorOpRGatherVV>, // Vector Gather Instructions
+        RiscvInstr::VRGATHEREI16_VV => vec_integer_gather_op_ei16_vv::<VectorOpRGatherEI16VV>,
 
         //-------- OPIVX (0x100) --------
         RiscvInstr::VADD_VX => vec_integer_op_vx::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
@@ -559,10 +559,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WX => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WX => unimplemented!(),
 
-        RiscvInstr::VSLIDEUP_VX => unimplemented!(), // Vector Slide Instructions
-        RiscvInstr::VSLIDEDOWN_VX => unimplemented!(),
+        RiscvInstr::VSLIDEUP_VX => vec_integer_slideup_op_vx::<VectorOpSlideUp>, // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VX => vec_integer_slidedown_op_vx::<VectorOpSlideDown>,
 
-        RiscvInstr::VRGATHER_VX => unimplemented!(), // Vector Gather Instructions
+        RiscvInstr::VRGATHER_VX => vec_integer_gather_op_vx::<VectorOpRGatherVX>, // Vector Gather Instructions
 
         //-------- OPIVI (func3 = 0b011) --------
         RiscvInstr::VADD_VI => vec_integer_op_vi_signed::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
@@ -613,10 +613,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WI => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WI => unimplemented!(),
 
-        RiscvInstr::VSLIDEUP_VI => unimplemented!(), // Vector Slide Instructions
-        RiscvInstr::VSLIDEDOWN_VI => unimplemented!(),
+        RiscvInstr::VSLIDEUP_VI => vec_integer_slideup_op_vi::<VectorOpSlideUp>, // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VI => vec_integer_slidedown_op_vi::<VectorOpSlideDown>,
 
-        RiscvInstr::VRGATHER_VI => unimplemented!(), // Vector Gather Instructions
+        RiscvInstr::VRGATHER_VI => vec_integer_gather_op_vi::<VectorOpRGatherVI>, // Vector Gather Instructions
 
         RiscvInstr::VMV1R_V => vec_whole_register_move_op_v::<1>, // Whole Vector Register Move
         RiscvInstr::VMV2R_V => vec_whole_register_move_op_v::<2>,

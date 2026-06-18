@@ -789,6 +789,52 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
     }
 }
 
+pub(in crate::isa::riscv) trait VectorOpIntegerGatherVV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_gather_vv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+            0,
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerGatherEI16VV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_gather_ei16_vv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+            0,
+        )
+    }
+}
+
 macro_rules! impl_vector_op_integer_vv_binary {
     ($op_ty:ty, $exec_ty:ident) => {
         impl VectorOpIntegerVV for $op_ty {
@@ -1085,6 +1131,88 @@ where
     let vs2 = vs2.as_slice::<Dst>();
     for (index, element) in vd.iter_mut().enumerate() {
         mask.element_load(element, Exec::exec(vs2[index], scalar)?, index);
+    }
+    Ok(())
+}
+
+// (vs1[i] >= VLMAX) ? 0 : vs2[vs1[i]]
+fn vector_gather_value<T>(vs2: &[T], vs1_as_index: u128) -> T
+where
+    T: Copy + Default,
+{
+    // vs2 size is VLMAX(VLEN * LMUL / SEW). If vs2.get() return `None`, means vs1[i] >= VLMAX
+    vs2.get(vs1_as_index as usize).copied().unwrap_or_default()
+}
+
+fn vector_op_gather_vv<Idx, T>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    Idx: Copy + Into<u128>,
+    T: Copy + Default,
+{
+    let vs1 = vs1.as_slice::<Idx>();
+    let vs2 = vs2.as_slice::<T>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, vector_gather_value(vs2, vs1[index].into()), index);
+    }
+    Ok(())
+}
+
+fn vector_op_gather_vx<T>(
+    x1: WordType,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let vs2 = vs2.as_slice::<T>();
+    let value = vector_gather_value(vs2, x1 as u128);
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
+fn vector_op_slideup<T>(
+    offset: usize,
+    vs2: &VGFRef,
+    _old_vd: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let vs2 = vs2.as_slice::<T>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        if index < offset {
+            continue;
+        }
+        let value = vs2.get(index - offset).copied().unwrap_or_default();
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
+fn vector_op_slidedown<T>(
+    offset: usize,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let vs2 = vs2.as_slice::<T>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        let value = vs2.get(index + offset).copied().unwrap_or_default();
+        mask.element_load(element, value, index);
     }
     Ok(())
 }
@@ -1686,6 +1814,12 @@ pub(in crate::isa::riscv) struct VectorOpZextVf8;
 pub(in crate::isa::riscv) struct VectorOpSextVf2;
 pub(in crate::isa::riscv) struct VectorOpSextVf4;
 pub(in crate::isa::riscv) struct VectorOpSextVf8;
+pub(in crate::isa::riscv) struct VectorOpRGatherVV;
+pub(in crate::isa::riscv) struct VectorOpRGatherVX;
+pub(in crate::isa::riscv) struct VectorOpRGatherVI;
+pub(in crate::isa::riscv) struct VectorOpRGatherEI16VV;
+pub(in crate::isa::riscv) struct VectorOpSlideUp;
+pub(in crate::isa::riscv) struct VectorOpSlideDown;
 
 impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
@@ -1859,6 +1993,108 @@ impl_vector_op_integer_v_unary_ext!(
     [(1, 4, u8, u32), (2, 8, u16, u64)]
 );
 impl_vector_op_integer_v_unary_ext!(VectorOpSextVf8, ExecSext, 8, [(1, 8, u8, u64)]);
+
+macro_rules! impl_vector_op_integer_gather_vv {
+    ($op_ty:ty) => {
+        impl VectorOpIntegerGatherVV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vs2.sew && vs2.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| {
+                    vector_op_gather_vv::<T, T>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_gather_vx {
+    ($op_ty:ty) => {
+        impl VectorOpIntegerVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| { vector_op_gather_vx::<T>(x1, vs2, vd, mask) })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_gather_vi {
+    ($op_ty:ty) => {
+        impl VectorOpIntegerVX for $op_ty {
+            fn exec(
+                imm: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| { vector_op_gather_vx::<T>(imm, vs2, vd, mask) })
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_gather_ei16_vv {
+    ($op_ty:ty) => {
+        impl VectorOpIntegerGatherEI16VV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == 2 && vs2.sew == vd.sew);
+                dispatch_integer_sew!(vd.sew, |T| {
+                    vector_op_gather_vv::<u16, T>(vs1, vs2, vd, mask)
+                })
+            }
+        }
+    };
+}
+
+impl_vector_op_integer_gather_vv!(VectorOpRGatherVV);
+impl_vector_op_integer_gather_vx!(VectorOpRGatherVX);
+impl_vector_op_integer_gather_ei16_vv!(VectorOpRGatherEI16VV);
+impl_vector_op_integer_gather_vi!(VectorOpRGatherVI);
+
+impl VectorOpIntegerVXV for VectorOpSlideUp {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs2.sew == old_vd.sew && old_vd.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_slideup::<T>(x1 as usize, vs2, old_vd, vd, mask)
+        })
+    }
+}
+
+impl VectorOpIntegerVX for VectorOpSlideDown {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs2.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_slidedown::<T>(x1 as usize, vs2, vd, mask)
+        })
+    }
+}
 
 #[cfg(test)]
 #[path = "integer_test.rs"]
