@@ -171,10 +171,11 @@ impl CompressedDecoder {
     pub fn decode(&self, raw: RawInstr) -> Option<DecodeInstr> {
         for (mask, instr, fmt) in self.masks.iter() {
             if mask.matches(raw.val) {
-                return Some(DecodeInstr(
-                    *instr,
-                    decode_compressed_info(raw.val, *instr, *fmt),
-                ));
+                return Some(DecodeInstr {
+                    instr: *instr,
+                    info: decode_compressed_info(raw.val, *instr, *fmt),
+                    len: 2,
+                });
             }
         }
 

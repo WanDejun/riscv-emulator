@@ -343,8 +343,9 @@ fn format_instr_detailed(instr: &DbgInstrLine) -> impl std::fmt::Display {
 }
 
 fn format_raw(raw: Option<RawInstr>) -> impl std::fmt::Display {
-    // TODO: handle instr len here
+    use riscv_emulator::isa::InstrLen;
     match raw {
+        Some(raw) if raw.len() == 2 => palette.data(&format!("0x{:04x}", raw.val)).to_string(),
         Some(raw) => palette.data(&format!("0x{:08x}", raw.val)).to_string(),
         None => palette.invalid("<invalid>").to_string(),
     }
@@ -354,7 +355,7 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
     if decode_instr.is_none() {
         return format!("{}", palette.invalid("<invalid instruction>"));
     }
-    let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
+    let DecodeInstr { instr, info, .. } = unsafe { decode_instr.unwrap_unchecked() };
     match info {
         RVInstrInfo::I { rd, rs1, imm } => match instr {
             RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {

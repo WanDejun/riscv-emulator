@@ -1,4 +1,5 @@
 use crate::isa::{
+    InstrLen,
     riscv::{
         RawInstr,
         decoder::{DecodeInstr, decode_info},
@@ -18,7 +19,11 @@ impl MaskDecoder {
     pub fn decode(&self, raw: RawInstr) -> Option<DecodeInstr> {
         for (mask, instr, fmt) in self.masks.iter() {
             if mask.matches(raw.val) {
-                return Some(DecodeInstr(*instr, decode_info(raw.val, *instr, *fmt)));
+                return Some(DecodeInstr {
+                    instr: *instr,
+                    info: decode_info(raw.val, *instr, *fmt),
+                    len: raw.len(),
+                });
             }
         }
 

@@ -186,7 +186,7 @@ where
     G: FnOnce(CPUChecker) -> CPUChecker,
 {
     let mut cpu = build(TestCPUBuilder::new()).build();
-    let DecodeInstr(instr, info) = cpu.decoder.decode(raw_instr.into()).unwrap();
+    let DecodeInstr { instr, info, .. } = cpu.decoder.decode(raw_instr.into()).unwrap();
     // FIXME: [`RVCPU::execute`] don't handle the raised exception
     cpu.execute(instr, info).unwrap();
     check(CPUChecker::new(&mut cpu));

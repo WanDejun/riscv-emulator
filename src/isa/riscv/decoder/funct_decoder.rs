@@ -1,11 +1,14 @@
 use smallvec::SmallVec;
 
-use crate::isa::riscv::{
-    RawInstr,
-    decoder::{DecodeInstr, decode_info},
-    instruction::{
-        instr_table::{RVInstrDesc, RiscvInstr},
-        *,
+use crate::isa::{
+    InstrLen,
+    riscv::{
+        RawInstr,
+        decoder::{DecodeInstr, decode_info},
+        instruction::{
+            instr_table::{RVInstrDesc, RiscvInstr},
+            *,
+        },
     },
 };
 
@@ -110,6 +113,7 @@ impl Decoder {
     }
 
     pub fn decode(&self, instr: RawInstr) -> Option<DecodeInstr> {
+        let len = instr.len();
         let instr = instr.val;
 
         let opcode = (instr & 0b1111111) as u8;
@@ -127,6 +131,10 @@ impl Decoder {
             }
         };
 
-        return Some(DecodeInstr(instr_kind, decode_info(instr, instr_kind, fmt)));
+        return Some(DecodeInstr {
+            instr: instr_kind,
+            info: decode_info(instr, instr_kind, fmt),
+            len,
+        });
     }
 }

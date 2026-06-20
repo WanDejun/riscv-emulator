@@ -8,6 +8,7 @@ use riscv_emulator::cli_coordinator::CliCoordinator;
 use riscv_emulator::{
     board::Board,
     config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, WordType},
+    isa::InstrLen,
     isa::riscv::{
         csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
         debugger::{Address, Debugger},
@@ -183,17 +184,23 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 
     fn handle_list(&mut self) -> Result<CommandOutput, String> {
-        const NUM_LINES: WordType = 20;
+        const NUM_LINES: usize = 20;
 
-        let pc = self.dbg.read_pc();
-        // FIXME: Cannot handle compressed instructions.
-        let start_addr = pc.saturating_sub(NUM_LINES * 4 / 2);
+        // Variable-length instructions make it impossible to reliably disassemble backwards,
+        // unless record decode result or decode from the last symbol.
+        let mut addr = self.dbg.read_pc();
         let mut lines = Vec::new();
 
-        for i in 0..NUM_LINES {
-            let addr = start_addr + i * 4;
-
-            lines.push(self.instr_from_addr(addr));
+        for _ in 0..NUM_LINES {
+            let line = self.instr_from_addr(addr);
+            let step = line
+                .decoded
+                .as_ref()
+                .map(|d| d.len)
+                .or_else(|| line.raw.map(|r| r.len()))
+                .unwrap_or(2);
+            lines.push(line);
+            addr = addr.wrapping_add(step);
         }
         Ok(CommandOutput::CodeList(lines))
     }
@@ -532,5 +539,65 @@ mod tests {
                 .unwrap(),
             CommandOutput::FTraceShow(Vec::new())
         );
+    }
+
+    fn board_with_program(instrs: &[u16]) -> VirtBoard {
+        let mut bytes = Vec::new();
+        for half in instrs {
+            bytes.extend_from_slice(&half.to_le_bytes());
+        }
+        VirtBoard::from_binary(&bytes)
+    }
+
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn test_list_advances_by_instruction_length() {
+        use riscv_emulator::ram_config::BASE_ADDR;
+
+        // c.addi s0,5 (2B) | addi x2,x3,-5 (4B) | c.li a0,-3 (2B)
+        let mut board = board_with_program(&[0x0415, 0x8113, 0xffb1, 0x5575]);
+        let mut handler = Handler::new(&mut board);
+
+        let CommandOutput::CodeList(lines) = handler.handle(Cli::List).unwrap() else {
+            panic!("expected a code list");
+        };
+
+        // The listing starts at the current PC and walks forward by each
+        // instruction's real length, mixing 2- and 4-byte instructions.
+        assert_eq!(lines[0].addr, BASE_ADDR);
+        assert_eq!(lines[0].decoded.unwrap().len, 2);
+        assert!(lines[0].is_current_pc);
+
+        assert_eq!(lines[1].addr, BASE_ADDR + 2);
+        assert_eq!(lines[1].decoded.unwrap().len, 4);
+        assert!(!lines[1].is_current_pc);
+
+        assert_eq!(lines[2].addr, BASE_ADDR + 6);
+        assert_eq!(lines[2].decoded.unwrap().len, 2);
+        assert_eq!(lines[3].addr, BASE_ADDR + 8);
+    }
+
+    #[test]
+    #[cfg(feature = "riscv64")]
+    fn test_decoded_length_in_history() {
+        use riscv_emulator::ram_config::BASE_ADDR;
+
+        // c.li a0,-3 (2B) then c.addi s0,5 (2B): stepping must advance PC by 2.
+        let mut board = board_with_program(&[0x5575, 0x0415]);
+        let mut handler = Handler::new(&mut board);
+
+        handler.handle(Cli::Si).unwrap();
+
+        let CommandOutput::History(history) = handler.handle(Cli::History { count: 8 }).unwrap()
+        else {
+            panic!("expected history");
+        };
+
+        // The single executed instruction was compressed; its recorded entry
+        // must decode with a 2-byte length, and the PC advanced by 2.
+        let first = history.first().expect("history should not be empty");
+        assert_eq!(first.addr, BASE_ADDR);
+        assert_eq!(first.decoded.unwrap().len, 2);
+        assert_eq!(handler.dbg.read_pc(), BASE_ADDR + 2);
     }
 }

@@ -21,7 +21,11 @@ mod funct_decoder;
 mod mask_decoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DecodeInstr(pub RiscvInstr, pub RVInstrInfo);
+pub struct DecodeInstr {
+    pub instr: RiscvInstr,
+    pub info: RVInstrInfo,
+    pub len: WordType,
+}
 
 impl Cacheable for DecodeInstr {
     const ADDR_SHIFT_BITS: usize = 1;
@@ -29,7 +33,7 @@ impl Cacheable for DecodeInstr {
 
 impl Display for DecodeInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}, {:?}", self.0, self.1)
+        write!(f, "{:?}, {:?}", self.instr, self.info)
     }
 }
 
@@ -284,8 +288,16 @@ mod tests {
         }
 
         fn check(&mut self, instr: u32, expected: RiscvInstr, expected_info: RVInstrInfo) {
-            let result = self.decoder.decode(instr.into()).unwrap();
-            assert_eq!(result, DecodeInstr(expected, expected_info));
+            let raw: RawInstr = instr.into();
+            let result = self.decoder.decode(raw).unwrap();
+            assert_eq!(
+                result,
+                DecodeInstr {
+                    instr: expected,
+                    info: expected_info,
+                    len: raw.len(),
+                }
+            );
         }
     }
 

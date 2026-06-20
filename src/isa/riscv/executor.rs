@@ -230,7 +230,8 @@ impl RVCPU {
             }
         }
 
-        let DecodeInstr(instr, info) = if let Some(decode_instr) = self.icache.get(self.pc) {
+        let DecodeInstr { instr, info, len } = if let Some(decode_instr) = self.icache.get(self.pc)
+        {
             self.icache_cnt += 1;
             decode_instr
         } else {
@@ -277,7 +278,11 @@ impl RVCPU {
 
         if self.debug {
             self.debug_info.last_instr = ExcuteInstrInfo {
-                instr: Some(DecodeInstr(instr, info.clone())),
+                instr: Some(DecodeInstr {
+                    instr,
+                    info: info.clone(),
+                    len,
+                }),
                 trap: false,
             };
         }

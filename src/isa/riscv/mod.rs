@@ -33,12 +33,22 @@ pub struct RawInstr {
 
 impl From<u32> for RawInstr {
     fn from(value: u32) -> Self {
-        Self { val: value }
+        if instr_len(value) == 2 {
+            Self {
+                val: value & 0xFFFF,
+            }
+        } else {
+            Self { val: value }
+        }
     }
+}
+
+fn instr_len(instr: u32) -> WordType {
+    if instr & 0b11 == 0b11 { 4 } else { 2 }
 }
 
 impl InstrLen for RawInstr {
     fn len(&self) -> WordType {
-        if self.val & 0b11 == 0b11 { 4 } else { 2 }
+        instr_len(self.val)
     }
 }
