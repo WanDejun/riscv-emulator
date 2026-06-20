@@ -10,8 +10,8 @@ use crate::{
             RawInstr,
             decoder::compress_decoder::CompressedDecoder,
             instruction::{InstrFormat, RVInstrInfo, instr_table::*},
+            isa_builder::{Extension, ISABuilder, IsaParseError},
         },
-        utils::ISABuilder,
     },
     utils::sign_extend,
 };
@@ -41,39 +41,49 @@ pub struct Decoder {
     funct3_decoder: funct_decoder::Decoder,
     mask_decoder: mask_decoder::MaskDecoder,
     compress_decoder: compress_decoder::CompressedDecoder,
+    /// `misa` extension bitmap of the ISA this decoder was built for.
+    extension_bits: WordType,
 }
 
 impl Decoder {
     pub fn new() -> Self {
-        let isa_builder = ISABuilder::new()
-            .add(TABLE_RV32I)
-            .add(TABLE_RV64I)
-            .add(TABLE_RVZIFENCEI)
-            .add(TABLE_RV32M)
-            .add(TABLE_RV64M)
-            .add(TABLE_RVZICSR)
-            .add(TABLE_RVSYSTEM)
-            .add(TABLE_RV32F)
-            .add(TABLE_RV64F)
-            .add(TABLE_RV32D)
-            .add(TABLE_RV64D)
-            .add(TABLE_RVS)
-            .add(TABLE_RV32A)
-            .add(TABLE_RV64A)
-            .add(TABLE_RVC)
-            // .add(TABLE_RV32C)  // 32 and 64 bit version is conflicting in C extension.
-            .add(TABLE_RV64C)
-            // .add(TABLE_RV32C_F)
-            .add(TABLE_RVC_D)
-            // Canonical illegal instruction (0x0000); see data/instr_dict_illegal.json.
-            .add(TABLE_RVILLEGAL);
+        Self::from_builder(
+            ISABuilder::new()
+                .add(Extension::M)
+                .add(Extension::A)
+                .add(Extension::D)
+                .add(Extension::C)
+                .add(Extension::Zifencei),
+        )
+    }
 
+    /// Builds a decoder for the ISA described by `isa`,
+    /// e.g. `"RV64IMAFDC_Zicsr_Zifencei"`. See [`ISABuilder`].
+    pub fn from_isa_str(isa: &str) -> Result<Self, IsaParseError> {
+        Ok(Self::from_builder(isa.parse::<ISABuilder>()?))
+    }
+
+    /// The `misa` extension bitmap of the ISA this decoder decodes.
+    pub fn extension_bits(&self) -> WordType {
+        self.extension_bits
+    }
+
+    fn from_builder(builder: ISABuilder) -> Self {
+        let extension_bits = builder.extension_bits();
+
+        #[allow(unused_mut)]
+        let mut isa = builder.build();
+        // Custom instructions are not a standard extension and have no place in
+        // an ISA string, so they live outside `ISABuilder`.
         #[cfg(feature = "custom-instr")]
-        let isa_builder = isa_builder.add(TABLE_RVCUSTOM0).add(TABLE_RVCUSTOM1);
+        {
+            isa.extend_from_slice(TABLE_RVCUSTOM0);
+            isa.extend_from_slice(TABLE_RVCUSTOM1);
+        }
 
-        let isa = isa_builder.build();
-
-        Self::from_isa(isa)
+        let mut decoder = Self::from_isa(isa);
+        decoder.extension_bits = extension_bits;
+        decoder
     }
 }
 
@@ -99,6 +109,9 @@ impl Decoder {
                     .filter(|d| !is_compressed(d) && !d.use_mask)
                     .cloned(),
             ),
+            // Unknown when building from a raw instruction list; the
+            // builder-aware constructors set this via `from_builder`.
+            extension_bits: 0,
         }
     }
 

@@ -72,14 +72,13 @@ pub struct RVCPU {
 
 impl RVCPU {
     pub(crate) fn from_vaddr_manager(v_memory: VirtAddrManager) -> Self {
+        Self::from_decoder(Decoder::new(), v_memory)
+    }
+
+    pub(crate) fn from_decoder(decoder: Decoder, v_memory: VirtAddrManager) -> Self {
         let mut csr = CsrRegFile::new();
 
-        // TODO: Record extensions in Decoder.
-        let ext = "ACDFIMSU"
-            .chars()
-            .into_iter()
-            .map(|c| c as WordType - 'A' as WordType)
-            .fold(0, |acc, c| acc | (1 << c));
+        let ext = decoder.extension_bits();
         csr.ctx.extension = ext;
 
         let mxl = if WordType::BITS == 32 {
@@ -110,7 +109,7 @@ impl RVCPU {
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
-            decoder: Decoder::new(),
+            decoder,
             csr: csr,
             icache: SetCache::new(),
             fpu,
