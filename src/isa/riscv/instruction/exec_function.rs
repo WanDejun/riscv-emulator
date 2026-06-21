@@ -1,5 +1,5 @@
 use std::{
-    hint::{cold_path, unlikely, unreachable_unchecked},
+    hint::{unlikely, unreachable_unchecked},
     marker::PhantomData,
 };
 
@@ -9,10 +9,7 @@ use super::normal_exec;
 use crate::{
     config::arch_config::{SignedWordType, WordType},
     isa::riscv::{
-        csr_reg::{
-            NamedCsrReg,
-            csr_macro::{Minstret, Misa},
-        },
+        csr_reg::{NamedCsrReg, csr_macro::Minstret},
         executor::RVCPU,
         instruction::RVInstrInfo,
         trap::Exception,
@@ -67,10 +64,7 @@ where
             let target = cpu.pc.wrapping_add(imm); // imm has been sign_extended
 
             // Like JAL(R), branch instructions will generate an exception.
-            if !cpu.csr.get_by_type_existing::<Misa>().c_enabled() && (target & 0x3) != 0 {
-                cold_path();
-                return Err(Exception::InstructionMisaligned);
-            }
+            super::check_jump_alignment(cpu, target)?;
 
             cpu.pc = target;
         } else {

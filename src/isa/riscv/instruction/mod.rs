@@ -11,12 +11,21 @@ use crate::{
     config::arch_config::WordType,
     isa::riscv::{
         self,
-        csr_reg::csr_macro::{Minstret, Mstatus},
+        csr_reg::csr_macro::{Minstret, Misa, Mstatus},
         executor::RVCPU,
         instruction::exec_function::save_fflags_to_cpu,
+        trap::Exception,
     },
 };
 
+#[inline]
+pub(super) fn check_jump_alignment(cpu: &mut RVCPU, target: WordType) -> Result<(), Exception> {
+    if !cpu.csr.get_by_type_existing::<Misa>().c_enabled() && (target & 0x3) != 0 {
+        cpu.pending_tval = Some(target);
+        return Err(Exception::InstructionMisaligned);
+    }
+    Ok(())
+}
 /// A helper function for normal instruction execution.
 ///
 /// It takes a closure `f` that performs the actual instruction logic.
