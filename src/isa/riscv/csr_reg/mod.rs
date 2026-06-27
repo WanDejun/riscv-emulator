@@ -7,7 +7,7 @@ pub mod csr_macro;
 pub mod utils;
 
 use self::{
-    csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, resolve_shadow_addr},
+    csr_macro::{CSR_REG_TABLE, Fcsr, Mstatus, Satp, Vcsr, resolve_shadow_addr},
     read_validator::ReadValidator,
     write_validator::WriteValidator,
 };
@@ -370,10 +370,10 @@ impl CsrRegFile {
             let fcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
             fcsr.value = data & 0xFF;
         } else if addr == csr_index::vxsat {
-            let vcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            let vcsr = self.table[Vcsr::get_index() as usize].as_mut().unwrap();
             vcsr.value = (vcsr.value & !0b1) | (data & 0b1);
         } else if addr == csr_index::vxrm {
-            let vcsr = self.table[Fcsr::get_index() as usize].as_mut().unwrap();
+            let vcsr = self.table[Vcsr::get_index() as usize].as_mut().unwrap();
             vcsr.value = (vcsr.value & !0b110) | ((data & 0b11) << 1);
         } else {
             if let Some(csr) = self.table[addr as usize].as_mut() {
@@ -405,9 +405,9 @@ impl CsrRegFile {
         } else if addr == csr_index::frm {
             Some((self.table[Fcsr::get_index() as usize].unwrap().value() >> 5) & 0b111)
         } else if addr == csr_index::vxsat {
-            Some(self.table[Fcsr::get_index() as usize].unwrap().value() & 0b1)
+            Some(self.table[Vcsr::get_index() as usize].unwrap().value() & 0b1)
         } else if addr == csr_index::vxrm {
-            Some((self.table[Fcsr::get_index() as usize].unwrap().value() >> 1) & 0b11)
+            Some((self.table[Vcsr::get_index() as usize].unwrap().value() >> 1) & 0b11)
         } else {
             if let Some(base_addr) = resolve_shadow_addr(addr) {
                 // This is a shadow CSR.
@@ -546,6 +546,20 @@ mod test {
         // so only test CsrRegfile API.
         reg.write_uncheck_privilege(Cycle::get_index(), 3);
         assert_eq!(reg.read_uncheck_privilege(Cycle::get_index()).unwrap(), 2);
+    }
+
+    #[test]
+    fn test_vector_fixed_point_shadow_csr() {
+        let mut reg = CsrRegFile::new();
+
+        reg.write_uncheck_privilege(csr_index::vxrm, 0b10);
+        reg.write_uncheck_privilege(csr_index::vxsat, 1);
+
+        assert_eq!(reg.read_uncheck_privilege(csr_index::vxrm).unwrap(), 0b10);
+        assert_eq!(reg.read_uncheck_privilege(csr_index::vxsat).unwrap(), 1);
+        assert_eq!(reg.get_by_type_existing::<Vcsr>().get_vxrm(), 0b10);
+        assert_eq!(reg.get_by_type_existing::<Vcsr>().get_vxsat(), 1);
+        assert_eq!(reg.read_uncheck_privilege(Fcsr::get_index()).unwrap(), 0);
     }
 
     #[test]

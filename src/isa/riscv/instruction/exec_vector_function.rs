@@ -5,7 +5,7 @@ use crate::{
         riscv::{
             csr_reg::{
                 NamedCsrReg,
-                csr_macro::{Vl, Vstart, Vtype},
+                csr_macro::{Vcsr, Vl, Vstart, Vtype},
             },
             executor::RVCPU,
             instruction::{RVInstrInfo, exec_function::ExecMove, normal_vector_exec},
@@ -14,17 +14,19 @@ use crate::{
                 VectorMemException,
                 arithmetic::{
                     VectorOpAdc, VectorOpBitVV, VectorOpCompressVm, VectorOpCpopM, VectorOpFirstM,
-                    VectorOpIdV, VectorOpIntegerMaskVV, VectorOpIntegerMaskVX, VectorOpIntegerV,
-                    VectorOpIntegerVV, VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX,
-                    VectorOpIntegerVXM, VectorOpIntegerVXV, VectorOpIotaM, VectorOpMadc,
-                    VectorOpMerge, VectorOpMsbc, VectorOpMsbfM, VectorOpMsifM, VectorOpMsofM,
-                    VectorOpNsra, VectorOpNsrl, VectorOpRGatherEI16VV, VectorOpRGatherVI,
-                    VectorOpRGatherVV, VectorOpRGatherVX, VectorOpSlideDown, VectorOpSlideUp,
-                    VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
-                    VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
-                    VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
+                    VectorOpFixedPointNarrowingVX, VectorOpFixedPointNarrowingWV,
+                    VectorOpFixedPointVV, VectorOpFixedPointVX, VectorOpIdV, VectorOpIntegerMaskVV,
+                    VectorOpIntegerMaskVX, VectorOpIntegerV, VectorOpIntegerVV, VectorOpIntegerVVM,
+                    VectorOpIntegerVVV, VectorOpIntegerVX, VectorOpIntegerVXM, VectorOpIntegerVXV,
+                    VectorOpIotaM, VectorOpMadc, VectorOpMerge, VectorOpMsbc, VectorOpMsbfM,
+                    VectorOpMsifM, VectorOpMsofM, VectorOpNsra, VectorOpNsrl,
+                    VectorOpRGatherEI16VV, VectorOpRGatherVI, VectorOpRGatherVV, VectorOpRGatherVX,
+                    VectorOpSlideDown, VectorOpSlideUp, VectorOpWideningIntegerVV,
+                    VectorOpWideningIntegerVVV, VectorOpWideningIntegerVX,
+                    VectorOpWideningIntegerVXV, VectorOpWideningIntegerWV,
+                    VectorOpWideningIntegerWX,
                 },
-                types::Vsew,
+                types::{FixedPointRoundingMode, Vsew},
             },
         },
     },
@@ -762,6 +764,196 @@ where
         {
             cpu.vector
                 .exec_integer_vx::<OpIVX>(uimm as WordType, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+fn fixed_point_rounding_mode(cpu: &mut RVCPU) -> FixedPointRoundingMode {
+    match cpu.csr.get_by_type_existing::<Vcsr>().get_vxrm() {
+        0 => FixedPointRoundingMode::RoundToNearestUp,
+        1 => FixedPointRoundingMode::RoundToNearestEven,
+        2 => FixedPointRoundingMode::RoundDown,
+        3 => FixedPointRoundingMode::RoundToOdd,
+        _ => unreachable!(),
+    }
+}
+
+fn finish_fixed_point_op(cpu: &mut RVCPU, saturated: bool) {
+    if saturated {
+        cpu.csr.get_by_type_existing::<Vcsr>().set_vxsat_directly(1);
+    }
+}
+
+pub(super) fn vec_fixed_point_op_vv<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointVV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu
+                .vector
+                .exec_fixed_point_vv::<Op>(vs1, vs2, vd, !vm, round, vstart)?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_fixed_point_op_vx<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu
+                .vector
+                .exec_fixed_point_vx::<Op>(x1, vs2, vd, !vm, round, vstart)?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_fixed_point_op_vi<Op, const SIGNED: bool>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: imm5,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let imm = if SIGNED {
+                sign_extend(imm5 as WordType, 5)
+            } else {
+                imm5 as WordType
+            };
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu
+                .vector
+                .exec_fixed_point_vx::<Op>(imm, vs2, vd, !vm, round, vstart)?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_fixed_point_narrowing_op_wv<Op>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointNarrowingWV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu
+                .vector
+                .exec_fixed_point_narrowing_wv::<Op>(vs1, vs2, vd, !vm, round, vstart)?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_fixed_point_narrowing_op_wx<Op>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointNarrowingVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu
+                .vector
+                .exec_fixed_point_narrowing_vx::<Op>(x1, vs2, vd, !vm, round, vstart)?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_fixed_point_narrowing_op_wi<Op>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    Op: VectorOpFixedPointNarrowingVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: uimm,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let round = fixed_point_rounding_mode(cpu);
+            let saturated = cpu.vector.exec_fixed_point_narrowing_vx::<Op>(
+                uimm as WordType,
+                vs2,
+                vd,
+                !vm,
+                round,
+                vstart,
+            )?;
+            finish_fixed_point_op(cpu, saturated);
+            Ok(())
         } else {
             unreachable!()
         }

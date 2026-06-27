@@ -456,23 +456,23 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         }
 
-        RiscvInstr::VSADDU_VV => unimplemented!(), // Single-Width Saturating Add and Subtract
-        RiscvInstr::VSADD_VV => unimplemented!(),
-        RiscvInstr::VSSUBU_VV => unimplemented!(),
-        RiscvInstr::VSSUB_VV => unimplemented!(),
+        RiscvInstr::VSADDU_VV => vec_fixed_point_op_vv::<VectorOpSaddu>, // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VV => vec_fixed_point_op_vv::<VectorOpSadd>,
+        RiscvInstr::VSSUBU_VV => vec_fixed_point_op_vv::<VectorOpSsubu>,
+        RiscvInstr::VSSUB_VV => vec_fixed_point_op_vv::<VectorOpSsub>,
 
-        RiscvInstr::VAADDU_VV => unimplemented!(), // Single-Width Averaging Add and Subtract
-        RiscvInstr::VAADD_VV => unimplemented!(),
-        RiscvInstr::VASUBU_VV => unimplemented!(),
-        RiscvInstr::VASUB_VV => unimplemented!(),
+        RiscvInstr::VAADDU_VV => vec_fixed_point_op_vv::<VectorOpAaddu>, // Single-Width Averaging Add and Subtract
+        RiscvInstr::VAADD_VV => vec_fixed_point_op_vv::<VectorOpAadd>,
+        RiscvInstr::VASUBU_VV => vec_fixed_point_op_vv::<VectorOpAsubu>,
+        RiscvInstr::VASUB_VV => vec_fixed_point_op_vv::<VectorOpAsub>,
 
-        RiscvInstr::VSMUL_VV => unimplemented!(), //  Single-Width Fractional Multiply with Rounding and Saturation
+        RiscvInstr::VSMUL_VV => vec_fixed_point_op_vv::<VectorOpSmul>, //  Single-Width Fractional Multiply with Rounding and Saturation
 
-        RiscvInstr::VSSRL_VV => unimplemented!(), // Single-Width Scaling Shift Instructions
-        RiscvInstr::VSSRA_VV => unimplemented!(),
+        RiscvInstr::VSSRL_VV => vec_fixed_point_op_vv::<VectorOpSsrl>, // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VV => vec_fixed_point_op_vv::<VectorOpSsra>,
 
-        RiscvInstr::VNCLIPU_WV => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
-        RiscvInstr::VNCLIP_WV => unimplemented!(),
+        RiscvInstr::VNCLIPU_WV => vec_fixed_point_narrowing_op_wv::<VectorOpNclipu>, // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WV => vec_fixed_point_narrowing_op_wv::<VectorOpNclip>,
 
         RiscvInstr::VRGATHER_VV => vec_integer_spec_op::<{ vector_spec_instr::GATHER_VV }>, // Vector Gather Instructions
         RiscvInstr::VRGATHEREI16_VV => vec_integer_spec_op::<{ vector_spec_instr::GATHER_EI16_VV }>,
@@ -544,23 +544,23 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         }
 
-        RiscvInstr::VSADDU_VX => unimplemented!(), // Single-Width Saturating Add and Subtract
-        RiscvInstr::VSADD_VX => unimplemented!(),
-        RiscvInstr::VSSUBU_VX => unimplemented!(),
-        RiscvInstr::VSSUB_VX => unimplemented!(),
+        RiscvInstr::VSADDU_VX => vec_fixed_point_op_vx::<VectorOpSaddu>, // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VX => vec_fixed_point_op_vx::<VectorOpSadd>,
+        RiscvInstr::VSSUBU_VX => vec_fixed_point_op_vx::<VectorOpSsubu>,
+        RiscvInstr::VSSUB_VX => vec_fixed_point_op_vx::<VectorOpSsub>,
 
-        RiscvInstr::VAADDU_VX => unimplemented!(), // Single-Width Averaging Add and Subtract
-        RiscvInstr::VAADD_VX => unimplemented!(),
-        RiscvInstr::VASUBU_VX => unimplemented!(),
-        RiscvInstr::VASUB_VX => unimplemented!(),
+        RiscvInstr::VAADDU_VX => vec_fixed_point_op_vx::<VectorOpAaddu>, // Single-Width Averaging Add and Subtract
+        RiscvInstr::VAADD_VX => vec_fixed_point_op_vx::<VectorOpAadd>,
+        RiscvInstr::VASUBU_VX => vec_fixed_point_op_vx::<VectorOpAsubu>,
+        RiscvInstr::VASUB_VX => vec_fixed_point_op_vx::<VectorOpAsub>,
 
-        RiscvInstr::VSMUL_VX => unimplemented!(), //  Single-Width Fractional Multiply with Rounding and Saturation
+        RiscvInstr::VSMUL_VX => vec_fixed_point_op_vx::<VectorOpSmul>, //  Single-Width Fractional Multiply with Rounding and Saturation
 
-        RiscvInstr::VSSRL_VX => unimplemented!(), // Single-Width Scaling Shift Instructions
-        RiscvInstr::VSSRA_VX => unimplemented!(),
+        RiscvInstr::VSSRL_VX => vec_fixed_point_op_vx::<VectorOpSsrl>, // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VX => vec_fixed_point_op_vx::<VectorOpSsra>,
 
-        RiscvInstr::VNCLIPU_WX => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
-        RiscvInstr::VNCLIP_WX => unimplemented!(),
+        RiscvInstr::VNCLIPU_WX => vec_fixed_point_narrowing_op_wx::<VectorOpNclipu>, // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WX => vec_fixed_point_narrowing_op_wx::<VectorOpNclip>,
 
         RiscvInstr::VSLIDEUP_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDEUP_VX }>, // Vector Slide Instructions
         RiscvInstr::VSLIDEDOWN_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDEDOWN_VX }>,
@@ -607,14 +607,14 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         }
 
-        RiscvInstr::VSADDU_VI => unimplemented!(), // Single-Width Saturating Add and Subtract
-        RiscvInstr::VSADD_VI => unimplemented!(),
+        RiscvInstr::VSADDU_VI => vec_fixed_point_op_vi::<VectorOpSaddu, true>, // Single-Width Saturating Add and Subtract
+        RiscvInstr::VSADD_VI => vec_fixed_point_op_vi::<VectorOpSadd, true>,
 
-        RiscvInstr::VSSRL_VI => unimplemented!(), // Single-Width Scaling Shift Instructions
-        RiscvInstr::VSSRA_VI => unimplemented!(),
+        RiscvInstr::VSSRL_VI => vec_fixed_point_op_vi::<VectorOpSsrl, false>, // Single-Width Scaling Shift Instructions
+        RiscvInstr::VSSRA_VI => vec_fixed_point_op_vi::<VectorOpSsra, false>,
 
-        RiscvInstr::VNCLIPU_WI => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
-        RiscvInstr::VNCLIP_WI => unimplemented!(),
+        RiscvInstr::VNCLIPU_WI => vec_fixed_point_narrowing_op_wi::<VectorOpNclipu>, // Narrowing Fixed-Point Clip Instructions
+        RiscvInstr::VNCLIP_WI => vec_fixed_point_narrowing_op_wi::<VectorOpNclip>,
 
         RiscvInstr::VSLIDEUP_VI => vec_integer_spec_op::<{ vector_spec_instr::SLIDEUP_VI }>, // Vector Slide Instructions
         RiscvInstr::VSLIDEDOWN_VI => vec_integer_spec_op::<{ vector_spec_instr::SLIDEDOWN_VI }>,
@@ -732,6 +732,5 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VWMACCUS_VX => vec_widening_integer_op_vxv::<VectorOpWmaccus>,
         //-------- OPFVV (func3 = 0b001) --------
         //-------- OPFVF (func3 = 0b101) --------
-        // _ => unimplemented!(),
     }
 }

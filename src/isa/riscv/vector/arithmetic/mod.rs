@@ -13,6 +13,9 @@ use crate::{
 pub(in crate::isa::riscv) mod integer_impl;
 pub(in crate::isa::riscv) use integer_impl::*;
 
+pub(in crate::isa::riscv) mod fix_point_impl;
+pub(in crate::isa::riscv) use fix_point_impl::*;
+
 #[inline]
 fn vector_register_group_overlaps(lhs: u8, lhs_lmul: u8, rhs: u8, rhs_lmul: u8) -> bool {
     lhs < rhs.saturating_add(rhs_lmul) && rhs < lhs.saturating_add(lhs_lmul)

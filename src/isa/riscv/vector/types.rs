@@ -3,7 +3,7 @@ use std::slice::{from_raw_parts, from_raw_parts_mut};
 use crate::isa::riscv::vector::VLEN_BYTE;
 
 #[repr(u8)]
-#[allow(unused)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FixedPointRoundingMode {
     RoundToNearestUp = 0x00,
     RoundToNearestEven = 0x01,
