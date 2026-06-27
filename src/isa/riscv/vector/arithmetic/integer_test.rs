@@ -148,6 +148,28 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_integer_narrowing_wv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVV: VectorOpIntegerNarrowingWV,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVV::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_integer_narrowing_vx<OpIVX, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVX: VectorOpIntegerNarrowingVX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVX::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_integer_v<OpIV, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIV: VectorOpIntegerV,
@@ -873,6 +895,87 @@ fn test_vector_op_slidedown_honors_mask_and_tail() {
                 .reg(1, param.v0(), &pred_mask)
                 .reg(LMUL.get_lmul(), param.vs2(), &vs2)
                 .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_narrowing_shift_right_wv() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u8>();
+    let vs1: Vec<u8> = (0..elem_count).map(|i| (i as u8).wrapping_mul(3)).collect();
+    let vs2: Vec<u16> = (0..elem_count)
+        .map(|i| 0x0100_u16.wrapping_add((i as u16) << 4))
+        .collect();
+    let expected: Vec<u8> = vs1
+        .iter()
+        .zip(vs2.iter())
+        .map(|(shift, value)| (*value >> (*shift as u32 & 7)) as u8)
+        .collect();
+
+    run_test_integer_narrowing_wv::<VectorOpNsrl, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul() * 2, param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_narrowing_shift_right_wx() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx(3, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0x8000_0000_u32 >> (i % 4))
+        .collect();
+    let expected: Vec<u16> = vs2.iter().map(|value| (value >> 3) as u16).collect();
+
+    run_test_integer_narrowing_vx::<VectorOpNsrl, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul() * 2, param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_narrowing_shift_right_wi_signed() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx((-1_i32) as WordType, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| {
+            if i % 2 == 0 {
+                0x8000_0000_u32
+            } else {
+                0x7fff_ff00_u32
+            }
+        })
+        .collect();
+    let expected: Vec<u16> = vs2
+        .iter()
+        .map(|value| ((*value as i32) >> 15) as u16)
+        .collect();
+
+    run_test_integer_narrowing_vx::<VectorOpNsra, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul() * 2, param.vs2(), &vs2)
         },
         |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
     );

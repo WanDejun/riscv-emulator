@@ -15,9 +15,10 @@ use crate::{
                 arithmetic::{
                     VectorOpBitVV, VectorOpIntegerGatherEI16VV, VectorOpIntegerGatherVV,
                     VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
-                    VectorOpIntegerMaskVXM, VectorOpIntegerV, VectorOpIntegerVV,
-                    VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX, VectorOpIntegerVXM,
-                    VectorOpIntegerVXV, VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
+                    VectorOpIntegerMaskVXM, VectorOpIntegerNarrowingVX, VectorOpIntegerNarrowingWV,
+                    VectorOpIntegerV, VectorOpIntegerVV, VectorOpIntegerVVM, VectorOpIntegerVVV,
+                    VectorOpIntegerVX, VectorOpIntegerVXM, VectorOpIntegerVXV,
+                    VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
                     VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
                     VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
                 },
@@ -859,6 +860,90 @@ where
         {
             cpu.vector
                 .exec_integer_vx::<OpIVX>(uimm as WordType, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_narrowing_op_wv<OpIVV>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVV: VectorOpIntegerNarrowingWV,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector
+                .exec_integer_narrowing_wv::<OpIVV>(rs1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_narrowing_op_wx<OpIVX>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerNarrowingVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            let x1 = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .exec_integer_narrowing_vx::<OpIVX>(x1, vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_integer_narrowing_op_vi<OpIVX, const SIGNED: bool>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception>
+where
+    OpIVX: VectorOpIntegerNarrowingVX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: imm5,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            if SIGNED {
+                let imm = sign_extend(imm5 as WordType, 5);
+                cpu.vector
+                    .exec_integer_narrowing_vx::<OpIVX>(imm, vs2, vd, !vm, vstart)
+            } else {
+                cpu.vector.exec_integer_narrowing_vx::<OpIVX>(
+                    imm5 as WordType,
+                    vs2,
+                    vd,
+                    !vm,
+                    vstart,
+                )
+            }
         } else {
             unreachable!()
         }

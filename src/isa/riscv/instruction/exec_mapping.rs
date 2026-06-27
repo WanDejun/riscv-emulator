@@ -411,8 +411,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VV => vec_integer_op_vv::<VectorOpSrl>,
         RiscvInstr::VSLL_VV => vec_integer_op_vv::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WV => unimplemented!(), // Widening Shift Instructions
-        RiscvInstr::VNSRA_WV => unimplemented!(),
+        RiscvInstr::VNSRL_WV => vec_integer_narrowing_op_wv::<VectorOpNsrl>, // Narrowing Shift Instructions
+        RiscvInstr::VNSRA_WV => vec_integer_narrowing_op_wv::<VectorOpNsra>,
 
         RiscvInstr::VMSEQ_VV => vec_integer_mask_op_vv::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VV => vec_integer_mask_op_vv::<VectorOpMsne>,
@@ -497,8 +497,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VX => vec_integer_op_vx::<VectorOpSrl>,
         RiscvInstr::VSLL_VX => vec_integer_op_vx::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WX => unimplemented!(), // Widening Shift Instructions
-        RiscvInstr::VNSRA_WX => unimplemented!(),
+        RiscvInstr::VNSRL_WX => vec_integer_narrowing_op_wx::<VectorOpNsrl>,
+        RiscvInstr::VNSRA_WX => vec_integer_narrowing_op_wx::<VectorOpNsra>,
 
         RiscvInstr::VMSEQ_VX => vec_integer_mask_op_vx::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VX => vec_integer_mask_op_vx::<VectorOpMsne>,
@@ -576,8 +576,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VI => vec_integer_op_vi_unsigned::<VectorOpSrl>,
         RiscvInstr::VSLL_VI => vec_integer_op_vi_unsigned::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WI => unimplemented!(), // Widening Shift Instructions
-        RiscvInstr::VNSRA_WI => unimplemented!(),
+        RiscvInstr::VNSRL_WI => vec_integer_narrowing_op_vi::<VectorOpNsrl, false>,
+        RiscvInstr::VNSRA_WI => vec_integer_narrowing_op_vi::<VectorOpNsra, true>,
 
         RiscvInstr::VMSEQ_VI => vec_integer_mask_op_vi::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VI => vec_integer_mask_op_vi::<VectorOpMsne>,

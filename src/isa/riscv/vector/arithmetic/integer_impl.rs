@@ -17,7 +17,7 @@ use crate::{
             types::{VGFRef, VGFRefMut},
         },
     },
-    utils::{UnsignedInteger, as_signed_i128},
+    utils::{TruncateFrom, UnsignedInteger, as_signed_i128},
 };
 
 trait ExecTernaryTrait<OUT, IN = WordType> {
@@ -40,6 +40,10 @@ trait WideningIntegerMultiplyAddExec<Src1, Src2, Dst> {
     fn exec(vs2: Src2, vs1: Src1, vd: Dst) -> Result<Dst, Exception>;
 }
 
+trait NarrowingIntegerShiftExec<Src, Shift, Dst> {
+    fn exec(src: Src, shift: Shift) -> Dst;
+}
+
 struct ExecAdc;
 struct ExecSbc;
 struct ExecAdcCarryNoCarry;
@@ -54,6 +58,8 @@ struct ExecNmsac;
 struct ExecMadd;
 struct ExecNmsub;
 struct ExecWmacc;
+struct ExecNsrl;
+struct ExecNsra;
 
 // res<bit> = a<bit> & b<bit>
 impl BitBinaryExec for ExecAnd<bool> {
@@ -192,6 +198,30 @@ where
         Ok(Dst::from(vs1)
             .wrapping_mul(&Dst::from(vs2))
             .wrapping_add(&vd))
+    }
+}
+
+impl<Src, Shift, Dst> NarrowingIntegerShiftExec<Src, Shift, Dst> for ExecNsrl
+where
+    Src: UnsignedInteger,
+    Shift: UnsignedInteger,
+    Dst: UnsignedInteger + crate::utils::TruncateFrom<Src>,
+{
+    fn exec(src: Src, shift: Shift) -> Dst {
+        Dst::truncate_from(src >> crate::utils::shift_amount(shift))
+    }
+}
+
+impl<Src, Shift, Dst> NarrowingIntegerShiftExec<Src, Shift, Dst> for ExecNsra
+where
+    Src: UnsignedInteger + Into<u128>,
+    Shift: UnsignedInteger,
+    Dst: UnsignedInteger,
+{
+    fn exec(src: Src, shift: Shift) -> Dst {
+        crate::utils::from_signed_i128(
+            crate::utils::as_signed_i128(src) >> crate::utils::shift_amount(shift),
+        )
     }
 }
 
@@ -614,6 +644,52 @@ pub(in crate::isa::riscv) trait VectorOpWideningIntegerWX {
         Self: Sized,
     {
         vector.exec_widening_integer_wx::<Self>(
+            param.x1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+            0,
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerNarrowingWV {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_narrowing_wv::<Self>(
+            param.vs1(),
+            param.vs2(),
+            param.vd(),
+            param.enable_mask(),
+            0,
+        )
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIntegerNarrowingVX {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_integer_narrowing_vx::<Self>(
             param.x1(),
             param.vs2(),
             param.vd(),
@@ -1249,6 +1325,29 @@ macro_rules! dispatch_widening_integer_sew {
     };
 }
 
+macro_rules! dispatch_narrowing_integer_sew {
+    ($dst_sew:expr, |$src_ty:ident, $dst_ty:ident| $body:block) => {
+        match $dst_sew {
+            1 => {
+                type $src_ty = u16;
+                type $dst_ty = u8;
+                $body
+            }
+            2 => {
+                type $src_ty = u32;
+                type $dst_ty = u16;
+                $body
+            }
+            4 => {
+                type $src_ty = u64;
+                type $dst_ty = u32;
+                $body
+            }
+            _ => unreachable!(),
+        }
+    };
+}
+
 macro_rules! impl_vector_op_widening_interger_vv_binary {
     ($op_ty:ty, $exec_ty:ident, signed) => {
         impl VectorOpWideningIntegerVV for $op_ty {
@@ -1549,6 +1648,69 @@ macro_rules! impl_vector_op_widening_interger_wx_binary {
     };
 }
 
+macro_rules! impl_vector_op_integer_narrowing_wv_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerNarrowingWV for $op_ty {
+            fn exec(
+                vs1: &VGFRef,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs1.sew == vd.sew && vs2.sew == vd.sew * 2);
+                dispatch_narrowing_integer_sew!(vd.sew, |TSrc, TDst| {
+                    let vs1 = vs1.as_slice::<TDst>();
+                    let vs2 = vs2.as_slice::<TSrc>();
+                    let len = vd.as_slice::<TDst>().len();
+                    debug_assert_eq!(vs1.len(), len);
+                    debug_assert_eq!(vs2.len(), len);
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            <$exec_ty as NarrowingIntegerShiftExec<TSrc, TDst, TDst>>::exec(
+                                vs2[index], vs1[index],
+                            ),
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
+macro_rules! impl_vector_op_integer_narrowing_vx_binary {
+    ($op_ty:ty, $exec_ty:ident) => {
+        impl VectorOpIntegerNarrowingVX for $op_ty {
+            fn exec(
+                x1: WordType,
+                vs2: &VGFRef,
+                vd: &mut VGFRefMut,
+                mask: &VecOpMask,
+            ) -> Result<(), Exception> {
+                assert!(vs2.sew == vd.sew * 2);
+                dispatch_narrowing_integer_sew!(vd.sew, |TSrc, TDst| {
+                    let vs2 = vs2.as_slice::<TSrc>();
+                    let shift = TDst::truncate_from(x1);
+                    let len = vd.as_slice::<TDst>().len();
+                    debug_assert_eq!(vs2.len(), len);
+                    for (index, element) in vd.iter_mut().enumerate() {
+                        mask.element_load(
+                            element,
+                            <$exec_ty as NarrowingIntegerShiftExec<TSrc, TDst, TDst>>::exec(
+                                vs2[index], shift,
+                            ),
+                            index,
+                        );
+                    }
+                });
+                Ok(())
+            }
+        }
+    };
+}
+
 /// Generate a `VectorOpIntegerV` implementation for unary extension operations (e.g., `vzext.vf2`, `vsext.vf4`).
 ///
 /// This macro dispatches on `(src_sew, dst_sew)` pairs to call the appropriate type-specific executor,
@@ -1801,6 +1963,8 @@ pub(in crate::isa::riscv) struct VectorOpWmul;
 pub(in crate::isa::riscv) struct VectorOpWmulu;
 pub(in crate::isa::riscv) struct VectorOpWmulsu;
 pub(in crate::isa::riscv) struct VectorOpWmacc;
+pub(in crate::isa::riscv) struct VectorOpNsrl;
+pub(in crate::isa::riscv) struct VectorOpNsra;
 pub(in crate::isa::riscv) struct VectorOpWmaccu;
 pub(in crate::isa::riscv) struct VectorOpWmaccsu;
 pub(in crate::isa::riscv) struct VectorOpWmaccus;
@@ -1937,6 +2101,11 @@ impl_vector_op_widening_interger_wx_binary!(VectorOpWadd, ExecWideningAdd, signe
 impl_vector_op_widening_interger_wx_binary!(VectorOpWaddu, ExecWideningAdd, unsigned);
 impl_vector_op_widening_interger_wx_binary!(VectorOpWsub, ExecWideningSub, signed);
 impl_vector_op_widening_interger_wx_binary!(VectorOpWsubu, ExecWideningSub, unsigned);
+
+impl_vector_op_integer_narrowing_wv_binary!(VectorOpNsrl, ExecNsrl);
+impl_vector_op_integer_narrowing_wv_binary!(VectorOpNsra, ExecNsra);
+impl_vector_op_integer_narrowing_vx_binary!(VectorOpNsrl, ExecNsrl);
+impl_vector_op_integer_narrowing_vx_binary!(VectorOpNsra, ExecNsra);
 
 impl_vector_op_integer_vvm_binary!(VectorOpAdc, ExecAdc);
 impl_vector_op_integer_vxm_binary!(VectorOpAdc, ExecAdc);
