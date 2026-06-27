@@ -445,7 +445,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                     if vm {
                         vec_integer_move_op_v(inst_info, cpu)
                     } else {
-                        unimplemented!() // Handle VMERGE_VVM
+                        vec_integer_op_vvm::<VectorOpMerge>(inst_info, cpu)
                     }
                 } else {
                     std::unreachable!();
@@ -533,7 +533,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                     if vm {
                         vec_integer_move_op_vx(inst_info, cpu)
                     } else {
-                        unimplemented!() // Handle VMERGE_VXM
+                        vec_integer_op_vxm::<VectorOpMerge>(inst_info, cpu)
                     }
                 } else {
                     std::unreachable!();
@@ -596,7 +596,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                     if vm {
                         vec_integer_move_op_vi(inst_info, cpu)
                     } else {
-                        unimplemented!() // Handle VMERGE_VXM
+                        vec_integer_op_vim::<VectorOpMerge>(inst_info, cpu)
                     }
                 } else {
                     std::unreachable!();

@@ -1293,6 +1293,58 @@ where
     Ok(())
 }
 
+fn vector_op_merge_vvm<T>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    v0: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let merge_mask = v0.as_slice::<u8>();
+    let vs1 = vs1.as_slice::<T>();
+    let vs2 = vs2.as_slice::<T>();
+    let len = vd.as_slice::<T>().len();
+    debug_assert_eq!(vs1.len(), len);
+    debug_assert_eq!(vs2.len(), len);
+    for (index, element) in vd.iter_mut().enumerate() {
+        let value = if read_mask_bit(merge_mask, index) {
+            vs1[index]
+        } else {
+            vs2[index]
+        };
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
+fn vector_op_merge_vxm<T>(
+    scalar: T,
+    vs2: &VGFRef,
+    v0: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let merge_mask = v0.as_slice::<u8>();
+    let vs2 = vs2.as_slice::<T>();
+    let len = vd.as_slice::<T>().len();
+    debug_assert_eq!(vs2.len(), len);
+    for (index, element) in vd.iter_mut().enumerate() {
+        let value = if read_mask_bit(merge_mask, index) {
+            scalar
+        } else {
+            vs2[index]
+        };
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
 // =================================================
 //         Widening Integer Operations
 // =================================================
@@ -1984,6 +2036,7 @@ pub(in crate::isa::riscv) struct VectorOpRGatherVI;
 pub(in crate::isa::riscv) struct VectorOpRGatherEI16VV;
 pub(in crate::isa::riscv) struct VectorOpSlideUp;
 pub(in crate::isa::riscv) struct VectorOpSlideDown;
+pub(in crate::isa::riscv) struct VectorOpMerge;
 
 impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
@@ -2235,6 +2288,36 @@ impl_vector_op_integer_gather_vv!(VectorOpRGatherVV);
 impl_vector_op_integer_gather_vx!(VectorOpRGatherVX);
 impl_vector_op_integer_gather_ei16_vv!(VectorOpRGatherEI16VV);
 impl_vector_op_integer_gather_vi!(VectorOpRGatherVI);
+
+impl VectorOpIntegerVVM for VectorOpMerge {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs1.sew == vs2.sew && vs2.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_merge_vvm::<T>(vs1, vs2, v0, vd, mask)
+        })
+    }
+}
+
+impl VectorOpIntegerVXM for VectorOpMerge {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        v0: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs2.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_merge_vxm::<T>(x1 as T, vs2, v0, vd, mask)
+        })
+    }
+}
 
 impl VectorOpIntegerVXV for VectorOpSlideUp {
     fn exec(

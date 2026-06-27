@@ -248,6 +248,17 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_integer_vxm<OpIVXM, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    OpIVXM: VectorOpIntegerVXM,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    OpIVXM::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_integer_mask_vv<OpIMVV, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIMVV: VectorOpIntegerMaskVV,
@@ -310,6 +321,104 @@ fn signed_rem_u64(lhs: u64, rhs: u64) -> u64 {
     } else {
         as_signed_i128(lhs).wrapping_rem(as_signed_i128(rhs)) as u64
     }
+}
+
+#[test]
+fn test_vector_op_merge_vvm_selects_by_v0() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vvm(8, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vl = 5;
+    let vs1: Vec<u16> = (0..elem_count).map(|i| 0x1000_u16 + i as u16).collect();
+    let vs2: Vec<u16> = (0..elem_count).map(|i| 0x2000_u16 + i as u16).collect();
+    let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x9000_u16 + i as u16).collect();
+    let merge_mask = mask_from_bits([true, false, true, false, true, false, true, false]);
+    let mut expected = old_vd.clone();
+    for index in 0..vl {
+        expected[index] = if mask_bit(&merge_mask, index) {
+            vs1[index]
+        } else {
+            vs2[index]
+        };
+    }
+
+    run_test_integer_vvm::<VectorOpMerge, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.v0(), &merge_mask)
+                .reg(LMUL.get_lmul(), param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_merge_vxm_selects_scalar_by_v0() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let scalar = 0xaaaa_5555_u32 as WordType;
+    let param = TestOpParameter::new_vxm(scalar, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0x3000_0000_u32 + i as u32)
+        .collect();
+    let merge_mask = mask_from_bits([false, true, true, false]);
+    let expected: Vec<u32> = (0..elem_count)
+        .map(|index| {
+            if mask_bit(&merge_mask, index) {
+                scalar as u32
+            } else {
+                vs2[index]
+            }
+        })
+        .collect();
+
+    run_test_integer_vxm::<VectorOpMerge, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(1, param.v0(), &merge_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_merge_vim_uses_signed_immediate_value() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let imm = (-3_i8) as WordType;
+    let param = TestOpParameter::new_vxm(imm, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u8>();
+    let vs2: Vec<u8> = (0..elem_count).map(|i| 0x40_u8 + i as u8).collect();
+    let merge_mask = mask_from_bits((0..elem_count).map(|index| index % 2 == 0));
+    let expected: Vec<u8> = (0..elem_count)
+        .map(|index| {
+            if mask_bit(&merge_mask, index) {
+                imm as u8
+            } else {
+                vs2[index]
+            }
+        })
+        .collect();
+
+    run_test_integer_vxm::<VectorOpMerge, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(1, param.v0(), &merge_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
 }
 
 fn run_vv_binary_u32<OpIVV>(vs1: &[u32], vs2: &[u32], expected: &[u32])
