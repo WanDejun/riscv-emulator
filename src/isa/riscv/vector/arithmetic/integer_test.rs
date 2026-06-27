@@ -557,6 +557,28 @@ fn test_vector_op_mask_before_first_family() {
 }
 
 #[test]
+fn test_vector_op_mask_before_first_initializes_seen_first_from_vstart() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_v(16, 24, SEW, SEW);
+    let source = mask_from_bits([false, true, false, false, false, false, false, false]);
+    let old_vd = mask_from_bits([true, true, true, true, true, true, true, true]);
+    let expected = mask_from_bits([true, true, true, false, false, false, false, false]);
+
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(LMUL, SEW, false, false, 8)
+        .reg(1, param.vs2(), &source)
+        .reg(1, param.vd(), &old_vd)
+        .build();
+
+    vector
+        .exec_mask_unary::<VectorOpMsbfM>(param.vs2(), param.vd(), false, 3)
+        .unwrap();
+
+    VectorChecker::new(&mut vector, &mut mmio).reg(1, param.vd(), &expected);
+}
+
+#[test]
 fn test_vector_op_iota_m_honors_mask() {
     const LMUL: Vlmul = Vlmul::M1;
     const SEW: Vsew = Vsew::E16;
@@ -570,8 +592,8 @@ fn test_vector_op_iota_m_honors_mask() {
     expected[2] = 1;
     expected[3] = 2;
     expected[4] = 3;
-    expected[6] = 3;
-    expected[7] = 3;
+    expected[6] = 4;
+    expected[7] = 4;
 
     run_test_mask_to_vector::<VectorOpIotaM, _, _>(
         param,
@@ -583,6 +605,50 @@ fn test_vector_op_iota_m_honors_mask() {
                 .reg(LMUL.get_lmul(), param.vd(), &old_vd)
         },
         |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_iota_m_counts_source_bits_before_vstart() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_v(16, 24, SEW, SEW);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let source = mask_from_bits([true, false, true, true, false, false, false, false]);
+    let old_vd: Vec<u16> = (0..elem_count).map(|index| 0x9000 + index as u16).collect();
+    let mut expected = old_vd.clone();
+    expected[4] = 3;
+    expected[5] = 3;
+    expected[6] = 3;
+    expected[7] = 3;
+
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(LMUL, SEW, false, false, 8)
+        .reg(1, param.vs2(), &source)
+        .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        .build();
+
+    vector
+        .exec_mask_to_vector::<VectorOpIotaM>(param.vs2(), param.vd(), false, 4)
+        .unwrap();
+
+    VectorChecker::new(&mut vector, &mut mmio).reg(LMUL.get_lmul(), param.vd(), &expected);
+}
+
+#[test]
+fn test_vector_op_mask_special_rejects_destination_source_overlap() {
+    let mut vector = VectorBuilder::new()
+        .config(Vlmul::M1, Vsew::E16, false, false, 8)
+        .build()
+        .0;
+
+    assert_eq!(
+        vector.exec_mask_unary::<VectorOpMsbfM>(8, 8, false, 0),
+        Err(Exception::IllegalInstruction)
+    );
+    assert_eq!(
+        vector.exec_mask_to_vector::<VectorOpIotaM>(8, 8, false, 0),
+        Err(Exception::IllegalInstruction)
     );
 }
 
@@ -1011,6 +1077,28 @@ fn test_vector_op_rgatherei16_vv_uses_16_bit_indices() {
 }
 
 #[test]
+fn test_vector_op_rgatherei16_vv_uses_widened_index_group_for_e8() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u8>();
+    let vs1: Vec<u16> = (0..elem_count).rev().map(|index| index as u16).collect();
+    let vs2: Vec<u8> = (0..elem_count).map(|index| 0x10 + index as u8).collect();
+    let expected: Vec<u8> = vs1.iter().map(|index| vs2[*index as usize]).collect();
+
+    run_test_integer_gather_ei16_vv::<VectorOpRGatherEI16VV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(2, param.vs1(), &vs1)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
 fn test_vector_op_rgather_vx() {
     const LMUL: Vlmul = Vlmul::M1;
     const SEW: Vsew = Vsew::E64;
@@ -1073,6 +1161,19 @@ fn test_vector_op_rgather_rejects_destination_source_overlap() {
     );
     assert_eq!(
         vector.exec_integer_gather_ei16_vv::<VectorOpRGatherEI16VV>(8, 12, 8, false, 0),
+        Err(Exception::IllegalInstruction)
+    );
+}
+
+#[test]
+fn test_vector_op_rgatherei16_vv_rejects_widened_index_overlap() {
+    let mut vector = VectorBuilder::new()
+        .config(Vlmul::M1, Vsew::E8, false, false, 16)
+        .build()
+        .0;
+
+    assert_eq!(
+        vector.exec_integer_gather_ei16_vv::<VectorOpRGatherEI16VV>(2, 8, 3, false, 0),
         Err(Exception::IllegalInstruction)
     );
 }
@@ -1364,6 +1465,44 @@ fn test_vector_op_narrowing_shift_right_wi_signed() {
                 .reg(LMUL.get_lmul() * 2, param.vs2(), &vs2)
         },
         |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_narrowing_shift_rejects_destination_source_overlap() {
+    let mut vector = VectorBuilder::new()
+        .config(Vlmul::M1, Vsew::E8, false, false, 16)
+        .build()
+        .0;
+
+    assert_eq!(
+        vector.exec_integer_narrowing_wv::<VectorOpNsrl>(8, 2, 3, false, 0),
+        Err(Exception::IllegalInstruction)
+    );
+    assert_eq!(
+        vector.exec_integer_narrowing_vx::<VectorOpNsrl>(1, 2, 3, false, 0),
+        Err(Exception::IllegalInstruction)
+    );
+}
+
+#[test]
+fn test_vector_op_narrowing_shift_fractional_lmul_overlap_check() {
+    const LMUL: Vlmul = Vlmul::Mf2;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_vv(8, 2, 3);
+    let vs1 = [0u8; VLEN_BYTE];
+    let vs2 = [1u16, 2, 3, 4, 0, 0, 0, 0];
+    let expected = [1u8, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    run_test_integer_narrowing_wv::<VectorOpNsrl, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, 4)
+                .reg(1, param.vs1(), &vs1)
+                .reg(1, param.vs2(), &vs2)
+        },
+        |checker| checker.reg(1, param.vd(), &expected),
     );
 }
 

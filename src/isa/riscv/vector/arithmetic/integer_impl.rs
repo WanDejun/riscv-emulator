@@ -1447,10 +1447,12 @@ fn vector_op_mask_before_first(
     let source_mask = vs2.as_slice::<u8>();
     let dest_mask = vd.as_mut_slice::<u8>();
     let bit_capacity = dest_mask.len() * u8::BITS as usize;
-    let mut seen_first = false;
+    let mut seen_first = (0..mask.first_pending_index().min(bit_capacity))
+        .any(|index| mask.should_access_ignoring_start(index) && read_mask_bit(source_mask, index));
 
     for index in mask.first_pending_index().min(bit_capacity)..mask.write_end(bit_capacity) {
-        let active_source_bit = mask.should_access(index) && read_mask_bit(source_mask, index);
+        let active_source_bit =
+            mask.should_access_ignoring_start(index) && read_mask_bit(source_mask, index);
         let value = match mode {
             MaskBeforeFirstMode::Before => !seen_first && !active_source_bit,
             MaskBeforeFirstMode::Including => !seen_first,
@@ -1473,7 +1475,7 @@ where
     let mut count = 0u128;
     for (index, element) in vd.iter_mut().enumerate() {
         mask.element_load(element, T::truncate_from(count), index);
-        if mask.should_access(index) && read_mask_bit(source_mask, index) {
+        if mask.is_body_index(index) && read_mask_bit(source_mask, index) {
             count += 1;
         }
     }
@@ -1891,8 +1893,8 @@ macro_rules! impl_vector_op_integer_narrowing_wv_binary {
                     let vs2 = vs2.as_slice::<TSrc>();
                     let len = vd.as_slice::<TDst>().len();
                     debug_assert_eq!(vs1.len(), len);
-                    debug_assert_eq!(vs2.len(), len);
-                    for (index, element) in vd.iter_mut().enumerate() {
+                    debug_assert!(vs2.len() <= len);
+                    for (index, element) in vd.iter_mut().take(vs2.len()).enumerate() {
                         mask.element_load(
                             element,
                             <$exec_ty as NarrowingIntegerShiftExec<TSrc, TDst, TDst>>::exec(
@@ -1922,8 +1924,8 @@ macro_rules! impl_vector_op_integer_narrowing_vx_binary {
                     let vs2 = vs2.as_slice::<TSrc>();
                     let shift = TDst::truncate_from(x1);
                     let len = vd.as_slice::<TDst>().len();
-                    debug_assert_eq!(vs2.len(), len);
-                    for (index, element) in vd.iter_mut().enumerate() {
+                    debug_assert!(vs2.len() <= len);
+                    for (index, element) in vd.iter_mut().take(vs2.len()).enumerate() {
                         mask.element_load(
                             element,
                             <$exec_ty as NarrowingIntegerShiftExec<TSrc, TDst, TDst>>::exec(

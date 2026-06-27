@@ -5,7 +5,7 @@ use crate::{
         trap::Exception,
         vector::{
             VLEN_BYTE, VecOpMask, Vector,
-            types::{VGFRef, VGFRefMut, Vsew},
+            types::{VGFRef, VGFRefMut, Vlmul, Vsew},
         },
     },
 };
@@ -19,6 +19,37 @@ pub(in crate::isa::riscv) use fix_point_impl::*;
 #[inline]
 fn vector_register_group_overlaps(lhs: u8, lhs_lmul: u8, rhs: u8, rhs_lmul: u8) -> bool {
     lhs < rhs.saturating_add(rhs_lmul) && rhs < lhs.saturating_add(lhs_lmul)
+}
+
+fn lmul_ratio(vlmul: Vlmul) -> (u8, u8) {
+    match vlmul {
+        Vlmul::M1 => (1, 1),
+        Vlmul::M2 => (2, 1),
+        Vlmul::M4 => (4, 1),
+        Vlmul::M8 => (8, 1),
+        Vlmul::Mf2 => (1, 2),
+        Vlmul::Mf4 => (1, 4),
+        Vlmul::Mf8 => (1, 8),
+    }
+}
+
+fn physical_lmul_from_ratio(numerator: u8, denominator: u8) -> Result<u8, Exception> {
+    let physical_lmul = numerator.div_ceil(denominator).max(1);
+    if physical_lmul > 8 {
+        Err(Exception::IllegalInstruction)
+    } else {
+        Ok(physical_lmul)
+    }
+}
+
+fn gather_ei16_index_lmul(vlmul: Vlmul, sew: u8) -> Result<u8, Exception> {
+    let (lmul_num, lmul_den) = lmul_ratio(vlmul);
+    physical_lmul_from_ratio(lmul_num * Vsew::E16.into_byte_width(), lmul_den * sew)
+}
+
+fn narrowing_source_lmul(vlmul: Vlmul) -> Result<u8, Exception> {
+    let (lmul_num, lmul_den) = lmul_ratio(vlmul);
+    physical_lmul_from_ratio(lmul_num * 2, lmul_den)
 }
 
 impl Vector {
@@ -101,12 +132,13 @@ impl Vector {
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
-        if vector_register_group_overlaps(vd, lmul, vs1, lmul)
+        let index_lmul = gather_ei16_index_lmul(vlmul, sew)?;
+        if vector_register_group_overlaps(vd, lmul, vs1, index_lmul)
             || vector_register_group_overlaps(vd, lmul, vs2, lmul)
         {
             return Err(Exception::IllegalInstruction);
         }
-        let vs1_data = self.vector_regfile.get_ref(lmul, 1, vs1)?.to_vec();
+        let vs1_data = self.vector_regfile.get_ref(index_lmul, 1, vs1)?.to_vec();
         let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
         let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
@@ -116,7 +148,7 @@ impl Vector {
             self.config.tail_agnostic,
             vstart,
         );
-        let vs1_ref = VGFRef::new(&vs1_data, Vsew::E16.into_byte_width(), lmul, 1);
+        let vs1_ref = VGFRef::new(&vs1_data, Vsew::E16.into_byte_width(), index_lmul, 1);
         let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
         let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
         OpIVV::exec(&vs1_ref, &vs2_ref, &mut vd_ref, &mask)
@@ -647,10 +679,8 @@ impl Vector {
             return Err(Exception::IllegalInstruction);
         };
         let lmul = vlmul.get_lmul();
-        let Some(src_lmul) = lmul.checked_mul(2) else {
-            return Err(Exception::IllegalInstruction);
-        };
-        if src_lmul > 8 {
+        let src_lmul = narrowing_source_lmul(vlmul)?;
+        if vector_register_group_overlaps(vd, lmul, vs2, src_lmul) {
             return Err(Exception::IllegalInstruction);
         }
 
@@ -689,10 +719,8 @@ impl Vector {
             return Err(Exception::IllegalInstruction);
         };
         let lmul = vlmul.get_lmul();
-        let Some(src_lmul) = lmul.checked_mul(2) else {
-            return Err(Exception::IllegalInstruction);
-        };
-        if src_lmul > 8 {
+        let src_lmul = narrowing_source_lmul(vlmul)?;
+        if vector_register_group_overlaps(vd, lmul, vs2, src_lmul) {
             return Err(Exception::IllegalInstruction);
         }
 
@@ -1068,6 +1096,10 @@ impl Vector {
     where
         Op: VectorOpMaskUnary,
     {
+        if vd == vs2 {
+            return Err(Exception::IllegalInstruction);
+        }
+
         let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
         let mask = VecOpMask::new_with_start(
             &self.vector_regfile,
@@ -1100,6 +1132,10 @@ impl Vector {
     {
         let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
         let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        if vector_register_group_overlaps(vd, lmul, vs2, 1) {
+            return Err(Exception::IllegalInstruction);
+        }
+
         let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
         let mask = VecOpMask::new_with_start(
             &self.vector_regfile,

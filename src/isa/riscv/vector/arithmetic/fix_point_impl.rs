@@ -6,8 +6,8 @@ use crate::{
         trap::Exception,
         vector::{
             VecOpMask, Vector,
-            arithmetic::vector_register_group_overlaps,
-            types::{FixedPointRoundingMode, VGFRef, VGFRefMut, Vlmul, Vsew},
+            arithmetic::{narrowing_source_lmul, vector_register_group_overlaps},
+            types::{FixedPointRoundingMode, VGFRef, VGFRefMut, Vsew},
         },
     },
     utils::{TruncateFrom, UnsignedInteger, as_signed_i128, from_signed_i128, shift_amount},
@@ -305,16 +305,6 @@ impl Vector {
             self.config.fixed_point_accrued_saturation_flag = true;
         }
         Ok(saturated)
-    }
-}
-
-fn narrowing_source_lmul(vlmul: Vlmul) -> Result<u8, Exception> {
-    match vlmul {
-        Vlmul::Mf8 | Vlmul::Mf4 | Vlmul::Mf2 => Ok(1),
-        _ => vlmul
-            .get_lmul()
-            .checked_mul(2)
-            .ok_or(Exception::IllegalInstruction),
     }
 }
 

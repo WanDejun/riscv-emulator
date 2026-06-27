@@ -200,6 +200,16 @@ impl VecOpMask {
     }
 
     #[inline(always)]
+    pub fn should_access_ignoring_start(&self, index: usize) -> bool {
+        self.bit(index) && index < self.length as usize
+    }
+
+    #[inline(always)]
+    pub fn is_body_index(&self, index: usize) -> bool {
+        index < self.length as usize
+    }
+
+    #[inline(always)]
     pub fn mask_value<T>(&self, value: T, index: usize) -> Option<T>
     where
         T: Default,
