@@ -13,7 +13,7 @@ use crate::{
             vector::{
                 VectorMemException,
                 arithmetic::{
-                    VectorOpBitVV, VectorOpIndex, VectorOpIntegerGatherEI16VV,
+                    VectorOpBitVV, VectorOpCompress, VectorOpIndex, VectorOpIntegerGatherEI16VV,
                     VectorOpIntegerGatherVV, VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM,
                     VectorOpIntegerMaskVX, VectorOpIntegerMaskVXM, VectorOpIntegerNarrowingVX,
                     VectorOpIntegerNarrowingWV, VectorOpIntegerV, VectorOpIntegerVV,
@@ -1359,6 +1359,29 @@ where
             let imm = sign_extend(simm5 as WordType, 5);
             cpu.vector
                 .exec_integer_mask_vxm::<OpIMVXM>(imm, vs2, 0, vd, false, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_compress_op<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpCompress,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: vs1,
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            if !vm {
+                return Err(Exception::IllegalInstruction);
+            }
+            cpu.vector.exec_compress::<Op>(vs1, vs2, vd, vstart)
         } else {
             unreachable!()
         }

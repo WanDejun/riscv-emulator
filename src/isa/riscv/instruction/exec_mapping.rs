@@ -651,7 +651,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VWMACC_VV => vec_widening_integer_op_vvv::<VectorOpWmacc>,
         RiscvInstr::VWMACCSU_VV => vec_widening_integer_op_vvv::<VectorOpWmaccsu>,
 
-        RiscvInstr::VCOMPRESS_VM => unimplemented!(), // Vector Compress, Expand, and Slide Instructions
+        RiscvInstr::VCOMPRESS_VM => vec_compress_op::<VectorOpCompressVm>, // Vector Compress, Expand, and Slide Instructions
 
         RiscvInstr::VMAND_MM => vec_bit_op_vv::<VectorOpAnd>, // Mask-Register Logical Instructions
         RiscvInstr::VMNAND_MM => vec_bit_op_vv::<VectorOpNand>,

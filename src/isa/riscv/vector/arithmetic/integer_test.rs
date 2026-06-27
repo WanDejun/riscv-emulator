@@ -38,6 +38,17 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_compress<Op, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    Op: VectorOpCompress,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    Op::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_bit_vv<OpIVV, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIVV: VectorOpBitVV,
@@ -1083,6 +1094,91 @@ fn test_vector_op_rgather_scalar_forms_reject_destination_source_overlap() {
     );
     assert_eq!(
         vector.exec_integer_gather_vx::<VectorOpRGatherVI>(0, 16, 17, false, 0),
+        Err(Exception::IllegalInstruction)
+    );
+}
+
+#[test]
+fn test_vector_op_compress_vm() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vl = 6;
+    let select_mask = mask_from_bits([false, true, true, false, true, false, false, false]);
+    let vs2: Vec<u16> = (0..elem_count).map(|i| 0x1000_u16 + i as u16).collect();
+    let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x9000_u16 + i as u16).collect();
+    let mut expected = old_vd.clone();
+    expected[0] = vs2[1];
+    expected[1] = vs2[2];
+    expected[2] = vs2[4];
+
+    run_test_compress::<VectorOpCompressVm, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.vs1(), &select_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_compress_vm_tail_agnostic() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vv(8, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let select_mask = mask_from_bits([true, false, true, false]);
+    let vs2: Vec<u32> = (0..elem_count)
+        .map(|i| 0x2000_0000_u32 + i as u32)
+        .collect();
+    let old_vd: Vec<u32> = (0..elem_count)
+        .map(|i| 0x9000_0000_u32 + i as u32)
+        .collect();
+    let mut expected = vec![0; elem_count];
+    expected[0] = vs2[0];
+    expected[1] = vs2[2];
+
+    run_test_compress::<VectorOpCompressVm, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, true, elem_count as u16)
+                .reg(1, param.vs1(), &select_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_compress_vm_rejects_overlap_and_nonzero_vstart() {
+    const LMUL: Vlmul = Vlmul::M2;
+    const SEW: Vsew = Vsew::E16;
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let select_mask = mask_from_bits((0..elem_count).map(|i| i % 2 == 0));
+    let data: Vec<u16> = (0..elem_count).map(|i| i as u16).collect();
+    let (mut vector, _) = VectorBuilder::new()
+        .config(LMUL, SEW, false, false, elem_count as u16)
+        .reg(1, 4, &select_mask)
+        .reg(LMUL.get_lmul(), 8, &data)
+        .build();
+
+    assert_eq!(
+        vector.exec_compress::<VectorOpCompressVm>(4, 8, 9, 0),
+        Err(Exception::IllegalInstruction)
+    );
+    assert_eq!(
+        vector.exec_compress::<VectorOpCompressVm>(4, 8, 4, 0),
+        Err(Exception::IllegalInstruction)
+    );
+    assert_eq!(
+        vector.exec_compress::<VectorOpCompressVm>(4, 8, 12, 1),
         Err(Exception::IllegalInstruction)
     );
 }

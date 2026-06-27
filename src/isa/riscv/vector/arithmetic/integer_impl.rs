@@ -959,6 +959,24 @@ pub(in crate::isa::riscv) trait VectorOpIntegerGatherEI16VV {
     }
 }
 
+pub(in crate::isa::riscv) trait VectorOpCompress {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        vl: usize,
+        tail_mask: &VecOpMask,
+    ) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_compress::<Self>(param.vs1(), param.vs2(), param.vd(), 0)
+    }
+}
+
 macro_rules! impl_vector_op_integer_vv_binary {
     ($op_ty:ty, $exec_ty:ident) => {
         impl VectorOpIntegerVV for $op_ty {
@@ -1469,6 +1487,37 @@ where
     for (index, element) in vd.iter_mut().enumerate() {
         mask.element_load(element, T::truncate_from(index as u128), index);
     }
+    Ok(())
+}
+
+fn vector_op_compress<T>(
+    vs1: &VGFRef,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    vl: usize,
+    tail_mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default,
+{
+    let select_mask = vs1.as_slice::<u8>();
+    let vs2 = vs2.as_slice::<T>();
+    let mut dest_index = 0;
+    let mut dest_iter = vd.iter_mut();
+
+    for source_index in 0..vl {
+        if read_mask_bit(select_mask, source_index) {
+            let element = dest_iter.next().unwrap();
+            tail_mask.element_load(element, vs2[source_index], dest_index);
+            dest_index += 1;
+        }
+    }
+
+    for (index, element) in dest_iter.enumerate() {
+        let index = index + dest_index;
+        tail_mask.element_load_default::<T>(element, index);
+    }
+
     Ok(())
 }
 
@@ -2171,6 +2220,7 @@ pub(in crate::isa::riscv) struct VectorOpMsifM;
 pub(in crate::isa::riscv) struct VectorOpMsofM;
 pub(in crate::isa::riscv) struct VectorOpIotaM;
 pub(in crate::isa::riscv) struct VectorOpIdV;
+pub(in crate::isa::riscv) struct VectorOpCompressVm;
 
 impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
@@ -2492,6 +2542,21 @@ impl VectorOpMaskToVector for VectorOpIotaM {
 impl VectorOpIndex for VectorOpIdV {
     fn exec(vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
         dispatch_integer_sew!(vd.sew, |T| { vector_op_index::<T>(vd, mask) })
+    }
+}
+
+impl VectorOpCompress for VectorOpCompressVm {
+    fn exec(
+        vs1: &VGFRef,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        vl: usize,
+        tail_mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs1.sew == 1 && vs2.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_compress::<T>(vs1, vs2, vd, vl, tail_mask)
+        })
     }
 }
 

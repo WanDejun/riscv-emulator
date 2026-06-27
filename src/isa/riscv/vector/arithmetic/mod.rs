@@ -120,6 +120,54 @@ impl Vector {
     }
 
     #[inline]
+    pub(in crate::isa::riscv) fn exec_compress<Op>(
+        &mut self,
+        vs1: u8,
+        vs2: u8,
+        vd: u8,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        Op: VectorOpCompress,
+    {
+        if vstart != 0 {
+            return Err(Exception::IllegalInstruction);
+        }
+
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        if vector_register_group_overlaps(vd, lmul, vs2, lmul)
+            || vector_register_group_overlaps(vd, lmul, vs1, 1)
+        {
+            return Err(Exception::IllegalInstruction);
+        }
+
+        let vs1_data = self.vector_regfile.get_ref(1, 1, vs1)?.to_vec();
+        let vs2_data = self.vector_regfile.get_ref(lmul, 1, vs2)?.to_vec();
+        let selected_count = (0..self.config.vl as usize)
+            .filter(|index| (vs1_data[index / 8] & (1 << (index % 8))) != 0)
+            .count() as u16;
+        let tail_mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            selected_count,
+            false,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            0,
+        );
+        let vs1_ref = VGFRef::new(&vs1_data, Vsew::E8.into_byte_width(), 1, 1);
+        let vs2_ref = VGFRef::new(&vs2_data, sew, lmul, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        Op::exec(
+            &vs1_ref,
+            &vs2_ref,
+            &mut vd_ref,
+            self.config.vl as usize,
+            &tail_mask,
+        )
+    }
+
+    #[inline]
     pub(in crate::isa::riscv) fn exec_bit_vv<OpIVV>(
         &mut self,
         vs1: u8,
