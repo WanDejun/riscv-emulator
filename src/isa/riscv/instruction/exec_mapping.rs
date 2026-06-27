@@ -414,8 +414,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VV => vec_integer_op_vv::<VectorOpSrl>,
         RiscvInstr::VSLL_VV => vec_integer_op_vv::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WV => vec_integer_narrowing_op_wv::<VectorOpNsrl>, // Narrowing Shift Instructions
-        RiscvInstr::VNSRA_WV => vec_integer_narrowing_op_wv::<VectorOpNsra>,
+        RiscvInstr::VNSRL_WV => vec_integer_spec_op::<{ vector_spec_instr::NSRL_WV }>, // Narrowing Shift Instructions
+        RiscvInstr::VNSRA_WV => vec_integer_spec_op::<{ vector_spec_instr::NSRA_WV }>,
 
         RiscvInstr::VMSEQ_VV => vec_integer_mask_op_vv::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VV => vec_integer_mask_op_vv::<VectorOpMsne>,
@@ -426,10 +426,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::VADC_VVM => vec_integer_op_vvm::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
         RiscvInstr::VMADC_VV => vec_integer_mask_op_vv::<VectorOpMadc>,
-        RiscvInstr::VMADC_VVM => vec_integer_mask_op_vvm::<VectorOpMadc>,
+        RiscvInstr::VMADC_VVM => vec_integer_spec_op::<{ vector_spec_instr::MADC_VVM }>,
         RiscvInstr::VSBC_VVM => vec_integer_op_vvm::<VectorOpSbc>,
         RiscvInstr::VMSBC_VV => vec_integer_mask_op_vv::<VectorOpMsbc>,
-        RiscvInstr::VMSBC_VVM => vec_integer_mask_op_vvm::<VectorOpMsbc>,
+        RiscvInstr::VMSBC_VVM => vec_integer_spec_op::<{ vector_spec_instr::MSBC_VVM }>,
 
         RiscvInstr::VMAX_VV => vec_integer_op_vv::<VectorOpMax>, // Integer Min/Max Instructions
         RiscvInstr::VMAXU_VV => vec_integer_op_vv::<VectorOpMaxu>,
@@ -446,7 +446,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        vec_integer_move_op_v(inst_info, cpu)
+                        vec_integer_spec_op::<{ vector_spec_instr::MOVE_V }>(inst_info, cpu)
                     } else {
                         vec_integer_op_vvm::<VectorOpMerge>(inst_info, cpu)
                     }
@@ -474,8 +474,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WV => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WV => unimplemented!(),
 
-        RiscvInstr::VRGATHER_VV => vec_integer_gather_op_vv::<VectorOpRGatherVV>, // Vector Gather Instructions
-        RiscvInstr::VRGATHEREI16_VV => vec_integer_gather_op_ei16_vv::<VectorOpRGatherEI16VV>,
+        RiscvInstr::VRGATHER_VV => vec_integer_spec_op::<{ vector_spec_instr::GATHER_VV }>, // Vector Gather Instructions
+        RiscvInstr::VRGATHEREI16_VV => vec_integer_spec_op::<{ vector_spec_instr::GATHER_EI16_VV }>,
 
         //-------- OPIVX (0x100) --------
         RiscvInstr::VADD_VX => vec_integer_op_vx::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
@@ -500,8 +500,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VX => vec_integer_op_vx::<VectorOpSrl>,
         RiscvInstr::VSLL_VX => vec_integer_op_vx::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WX => vec_integer_narrowing_op_wx::<VectorOpNsrl>,
-        RiscvInstr::VNSRA_WX => vec_integer_narrowing_op_wx::<VectorOpNsra>,
+        RiscvInstr::VNSRL_WX => vec_integer_spec_op::<{ vector_spec_instr::NSRL_WX }>,
+        RiscvInstr::VNSRA_WX => vec_integer_spec_op::<{ vector_spec_instr::NSRA_WX }>,
 
         RiscvInstr::VMSEQ_VX => vec_integer_mask_op_vx::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VX => vec_integer_mask_op_vx::<VectorOpMsne>,
@@ -514,10 +514,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
         RiscvInstr::VADC_VXM => vec_integer_op_vxm::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
         RiscvInstr::VMADC_VX => vec_integer_mask_op_vx::<VectorOpMadc>,
-        RiscvInstr::VMADC_VXM => vec_integer_mask_op_vxm::<VectorOpMadc>,
+        RiscvInstr::VMADC_VXM => vec_integer_spec_op::<{ vector_spec_instr::MADC_VXM }>,
         RiscvInstr::VSBC_VXM => vec_integer_op_vxm::<VectorOpSbc>,
         RiscvInstr::VMSBC_VX => vec_integer_mask_op_vx::<VectorOpMsbc>,
-        RiscvInstr::VMSBC_VXM => vec_integer_mask_op_vxm::<VectorOpMsbc>,
+        RiscvInstr::VMSBC_VXM => vec_integer_spec_op::<{ vector_spec_instr::MSBC_VXM }>,
 
         RiscvInstr::VMAX_VX => vec_integer_op_vx::<VectorOpMax>, // Integer Min/Max Instructions
         RiscvInstr::VMAXU_VX => vec_integer_op_vx::<VectorOpMaxu>,
@@ -534,7 +534,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        vec_integer_move_op_vx(inst_info, cpu)
+                        vec_integer_spec_op::<{ vector_spec_instr::MOVE_VX }>(inst_info, cpu)
                     } else {
                         vec_integer_op_vxm::<VectorOpMerge>(inst_info, cpu)
                     }
@@ -562,10 +562,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WX => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WX => unimplemented!(),
 
-        RiscvInstr::VSLIDEUP_VX => vec_integer_slideup_op_vx::<VectorOpSlideUp>, // Vector Slide Instructions
-        RiscvInstr::VSLIDEDOWN_VX => vec_integer_slidedown_op_vx::<VectorOpSlideDown>,
+        RiscvInstr::VSLIDEUP_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDEUP_VX }>, // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDEDOWN_VX }>,
 
-        RiscvInstr::VRGATHER_VX => vec_integer_gather_op_vx::<VectorOpRGatherVX>, // Vector Gather Instructions
+        RiscvInstr::VRGATHER_VX => vec_integer_spec_op::<{ vector_spec_instr::GATHER_VX }>, // Vector Gather Instructions
 
         //-------- OPIVI (func3 = 0b011) --------
         RiscvInstr::VADD_VI => vec_integer_op_vi_signed::<VectorOpAdd>, // Single-width Integer Arithmetic Instructions
@@ -579,8 +579,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VSRL_VI => vec_integer_op_vi_unsigned::<VectorOpSrl>,
         RiscvInstr::VSLL_VI => vec_integer_op_vi_unsigned::<VectorOpSll>,
 
-        RiscvInstr::VNSRL_WI => vec_integer_narrowing_op_vi::<VectorOpNsrl, false>,
-        RiscvInstr::VNSRA_WI => vec_integer_narrowing_op_vi::<VectorOpNsra, true>,
+        RiscvInstr::VNSRL_WI => vec_integer_spec_op::<{ vector_spec_instr::NSRL_WI }>,
+        RiscvInstr::VNSRA_WI => vec_integer_spec_op::<{ vector_spec_instr::NSRA_WI }>,
 
         RiscvInstr::VMSEQ_VI => vec_integer_mask_op_vi::<VectorOpMseq>, // Integer Compare Instructions
         RiscvInstr::VMSNE_VI => vec_integer_mask_op_vi::<VectorOpMsne>,
@@ -589,17 +589,17 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMSGTU_VI => vec_integer_mask_op_vi::<VectorOpMsgtu>,
         RiscvInstr::VMSGT_VI => vec_integer_mask_op_vi::<VectorOpMsgt>,
 
-        RiscvInstr::VADC_VIM => vec_integer_op_vim::<VectorOpAdc>, // Add-with-Carry / Subtract-with-Borrow
+        RiscvInstr::VADC_VIM => vec_integer_spec_op::<{ vector_spec_instr::ADC_VIM }>, // Add-with-Carry / Subtract-with-Borrow
         RiscvInstr::VMADC_VI => vec_integer_mask_op_vi::<VectorOpMadc>,
-        RiscvInstr::VMADC_VIM => vec_integer_mask_op_vim::<VectorOpMadc>,
+        RiscvInstr::VMADC_VIM => vec_integer_spec_op::<{ vector_spec_instr::MADC_VIM }>,
 
         RiscvInstr::VMERGE_VIM | RiscvInstr::VMV_V_I => {
             |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { vm, .. } = inst_info {
                     if vm {
-                        vec_integer_move_op_vi(inst_info, cpu)
+                        vec_integer_spec_op::<{ vector_spec_instr::MOVE_VI }>(inst_info, cpu)
                     } else {
-                        vec_integer_op_vim::<VectorOpMerge>(inst_info, cpu)
+                        vec_integer_spec_op::<{ vector_spec_instr::MERGE_VIM }>(inst_info, cpu)
                     }
                 } else {
                     std::unreachable!();
@@ -616,10 +616,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VNCLIPU_WI => unimplemented!(), // Narrowing Fixed-Point Clip Instructions
         RiscvInstr::VNCLIP_WI => unimplemented!(),
 
-        RiscvInstr::VSLIDEUP_VI => vec_integer_slideup_op_vi::<VectorOpSlideUp>, // Vector Slide Instructions
-        RiscvInstr::VSLIDEDOWN_VI => vec_integer_slidedown_op_vi::<VectorOpSlideDown>,
+        RiscvInstr::VSLIDEUP_VI => vec_integer_spec_op::<{ vector_spec_instr::SLIDEUP_VI }>, // Vector Slide Instructions
+        RiscvInstr::VSLIDEDOWN_VI => vec_integer_spec_op::<{ vector_spec_instr::SLIDEDOWN_VI }>,
 
-        RiscvInstr::VRGATHER_VI => vec_integer_gather_op_vi::<VectorOpRGatherVI>, // Vector Gather Instructions
+        RiscvInstr::VRGATHER_VI => vec_integer_spec_op::<{ vector_spec_instr::GATHER_VI }>, // Vector Gather Instructions
 
         RiscvInstr::VMV1R_V => vec_whole_register_move_op_v::<1>, // Whole Vector Register Move
         RiscvInstr::VMV2R_V => vec_whole_register_move_op_v::<2>,
@@ -651,7 +651,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VWMACC_VV => vec_widening_integer_op_vvv::<VectorOpWmacc>,
         RiscvInstr::VWMACCSU_VV => vec_widening_integer_op_vvv::<VectorOpWmaccsu>,
 
-        RiscvInstr::VCOMPRESS_VM => vec_compress_op::<VectorOpCompressVm>, // Vector Compress, Expand, and Slide Instructions
+        RiscvInstr::VCOMPRESS_VM => vec_integer_spec_op::<{ vector_spec_instr::COMPRESS_VM }>, // Vector Compress, Expand, and Slide Instructions
 
         RiscvInstr::VMAND_MM => vec_bit_op_vv::<VectorOpAnd>, // Mask-Register Logical Instructions
         RiscvInstr::VMNAND_MM => vec_bit_op_vv::<VectorOpNand>,
@@ -666,9 +666,9 @@ pub(in crate::isa::riscv) fn get_exec_func(
             |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { rs1, .. } = inst_info {
                     if rs1 == 0b10000 {
-                        vec_mask_to_x_op::<VectorOpCpopM>(inst_info, cpu) // count population in mask vcpop.m
+                        vec_integer_spec_op::<{ vector_spec_instr::CPOP_M }>(inst_info, cpu) // count population in mask vcpop.m
                     } else if rs1 == 0b10001 {
-                        vec_mask_to_x_op::<VectorOpFirstM>(inst_info, cpu) // find first set bit in mask vfirst.m
+                        vec_integer_spec_op::<{ vector_spec_instr::FIRST_M }>(inst_info, cpu) // find first set bit in mask vfirst.m
                     } else {
                         return Err(IllegalInstruction);
                     }
@@ -686,19 +686,19 @@ pub(in crate::isa::riscv) fn get_exec_func(
             |instr_info: RVInstrInfo, cpu: &mut RVCPU| {
                 match instr_info {
                     RVInstrInfo::V { rs1: 0b00001, .. } => {
-                        vec_mask_unary_op::<VectorOpMsbfM>(instr_info, cpu) // set-before-first mask bit
+                        vec_integer_spec_op::<{ vector_spec_instr::MSBF_M }>(instr_info, cpu) // set-before-first mask bit
                     }
                     RVInstrInfo::V { rs1: 0b00010, .. } => {
-                        vec_mask_unary_op::<VectorOpMsofM>(instr_info, cpu) // set-only-first mask bit
+                        vec_integer_spec_op::<{ vector_spec_instr::MSOF_M }>(instr_info, cpu) // set-only-first mask bit
                     }
                     RVInstrInfo::V { rs1: 0b00011, .. } => {
-                        vec_mask_unary_op::<VectorOpMsifM>(instr_info, cpu) // set-including-first mask bit
+                        vec_integer_spec_op::<{ vector_spec_instr::MSIF_M }>(instr_info, cpu) // set-including-first mask bit
                     }
                     RVInstrInfo::V { rs1: 0b10000, .. } => {
-                        vec_mask_to_vector_op::<VectorOpIotaM>(instr_info, cpu) // Iota Instruction
+                        vec_integer_spec_op::<{ vector_spec_instr::IOTA_M }>(instr_info, cpu) // Iota Instruction
                     }
                     RVInstrInfo::V { rs1: 0b10001, .. } => {
-                        vec_index_op::<VectorOpIdV>(instr_info, cpu) //  Element Index Instruction
+                        vec_integer_spec_op::<{ vector_spec_instr::ID_V }>(instr_info, cpu) //  Element Index Instruction
                     }
                     _ => {
                         std::unreachable!()
