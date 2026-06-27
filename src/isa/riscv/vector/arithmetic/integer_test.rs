@@ -231,6 +231,46 @@ fn test_vector_scalar_move_uses_u64_width() {
 }
 
 #[test]
+fn test_vector_move_scalar_to_element_only_writes_element_zero() {
+    const LMUL: Vlmul = Vlmul::M4;
+    const SEW: Vsew = Vsew::E16;
+    let old_vd = [
+        0x1111_u16, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888,
+    ];
+    let mut expected = old_vd;
+    expected[0] = 0xcafe;
+
+    let (mut vector, mut mmio) = VectorBuilder::new()
+        .config(LMUL, SEW, false, false, old_vd.len() as u16)
+        .reg(1, 3, &old_vd)
+        .build();
+
+    vector
+        .exec_move_scalar_to_element(0xdead_beef_cafe, 3, 0)
+        .unwrap();
+
+    VectorChecker::new(&mut vector, &mut mmio).reg(1, 3, &expected);
+}
+
+#[test]
+fn test_vector_move_element_to_scalar_sign_extends_element_zero() {
+    const LMUL: Vlmul = Vlmul::M4;
+    const SEW: Vsew = Vsew::E8;
+    let mut source = [0_u8; VLEN_BYTE];
+    source[0] = 0x80;
+    source[1] = 0x7f;
+    let (vector, _) = VectorBuilder::new()
+        .config(LMUL, SEW, false, false, source.len() as u16)
+        .reg(1, 5, &source)
+        .build();
+
+    assert_eq!(
+        vector.exec_move_element_to_scalar(5, 0).unwrap(),
+        Some(WordType::MAX - 0x7f)
+    );
+}
+
+#[test]
 fn test_vector_whole_register_move_copies_group() {
     const LMUL: Vlmul = Vlmul::M4;
     let source: Vec<u64> = (0..(VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u64>()))

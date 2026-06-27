@@ -1173,6 +1173,8 @@ pub(super) mod vector_spec_instr {
     pub(in super::super) const MADC_VIM: usize = 30;
     pub(in super::super) const ADC_VIM: usize = 31;
     pub(in super::super) const MERGE_VIM: usize = 32;
+    pub(in super::super) const MOVE_SX: usize = 33;
+    pub(in super::super) const MOVE_XS: usize = 34;
 }
 
 pub(super) fn vec_integer_spec_op<const VINSTR: usize>(
@@ -1295,6 +1297,18 @@ pub(super) fn vec_integer_spec_op<const VINSTR: usize>(
                     let imm = sign_extend(simm5 as WordType, 5);
                     cpu.vector
                         .exec_integer_scalar_move::<ExecMove<u64>, u64>(imm as u64, vd, vstart)
+                }
+                vector_spec_instr::MOVE_SX => {
+                    let (rs1, vd) = (rs1, rd);
+                    let x1 = cpu.reg_file.read(rs1, 0).0;
+                    cpu.vector.exec_move_scalar_to_element(x1, vd, vstart)
+                }
+                vector_spec_instr::MOVE_XS => {
+                    let (vs2, rd) = (rs2, rd);
+                    if let Some(value) = cpu.vector.exec_move_element_to_scalar(vs2, vstart)? {
+                        cpu.write_reg(rd, value);
+                    }
+                    Ok(())
                 }
                 vector_spec_instr::NSRL_WV => {
                     let (vs1, vs2, vd) = (rs1, rs2, rd);

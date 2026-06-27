@@ -8,6 +8,7 @@ use crate::{
             types::{VGFRef, VGFRefMut, Vlmul, Vsew},
         },
     },
+    utils::sign_extend,
 };
 
 pub(in crate::isa::riscv) mod integer_impl;
@@ -824,6 +825,49 @@ impl Vector {
         }
 
         Ok(())
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_move_scalar_to_element(
+        &mut self,
+        src: WordType,
+        vd: u8,
+        vstart: usize,
+    ) -> Result<(), Exception> {
+        if vstart != 0 || self.config.vl == 0 {
+            return Ok(());
+        }
+
+        let sew = self.config.vsew.into_byte_width();
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(1, vd, 1)?, sew, 1, 1);
+        match self.config.vsew {
+            Vsew::E8 => vd_ref.set(0, src as u8),
+            Vsew::E16 => vd_ref.set(0, src as u16),
+            Vsew::E32 => vd_ref.set(0, src as u32),
+            Vsew::E64 => vd_ref.set(0, src as u64),
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_move_element_to_scalar(
+        &self,
+        vs2: u8,
+        vstart: usize,
+    ) -> Result<Option<WordType>, Exception> {
+        if vstart != 0 || self.config.vl == 0 {
+            return Ok(None);
+        }
+
+        let sew = self.config.vsew.into_byte_width();
+        let vs2_ref = VGFRef::new(self.vector_regfile.get_ref(1, 1, vs2)?, sew, 1, 1);
+        let value = match self.config.vsew {
+            Vsew::E8 => sign_extend(vs2_ref.get::<u8>(0) as WordType, 8),
+            Vsew::E16 => sign_extend(vs2_ref.get::<u16>(0) as WordType, 16),
+            Vsew::E32 => sign_extend(vs2_ref.get::<u32>(0) as WordType, 32),
+            Vsew::E64 => vs2_ref.get::<u64>(0) as WordType,
+        };
+        Ok(Some(value))
     }
 
     #[inline]

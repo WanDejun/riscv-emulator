@@ -707,8 +707,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         }
 
-        RiscvInstr::VMV_S_X => unimplemented!(), // Vector Slide Instructions
-        RiscvInstr::VMV_X_S => unimplemented!(),
+        RiscvInstr::VMV_S_X => vec_integer_spec_op::<{ vector_spec_instr::MOVE_SX }>, // Vector Scalar Move Instructions
+        RiscvInstr::VMV_X_S => vec_integer_spec_op::<{ vector_spec_instr::MOVE_XS }>,
         // RiscvInstr::VFMV_S_F => unimplemented!(),
         // RiscvInstr::VFMV_F_S => unimplemented!(),
 
