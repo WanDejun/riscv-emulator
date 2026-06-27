@@ -15,7 +15,10 @@ use crate::{
                 RVInstrInfo, exec_atomic_function::*, exec_function::*, exec_vector_function::*,
                 instr_table::RiscvInstr,
             },
-            trap::{Exception, trap_controller::TrapController},
+            trap::{
+                Exception::{self, IllegalInstruction},
+                trap_controller::TrapController,
+            },
             vector::arithmetic::*,
         },
     },
@@ -659,16 +662,50 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMORN_MM => vec_bit_op_vv::<VectorOpOrn>,
         RiscvInstr::VMXNOR_MM => vec_bit_op_vv::<VectorOpXnor>,
 
-        RiscvInstr::VCPOP_M => unimplemented!(), //count population in mask vcpop.m
+        RiscvInstr::VCPOP_M | RiscvInstr::VFIRST_M => {
+            |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
+                if let RVInstrInfo::V { rs1, .. } = inst_info {
+                    if rs1 == 0b10000 {
+                        vec_mask_to_x_op::<VectorOpCpopM>(inst_info, cpu) // count population in mask vcpop.m
+                    } else if rs1 == 0b10001 {
+                        vec_mask_to_x_op::<VectorOpFirstM>(inst_info, cpu) // find first set bit in mask vfirst.m
+                    } else {
+                        return Err(IllegalInstruction);
+                    }
+                } else {
+                    std::unreachable!();
+                }
+            }
+        }
 
-        RiscvInstr::VFIRST_M => unimplemented!(), // find first set bit in mask vfirst.m
-
-        RiscvInstr::VMSBF_M => unimplemented!(), // set-before-first mask bit
-        RiscvInstr::VMSIF_M => unimplemented!(), // set-including-first mask bit
-        RiscvInstr::VMSOF_M => unimplemented!(), // set-only-first mask bit
-
-        RiscvInstr::VIOTA_M => unimplemented!(), // Iota Instruction
-        RiscvInstr::VID_V => unimplemented!(),   //  Element Index Instruction
+        RiscvInstr::VMSBF_M
+        | RiscvInstr::VMSIF_M
+        | RiscvInstr::VMSOF_M
+        | RiscvInstr::VIOTA_M
+        | RiscvInstr::VID_V => {
+            |instr_info: RVInstrInfo, cpu: &mut RVCPU| {
+                match instr_info {
+                    RVInstrInfo::V { rs1: 0b00001, .. } => {
+                        vec_mask_unary_op::<VectorOpMsbfM>(instr_info, cpu) // set-before-first mask bit
+                    }
+                    RVInstrInfo::V { rs1: 0b00010, .. } => {
+                        vec_mask_unary_op::<VectorOpMsofM>(instr_info, cpu) // set-only-first mask bit
+                    }
+                    RVInstrInfo::V { rs1: 0b00011, .. } => {
+                        vec_mask_unary_op::<VectorOpMsifM>(instr_info, cpu) // set-including-first mask bit
+                    }
+                    RVInstrInfo::V { rs1: 0b10000, .. } => {
+                        vec_mask_to_vector_op::<VectorOpIotaM>(instr_info, cpu) // Iota Instruction
+                    }
+                    RVInstrInfo::V { rs1: 0b10001, .. } => {
+                        vec_index_op::<VectorOpIdV>(instr_info, cpu) //  Element Index Instruction
+                    }
+                    _ => {
+                        std::unreachable!()
+                    }
+                }
+            }
+        }
 
         RiscvInstr::VMV_S_X => unimplemented!(), // Vector Slide Instructions
         RiscvInstr::VMV_X_S => unimplemented!(),

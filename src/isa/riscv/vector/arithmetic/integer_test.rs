@@ -259,6 +259,48 @@ where
     check(VectorChecker::new(&mut vector, &mut mmio));
 }
 
+fn run_test_mask_to_x<Op, F>(param: TestOpParameter, build: F) -> WordType
+where
+    Op: VectorOpMaskToX,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+{
+    let (mut vector, _mmio) = build(VectorBuilder::new()).build();
+    Op::test(&mut vector, param).unwrap()
+}
+
+fn run_test_mask_unary<Op, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    Op: VectorOpMaskUnary,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    Op::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_mask_to_vector<Op, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    Op: VectorOpMaskToVector,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    Op::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
+fn run_test_index<Op, F, G>(param: TestOpParameter, build: F, check: G)
+where
+    Op: VectorOpIndex,
+    F: FnOnce(VectorBuilder) -> VectorBuilder,
+    G: FnOnce(VectorChecker) -> VectorChecker,
+{
+    let (mut vector, mut mmio) = build(VectorBuilder::new()).build();
+    Op::test(&mut vector, param).unwrap();
+    check(VectorChecker::new(&mut vector, &mut mmio));
+}
+
 fn run_test_integer_mask_vv<OpIMVV, F, G>(param: TestOpParameter, build: F, check: G)
 where
     OpIMVV: VectorOpIntegerMaskVV,
@@ -416,6 +458,145 @@ fn test_vector_op_merge_vim_uses_signed_immediate_value() {
                 .config(LMUL, SEW, false, false, elem_count as u16)
                 .reg(1, param.v0(), &merge_mask)
                 .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_cpop_and_first_m_honor_mask() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_v(16, 0, SEW, SEW).with_enable_mask(true);
+    let source = mask_from_bits([false, true, false, true, true, false, true, false]);
+    let pred_mask = mask_from_bits([true, false, true, true, false, true, true, true]);
+    let build = |builder: VectorBuilder| {
+        builder
+            .config(LMUL, SEW, false, false, 8)
+            .reg(1, param.v0(), &pred_mask)
+            .reg(1, param.vs2(), &source)
+    };
+
+    let count = run_test_mask_to_x::<VectorOpCpopM, _>(param, build);
+    assert_eq!(count, 2);
+
+    let first = run_test_mask_to_x::<VectorOpFirstM, _>(param, |builder| {
+        builder
+            .config(LMUL, SEW, false, false, 8)
+            .reg(1, param.v0(), &pred_mask)
+            .reg(1, param.vs2(), &source)
+    });
+    assert_eq!(first, 3);
+}
+
+#[test]
+fn test_vector_op_first_m_returns_minus_one_when_no_match() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_v(16, 0, SEW, SEW);
+    let source = mask_from_bits([false; 8]);
+
+    let first = run_test_mask_to_x::<VectorOpFirstM, _>(param, |builder| {
+        builder
+            .config(LMUL, SEW, false, false, 8)
+            .reg(1, param.vs2(), &source)
+    });
+    assert_eq!(first, WordType::MAX);
+}
+
+#[test]
+fn test_vector_op_mask_before_first_family() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E8;
+    let param = TestOpParameter::new_v(16, 24, SEW, SEW);
+    let source = mask_from_bits([false, false, true, false, true, false, false, false]);
+    let expected_msbf = mask_from_bits([true, true, false, false, false, false, false, false]);
+    let expected_msif = mask_from_bits([true, true, true, false, false, false, false, false]);
+    let expected_msof = mask_from_bits([false, false, true, false, false, false, false, false]);
+
+    run_test_mask_unary::<VectorOpMsbfM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, 8)
+                .reg(1, param.vs2(), &source)
+        },
+        |checker| checker.reg(1, param.vd(), &expected_msbf),
+    );
+
+    run_test_mask_unary::<VectorOpMsifM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, 8)
+                .reg(1, param.vs2(), &source)
+        },
+        |checker| checker.reg(1, param.vd(), &expected_msif),
+    );
+
+    run_test_mask_unary::<VectorOpMsofM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, 8)
+                .reg(1, param.vs2(), &source)
+        },
+        |checker| checker.reg(1, param.vd(), &expected_msof),
+    );
+}
+
+#[test]
+fn test_vector_op_iota_m_honors_mask() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_v(16, 24, SEW, SEW).with_enable_mask(true);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let source = mask_from_bits([true, false, true, true, false, true, false, false]);
+    let pred_mask = mask_from_bits([true, false, true, true, true, false, true, true]);
+    let old_vd: Vec<u16> = (0..elem_count).map(|index| 0x9000 + index as u16).collect();
+    let mut expected = old_vd.clone();
+    expected[0] = 0;
+    expected[2] = 1;
+    expected[3] = 2;
+    expected[4] = 3;
+    expected[6] = 3;
+    expected[7] = 3;
+
+    run_test_mask_to_vector::<VectorOpIotaM, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, 8)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(1, param.vs2(), &source)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_id_v_honors_mask() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_v(0, 24, SEW, SEW).with_enable_mask(true);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let pred_mask = mask_from_bits([true, false, true, true]);
+    let old_vd: Vec<u32> = (0..elem_count)
+        .map(|index| 0x8000_0000 + index as u32)
+        .collect();
+    let mut expected = old_vd.clone();
+    expected[0] = 0;
+    expected[2] = 2;
+    expected[3] = 3;
+
+    run_test_index::<VectorOpIdV, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
         },
         |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
     );

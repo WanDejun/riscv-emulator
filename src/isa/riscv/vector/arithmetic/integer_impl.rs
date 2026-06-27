@@ -13,7 +13,7 @@ use crate::{
         },
         trap::Exception,
         vector::{
-            VecOpMask,
+            VLEN_BYTE, VecOpMask,
             types::{VGFRef, VGFRefMut},
         },
     },
@@ -865,6 +865,54 @@ pub(in crate::isa::riscv) trait VectorOpIntegerMaskVXM {
     }
 }
 
+pub(in crate::isa::riscv) trait VectorOpMaskToX {
+    fn exec(vs2: &VGFRef, mask: &VecOpMask) -> Result<WordType, Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<WordType, Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_mask_to_x::<Self>(param.vs2(), param.enable_mask(), 0)
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpMaskUnary {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_mask_unary::<Self>(param.vs2(), param.vd(), param.enable_mask(), 0)
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpMaskToVector {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_mask_to_vector::<Self>(param.vs2(), param.vd(), param.enable_mask(), 0)
+    }
+}
+
+pub(in crate::isa::riscv) trait VectorOpIndex {
+    fn exec(vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>;
+
+    #[cfg(test)]
+    fn test(vector: &mut Vector, param: TestOpParameter) -> Result<(), Exception>
+    where
+        Self: Sized,
+    {
+        vector.exec_index::<Self>(param.vd(), param.enable_mask(), 0)
+    }
+}
+
 pub(in crate::isa::riscv) trait VectorOpIntegerGatherVV {
     fn exec(
         vs1: &VGFRef,
@@ -1341,6 +1389,85 @@ where
             vs2[index]
         };
         mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
+fn vector_op_mask_popcount(vs2: &VGFRef, mask: &VecOpMask) -> WordType {
+    let source_mask = vs2.as_slice::<u8>();
+    let mut count = 0;
+    for index in 0..VLEN_BYTE * 8 {
+        if mask.should_access(index) && read_mask_bit(source_mask, index) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn vector_op_mask_first(vs2: &VGFRef, mask: &VecOpMask) -> WordType {
+    let source_mask = vs2.as_slice::<u8>();
+    for index in 0..VLEN_BYTE * 8 {
+        if mask.should_access(index) && read_mask_bit(source_mask, index) {
+            return index as WordType;
+        }
+    }
+    WordType::MAX
+}
+
+enum MaskBeforeFirstMode {
+    Before,
+    Including,
+    Only,
+}
+
+fn vector_op_mask_before_first(
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+    mode: MaskBeforeFirstMode,
+) -> Result<(), Exception> {
+    let source_mask = vs2.as_slice::<u8>();
+    let dest_mask = vd.as_mut_slice::<u8>();
+    let bit_capacity = dest_mask.len() * u8::BITS as usize;
+    let mut seen_first = false;
+
+    for index in mask.first_pending_index().min(bit_capacity)..mask.write_end(bit_capacity) {
+        let active_source_bit = mask.should_access(index) && read_mask_bit(source_mask, index);
+        let value = match mode {
+            MaskBeforeFirstMode::Before => !seen_first && !active_source_bit,
+            MaskBeforeFirstMode::Including => !seen_first,
+            MaskBeforeFirstMode::Only => !seen_first && active_source_bit,
+        };
+        mask.mask_bit_load(dest_mask, index, value);
+        if active_source_bit {
+            seen_first = true;
+        }
+    }
+
+    Ok(())
+}
+
+fn vector_op_iota<T>(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>
+where
+    T: UnsignedInteger + Default + TruncateFrom<u128>,
+{
+    let source_mask = vs2.as_slice::<u8>();
+    let mut count = 0u128;
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, T::truncate_from(count), index);
+        if mask.should_access(index) && read_mask_bit(source_mask, index) {
+            count += 1;
+        }
+    }
+    Ok(())
+}
+
+fn vector_op_index<T>(vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception>
+where
+    T: UnsignedInteger + Default + TruncateFrom<u128>,
+{
+    for (index, element) in vd.iter_mut().enumerate() {
+        mask.element_load(element, T::truncate_from(index as u128), index);
     }
     Ok(())
 }
@@ -2037,6 +2164,13 @@ pub(in crate::isa::riscv) struct VectorOpRGatherEI16VV;
 pub(in crate::isa::riscv) struct VectorOpSlideUp;
 pub(in crate::isa::riscv) struct VectorOpSlideDown;
 pub(in crate::isa::riscv) struct VectorOpMerge;
+pub(in crate::isa::riscv) struct VectorOpCpopM;
+pub(in crate::isa::riscv) struct VectorOpFirstM;
+pub(in crate::isa::riscv) struct VectorOpMsbfM;
+pub(in crate::isa::riscv) struct VectorOpMsifM;
+pub(in crate::isa::riscv) struct VectorOpMsofM;
+pub(in crate::isa::riscv) struct VectorOpIotaM;
+pub(in crate::isa::riscv) struct VectorOpIdV;
 
 impl_vector_op_integer_vv_binary!(VectorOpAdd, ExecAdd);
 impl_vector_op_integer_vv_binary!(VectorOpAddu, ExecAddu);
@@ -2316,6 +2450,48 @@ impl VectorOpIntegerVXM for VectorOpMerge {
         dispatch_integer_sew!(vd.sew, |T| {
             vector_op_merge_vxm::<T>(x1 as T, vs2, v0, vd, mask)
         })
+    }
+}
+
+impl VectorOpMaskToX for VectorOpCpopM {
+    fn exec(vs2: &VGFRef, mask: &VecOpMask) -> Result<WordType, Exception> {
+        Ok(vector_op_mask_popcount(vs2, mask))
+    }
+}
+
+impl VectorOpMaskToX for VectorOpFirstM {
+    fn exec(vs2: &VGFRef, mask: &VecOpMask) -> Result<WordType, Exception> {
+        Ok(vector_op_mask_first(vs2, mask))
+    }
+}
+
+impl VectorOpMaskUnary for VectorOpMsbfM {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        vector_op_mask_before_first(vs2, vd, mask, MaskBeforeFirstMode::Before)
+    }
+}
+
+impl VectorOpMaskUnary for VectorOpMsifM {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        vector_op_mask_before_first(vs2, vd, mask, MaskBeforeFirstMode::Including)
+    }
+}
+
+impl VectorOpMaskUnary for VectorOpMsofM {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        vector_op_mask_before_first(vs2, vd, mask, MaskBeforeFirstMode::Only)
+    }
+}
+
+impl VectorOpMaskToVector for VectorOpIotaM {
+    fn exec(vs2: &VGFRef, vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        dispatch_integer_sew!(vd.sew, |T| { vector_op_iota::<T>(vs2, vd, mask) })
+    }
+}
+
+impl VectorOpIndex for VectorOpIdV {
+    fn exec(vd: &mut VGFRefMut, mask: &VecOpMask) -> Result<(), Exception> {
+        dispatch_integer_sew!(vd.sew, |T| { vector_op_index::<T>(vd, mask) })
     }
 }
 

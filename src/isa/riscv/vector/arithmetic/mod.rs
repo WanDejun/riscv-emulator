@@ -982,4 +982,108 @@ impl Vector {
         );
         OpIMVXM::exec(x1, &vs2_ref, &v0_ref, &mut vd_ref, &mask)
     }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_mask_to_x<Op>(
+        &mut self,
+        vs2: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<WordType, Exception>
+    where
+        Op: VectorOpMaskToX,
+    {
+        let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, Vsew::E8.into_byte_width(), 1, 1);
+        Op::exec(&vs2_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_mask_unary<Op>(
+        &mut self,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        Op: VectorOpMaskUnary,
+    {
+        let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, Vsew::E8.into_byte_width(), 1, 1);
+        let mut vd_ref = VGFRefMut::new(
+            self.vector_regfile.get_mut::<u8>(1, vd, 1)?,
+            Vsew::E8.into_byte_width(),
+            1,
+            1,
+        );
+        Op::exec(&vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_mask_to_vector<Op>(
+        &mut self,
+        vs2: u8,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        Op: VectorOpMaskToVector,
+    {
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        let vs2_data = self.vector_regfile.get_ref(1, 1, vs2)?.to_vec();
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let vs2_ref = VGFRef::new(&vs2_data, Vsew::E8.into_byte_width(), 1, 1);
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        Op::exec(&vs2_ref, &mut vd_ref, &mask)
+    }
+
+    #[inline]
+    pub(in crate::isa::riscv) fn exec_index<Op>(
+        &mut self,
+        vd: u8,
+        enable_mask: bool,
+        vstart: usize,
+    ) -> Result<(), Exception>
+    where
+        Op: VectorOpIndex,
+    {
+        let (vlmul, vsew) = (self.config.vlmul, self.config.vsew);
+        let (sew, lmul) = (vsew.into_byte_width(), vlmul.get_lmul());
+        let mask = VecOpMask::new_with_start(
+            &self.vector_regfile,
+            self.config.vl,
+            enable_mask,
+            self.config.mask_agnostic,
+            self.config.tail_agnostic,
+            vstart,
+        );
+        let mut vd_ref = VGFRefMut::new(self.vector_regfile.get_mut(lmul, vd, 1)?, sew, lmul, 1);
+        Op::exec(&mut vd_ref, &mask)
+    }
 }

@@ -13,11 +13,12 @@ use crate::{
             vector::{
                 VectorMemException,
                 arithmetic::{
-                    VectorOpBitVV, VectorOpIntegerGatherEI16VV, VectorOpIntegerGatherVV,
-                    VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM, VectorOpIntegerMaskVX,
-                    VectorOpIntegerMaskVXM, VectorOpIntegerNarrowingVX, VectorOpIntegerNarrowingWV,
-                    VectorOpIntegerV, VectorOpIntegerVV, VectorOpIntegerVVM, VectorOpIntegerVVV,
-                    VectorOpIntegerVX, VectorOpIntegerVXM, VectorOpIntegerVXV,
+                    VectorOpBitVV, VectorOpIndex, VectorOpIntegerGatherEI16VV,
+                    VectorOpIntegerGatherVV, VectorOpIntegerMaskVV, VectorOpIntegerMaskVVM,
+                    VectorOpIntegerMaskVX, VectorOpIntegerMaskVXM, VectorOpIntegerNarrowingVX,
+                    VectorOpIntegerNarrowingWV, VectorOpIntegerV, VectorOpIntegerVV,
+                    VectorOpIntegerVVM, VectorOpIntegerVVV, VectorOpIntegerVX, VectorOpIntegerVXM,
+                    VectorOpIntegerVXV, VectorOpMaskToVector, VectorOpMaskToX, VectorOpMaskUnary,
                     VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
                     VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
                     VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
@@ -1358,6 +1359,75 @@ where
             let imm = sign_extend(simm5 as WordType, 5);
             cpu.vector
                 .exec_integer_mask_vxm::<OpIMVXM>(imm, vs2, 0, vd, false, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_mask_to_x_op<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpMaskToX,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs2: vs2, rd, vm, ..
+        } = info
+        {
+            let value = cpu.vector.exec_mask_to_x::<Op>(vs2, !vm, vstart)?;
+            cpu.write_reg(rd, value);
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_mask_unary_op<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpMaskUnary,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector.exec_mask_unary::<Op>(vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_mask_to_vector_op<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpMaskToVector,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs2: vs2,
+            rd: vd,
+            vm,
+            ..
+        } = info
+        {
+            cpu.vector.exec_mask_to_vector::<Op>(vs2, vd, !vm, vstart)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vec_index_op<Op>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
+where
+    Op: VectorOpIndex,
+{
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V { rd: vd, vm, .. } = info {
+            cpu.vector.exec_index::<Op>(vd, !vm, vstart)
         } else {
             unreachable!()
         }
