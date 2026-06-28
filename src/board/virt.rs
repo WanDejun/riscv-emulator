@@ -3,21 +3,25 @@ use std::{
     cell::{RefCell, UnsafeCell},
     collections::HashMap,
     hint::cold_path,
+    pin::Pin,
     rc::Rc,
     sync::atomic::Ordering,
 };
 
+use crossbeam::channel;
+
 use crate::{
     DeviceConfig, EMULATOR_CONFIG,
+    background::BackgroundExecutor,
     board::{Board, BoardStatus},
+    byte_io::{ByteSinkExt, ByteSource},
     device::{
         self, DeviceTrait, IdAllocator,
         aclint::Clint,
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
         },
-        fast_uart::FastUart16550,
-        fast_uart::terminal_io::BufferedSerialHandle,
+        fast_uart::{FastUart16550, UartBytePort},
         mmio::{MemoryMapIO, MemoryMapItem},
         plic::{
             PLIC,
@@ -30,7 +34,6 @@ use crate::{
         },
     },
     device_poller::DevicePoller,
-    emulator_panic,
     isa::riscv::{
         executor::RVCPU,
         mmu::VirtAddrManager,
@@ -79,16 +82,20 @@ pub struct RVBoardBuilder {
     mmio_items: Vec<MemoryMapItem>,
     id_allocators: HashMap<TypeId, IdAllocator>,
     device_poller: DevicePoller,
+    background: BackgroundExecutor,
 }
 
 impl RVBoardBuilder {
     pub fn new() -> Self {
+        let (plic_irq_tx, plic_irq_rx) = channel::unbounded();
+
         Self {
             extra_plic_devices: Vec::new(),
             virtio_devices: Vec::new(),
             mmio_items: Vec::new(),
             id_allocators: HashMap::new(),
-            device_poller: DevicePoller::new(),
+            device_poller: DevicePoller::new(plic_irq_tx, plic_irq_rx),
+            background: BackgroundExecutor::new(),
         }
     }
 
@@ -126,9 +133,37 @@ impl RVBoardBuilder {
         let ram_ref = Rc::new(UnsafeCell::new(ram));
 
         // Construct devices
-        let uart1 = Rc::new(RefCell::new(FastUart16550::new()));
-        let serial_io = uart1.borrow().serial_handle();
+        let (uart1, uart_port1) = FastUart16550::new();
+        let uart1 = Rc::new(RefCell::new(uart1));
         self = self.add_plic_device(uart1);
+
+        #[cfg(feature = "native-cli")]
+        {
+            use crate::byte_io::ByteSource;
+            use std::io::IsTerminal;
+
+            // TODO: make this configurable
+            // uart <-> std I/O
+            use crate::{byte_io::TerminalIOContext, device_poller::PollingFnWrapper};
+
+            let mut ctx = TerminalIOContext::new();
+            let mut uart_port1 = uart_port1.clone();
+
+            let input_term = std::io::stdin().is_terminal();
+
+            self.device_poller
+                .add_event(Box::new(PollingFnWrapper::new(move || {
+                    // stdin -> uart
+                    if input_term {
+                        ctx.drain_to(&mut uart_port1);
+                    }
+
+                    // uart -> stdout
+                    uart_port1.drain_to(&mut ctx);
+
+                    None
+                })));
+        }
 
         const MTIME_OFFSET: u64 = 0xbff8;
         const MTIMECMP_OFFSET: u64 = 0x4000;
@@ -170,7 +205,7 @@ impl RVBoardBuilder {
                     .get()
                 }
                 dev_type => {
-                    emulator_panic!("unsupport device: {:#?}", dev_type);
+                    panic!("unsupport device: {:#?}", dev_type);
                 }
             };
             let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
@@ -185,7 +220,7 @@ impl RVBoardBuilder {
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), self.mmio_items);
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
-        let mut cpu = Box::new(RVCPU::from_vaddr_manager(vaddr_manager));
+        let mut cpu = Box::pin(RVCPU::from_vaddr_manager(vaddr_manager));
 
         // register irq line for timer.
         clint.borrow_mut().set_irq_line(
@@ -218,17 +253,23 @@ impl RVBoardBuilder {
         plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
         plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
 
+        // Hand the device poller's tick to the background executor and start the worker thread.
+        let mut background = self.background;
+        background.add_polling_task(self.device_poller.poll_task());
+        background.start();
+
         VirtBoard {
+            background,
             loader: None,
             cpu,
             clock,
             timer,
 
-            device_poller: self.device_poller.start_polling(),
+            device_poller: self.device_poller,
             clint,
             plic,
             plic_freq_counter: 0,
-            serial_io,
+            uart_port: uart_port1,
 
             status: BoardStatus::Running,
         }
@@ -236,9 +277,15 @@ impl RVBoardBuilder {
 }
 
 pub struct VirtBoard {
+    // Background threads must stop before the poller / devices they touch are dropped, so this is
+    // the first field (in rust, "fields of a struct are dropped in declaration order").
+    pub background: BackgroundExecutor,
+
+    pub device_poller: DevicePoller,
+
     loader: Option<ELFLoader>,
 
-    pub cpu: Box<RVCPU>,
+    pub cpu: Pin<Box<RVCPU>>,
     pub clock: VirtualClockRef,
     pub timer: Rc<UnsafeCell<Timer>>,
 
@@ -246,8 +293,8 @@ pub struct VirtBoard {
     pub clint: Rc<RefCell<Clint>>,
     pub plic: Rc<RefCell<PLIC>>,
     pub plic_freq_counter: usize,
-    pub device_poller: DevicePoller,
-    serial_io: Option<BufferedSerialHandle>,
+
+    pub uart_port: UartBytePort,
 
     status: BoardStatus,
 }
@@ -282,20 +329,14 @@ impl VirtBoard {
         builder.build(ram)
     }
 
-    #[cfg(feature = "web")]
-    pub fn push_uart_input(&self, bytes: &[u8]) {
-        if let Some(serial_io) = &self.serial_io {
-            serial_io.send_input_data(bytes.iter().copied());
-        }
+    pub fn push_uart_input(&mut self, bytes: &[u8]) {
+        self.uart_port.receive_bytes(bytes.iter().cloned());
     }
 
-    #[cfg(feature = "web")]
-    pub fn take_uart_output(&self) -> Vec<u8> {
-        if let Some(serial_io) = &self.serial_io {
-            serial_io.receive_output_data()
-        } else {
-            Vec::new()
-        }
+    pub fn take_uart_output(&mut self) -> Vec<u8> {
+        let mut vec = Vec::new();
+        self.uart_port.drain_to(&mut vec);
+        vec
     }
 }
 
@@ -306,6 +347,7 @@ impl Board for VirtBoard {
             self.plic_freq_counter = 0;
 
             // TODO: use external irq lines to trigger plic interrupts.
+            self.background.poll_once();
             self.device_poller.trigger_external_interrupt();
 
             self.plic.borrow_mut().try_get_interrupt(0);

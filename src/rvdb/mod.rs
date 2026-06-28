@@ -5,6 +5,7 @@ mod repl;
 use clap::{Parser, Subcommand};
 use riscv_emulator::config::arch_config::REGFILE_CNT;
 use riscv_emulator::config::arch_config::WordType;
+use riscv_emulator::isa::riscv::RawInstr;
 use riscv_emulator::isa::riscv::csr_reg::PrivilegeLevel;
 use riscv_emulator::isa::riscv::debugger;
 use riscv_emulator::isa::riscv::mmu::AccessType;
@@ -181,7 +182,7 @@ pub enum PrintObject {
 #[derive(Debug, PartialEq)]
 pub struct DbgInstrLine {
     pub addr: u64,
-    pub raw: Option<u32>,
+    pub raw: Option<RawInstr>,
     pub decoded: Option<DecodeInstr>,
     pub symbol: Option<String>,
     pub is_current_pc: bool,

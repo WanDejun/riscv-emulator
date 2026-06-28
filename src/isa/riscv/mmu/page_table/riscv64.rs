@@ -221,17 +221,17 @@ impl PageTableWalker {
             // When running Linux, many such logs are normal, like copy-on-write:
             // it marks pages read-only initially, and when a write access occurs,
             // the kernel will create a private copy.
-            log::info!(
-                "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), {}target flags: ({:?})",
-                vaddr.0,
-                check.exact_mask.0,
-                if check.any_of.is_empty() {
-                    String::new()
-                } else {
-                    format!("and any of {:?}, ", check.any_of)
-                },
-                walk_info.leaf_flags.0
-            );
+            // log::info!(
+            //     "Privilege fault when translating vaddr: {:#x}, required flags: ({:?}), {}target flags: ({:?})",
+            //     vaddr.0,
+            //     check.exact_mask.0,
+            //     if check.any_of.is_empty() {
+            //         String::new()
+            //     } else {
+            //         format!("and any of {:?}, ", check.any_of)
+            //     },
+            //     walk_info.leaf_flags.0
+            // );
             return Err(PageTableError::PrivilegeFault);
         }
 

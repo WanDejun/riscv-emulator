@@ -175,4 +175,10 @@ mod rv64_tests {
     fn run_rv64mi_p() {
         run_test_group_exclude("rv64mi-p-", &["pmpaddr", "sbreak", "breakpoint"]);
     }
+
+    #[test]
+    fn run_rv64uc() {
+        run_test_group("rv64uc-p-");
+        run_test_group("rv64uc-v-");
+    }
 }

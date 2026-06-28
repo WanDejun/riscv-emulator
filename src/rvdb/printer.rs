@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use riscv_emulator::{
     config::arch_config::{REG_NAME, WordType},
     isa::riscv::{
-        RawInstrType,
+        RawInstr,
         csr_reg::{PrivilegeLevel, csr_macro::CSR_NAME},
         debugger::{self, Address},
         decoder::DecodeInstr,
@@ -342,9 +342,11 @@ fn format_instr_detailed(instr: &DbgInstrLine) -> impl std::fmt::Display {
     }
 }
 
-fn format_raw(raw: Option<RawInstrType>) -> impl std::fmt::Display {
+fn format_raw(raw: Option<RawInstr>) -> impl std::fmt::Display {
+    use riscv_emulator::isa::InstrLen;
     match raw {
-        Some(raw) => palette.data(&format!("0x{:08x}", raw)).to_string(),
+        Some(raw) if raw.len() == 2 => palette.data(&format!("0x{:04x}", raw.val)).to_string(),
+        Some(raw) => palette.data(&format!("0x{:08x}", raw.val)).to_string(),
         None => palette.invalid("<invalid>").to_string(),
     }
 }
@@ -353,7 +355,7 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
     if decode_instr.is_none() {
         return format!("{}", palette.invalid("<invalid instruction>"));
     }
-    let DecodeInstr(instr, info) = unsafe { decode_instr.unwrap_unchecked() };
+    let DecodeInstr { instr, info, .. } = unsafe { decode_instr.unwrap_unchecked() };
     match info {
         RVInstrInfo::I { rd, rs1, imm } => match instr {
             RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
@@ -499,6 +501,88 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
             )
         }
         RVInstrInfo::V { .. } => unimplemented!(),
+
+        RVInstrInfo::CR { rd_rs1, rs2 } => {
+            format!(
+                "{} {},{}",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd_rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+            )
+        }
+
+        RVInstrInfo::CI { rd_rs1, imm } => {
+            format!(
+                "{} {},{}",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd_rs1 as usize], 0),
+                palette.data(imm.to_string().as_str()),
+            )
+        }
+
+        RVInstrInfo::CSS { rs2, imm } => {
+            format!(
+                "{} {},{}(sp)",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+                palette.data(imm.to_string().as_str()),
+            )
+        }
+
+        RVInstrInfo::CIW { rd, imm } => {
+            format!(
+                "{} {},{}",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.data(imm.to_string().as_str()),
+            )
+        }
+
+        RVInstrInfo::CL { rd, rs1, imm } => {
+            format!(
+                "{} {},{}({})",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd as usize], 0),
+                palette.data(imm.to_string().as_str()),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+            )
+        }
+
+        RVInstrInfo::CS { rs1, rs2, imm } => {
+            format!(
+                "{} {},{}({})",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+                palette.data(imm.to_string().as_str()),
+                palette.reg(REG_NAME[rs1 as usize], 0),
+            )
+        }
+
+        RVInstrInfo::CA { rd_rs1, rs2 } => {
+            format!(
+                "{} {},{}",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd_rs1 as usize], 0),
+                palette.reg(REG_NAME[rs2 as usize], 0),
+            )
+        }
+
+        RVInstrInfo::CB { rd_rs1, imm } => {
+            format!(
+                "{} {},{}",
+                palette.instr(instr.name()),
+                palette.reg(REG_NAME[rd_rs1 as usize], 0),
+                palette.data(imm.to_string().as_str()),
+            )
+        }
+
+        RVInstrInfo::CJ { target } => {
+            format!(
+                "{} {}",
+                palette.instr(instr.name()),
+                palette.data(target.to_string().as_str()),
+            )
+        }
 
         RVInstrInfo::None => {
             format!("{}", palette.instr(instr.name()))

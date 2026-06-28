@@ -61,11 +61,11 @@ impl WasmEmulator {
         self.inner.board().cpu().read_reg(idx)
     }
 
-    pub fn push_uart_input(&self, input: &[u8]) {
+    pub fn push_uart_input(&mut self, input: &[u8]) {
         self.inner.push_uart_input_bytes(input);
     }
 
-    pub fn take_uart_output(&self) -> Vec<u8> {
+    pub fn take_uart_output(&mut self) -> Vec<u8> {
         self.inner.take_uart_output_bytes()
     }
 }

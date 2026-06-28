@@ -43,7 +43,7 @@ pub trait DebugTarget<I: ISATypes> {
 }
 
 pub trait DecoderTrait<I: ISATypes> {
-    fn from_isa(instrs: &[I::ISADesc]) -> Self;
+    fn from_isa(instrs: Vec<I::ISADesc>) -> Self;
     fn decode(&self, instr: I::RawInstr) -> Option<I::DecodeRst>;
 }
 
@@ -52,18 +52,9 @@ pub trait InstrLen {
 }
 
 pub trait ISATypes: Sized {
-    const EBREAK: Self::RawInstr;
-
     type RawInstr: Copy + InstrLen;
     type ISADesc;
     type DecodeRst: Clone + Copy;
     type StepException: Debug;
-    type Decoder: DecoderTrait<Self>;
     type CPU: DebugTarget<Self>;
-}
-
-impl InstrLen for u32 {
-    fn len(&self) -> WordType {
-        4
-    }
 }

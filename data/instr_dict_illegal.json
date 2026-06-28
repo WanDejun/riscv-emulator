@@ -1,0 +1,11 @@
+{
+    "illegal": {
+        "encoding": "00000000000000000000000000000000",
+        "variable_fields": [],
+        "extension": [
+            "rv_illegal"
+        ],
+        "match": "0x0",
+        "mask": "0xffff"
+    }
+}

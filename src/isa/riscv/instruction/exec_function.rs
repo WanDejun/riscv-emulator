@@ -1,5 +1,5 @@
 use std::{
-    hint::{unlikely, unreachable_unchecked},
+    hint::{cold_path, unlikely, unreachable_unchecked},
     marker::PhantomData,
 };
 
@@ -8,16 +8,18 @@ use super::normal_exec;
 
 use crate::{
     config::arch_config::WordType,
-    device::MemError,
     isa::riscv::{
-        csr_reg::{NamedCsrReg, csr_macro::Minstret},
+        csr_reg::{
+            NamedCsrReg,
+            csr_macro::{Minstret, Misa},
+        },
         executor::RVCPU,
         instruction::RVInstrInfo,
         trap::Exception,
     },
     utils::{
         TruncateFrom, TruncateToBits, UnsignedInteger, as_signed_i128, from_signed_i128,
-        shift_amount, sign_extend, sign_extend_u32, wrapping_add_as_signed,
+        shift_amount, sign_extend_u32, wrapping_add_as_signed,
     },
 };
 
@@ -82,8 +84,8 @@ where
             let target = cpu.pc.wrapping_add(imm); // imm has been sign_extended
 
             // Like JAL(R), branch instructions will generate an exception.
-            // TODO: Like JAL(R), remember that this check should be disabled if 16-bit instructions are enabled.
-            if unlikely((target & 0x3) != 0) {
+            if !cpu.csr.get_by_type_existing::<Misa>().c_enabled() && (target & 0x3) != 0 {
+                cold_path();
                 return Err(Exception::InstructionMisaligned);
             }
 
@@ -112,29 +114,7 @@ where
         };
         let val = cpu.reg_file.read(rs1, 0).0;
         let addr = wrapping_add_as_signed(val, imm);
-        let ret = cpu.memory.read::<T>(addr, &mut cpu.csr);
-
-        match ret {
-            Ok(data) => {
-                let data_64: u64 = data.into();
-                let mut data = data_64 as WordType;
-                if EXTEND {
-                    data = sign_extend(data, (size_of::<T>() as u32) * 8);
-                }
-                cpu.reg_file.write(rd, data);
-            }
-            Err(err) => {
-                cpu.pending_tval = Some(addr);
-
-                // `LoadPageFault` and `LoadMisaligned` are common, so no need to log.
-                if unlikely(err == MemError::LoadFault) {
-                    log::warn!("Load fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
-                }
-
-                return Err(Exception::from_memory_err(err));
-            }
-        }
-        Ok(())
+        super::exec_core::handle_load::<T, EXTEND>(cpu, rd, addr)
     })
 }
 
@@ -152,11 +132,6 @@ where
         let ret = cpu.memory.write(addr, T::truncate_from(val2), &mut cpu.csr);
         if let Err(err) = ret {
             cpu.pending_tval = Some(addr);
-
-            // `SotrePageFault` and `SotreMisaligned` are common, so no need to log.
-            if unlikely(err == MemError::StoreFault) {
-                log::warn!("Store fault at address {:#x}, pc = {:#x}", addr, cpu.pc);
-            }
 
             return Err(Exception::from_memory_err(err));
         }

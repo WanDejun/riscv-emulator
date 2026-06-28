@@ -13,6 +13,12 @@ impl Minstret {
     }
 }
 
+impl Misa {
+    pub fn c_enabled(&self) -> bool {
+        (self.get_extension() & 0b100) != 0
+    }
+}
+
 impl Vtype {
     // If new vtype is supported return Some(vl). Otherwise return None.
     pub fn vsetvl(&mut self, vtype: WordType) -> Option<WordType> {

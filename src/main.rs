@@ -238,6 +238,8 @@ fn main() {
             fs::File::create(sig_path).expect("Failed to create signature file");
         }
 
+        crossterm::terminal::enable_raw_mode().unwrap();
+
         let now = Instant::now();
         loop {
             if board.status() == riscv_emulator::board::BoardStatus::Halt {
@@ -254,6 +256,7 @@ fn main() {
                 break;
             }
         }
+        crossterm::terminal::disable_raw_mode().unwrap();
 
         if let Some(sig_path) = &cli_args.signature {
             if let Err(e) = dump_signature(
@@ -264,6 +267,9 @@ fn main() {
                 log::error!("Failed to dump signature: {}", e);
             }
         }
+
+        drop(board);
+
         println!("Used time: {}s", now.elapsed().as_secs_f32());
     }
 }

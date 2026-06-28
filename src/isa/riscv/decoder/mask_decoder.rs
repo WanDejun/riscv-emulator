@@ -1,7 +1,8 @@
 use crate::isa::{
+    InstrLen,
     riscv::{
-        RiscvTypes,
-        decoder::{DecodeInstr, DecoderTrait, decode_info},
+        RawInstr,
+        decoder::{DecodeInstr, decode_info},
         instruction::{
             InstrFormat,
             instr_table::{RVInstrDesc, RiscvInstr},
@@ -14,30 +15,32 @@ pub(super) struct MaskDecoder {
     masks: Vec<(DecodeMask, RiscvInstr, InstrFormat)>,
 }
 
-impl DecoderTrait<RiscvTypes> for MaskDecoder {
-    fn decode(&self, raw_instr: u32) -> Option<DecodeInstr> {
+impl MaskDecoder {
+    pub fn decode(&self, raw: RawInstr) -> Option<DecodeInstr> {
         for (mask, instr, fmt) in self.masks.iter() {
-            if mask.matches(raw_instr) {
-                return Some(DecodeInstr(*instr, decode_info(raw_instr, *instr, *fmt)));
+            if mask.matches(raw.val) {
+                return Some(DecodeInstr {
+                    instr: *instr,
+                    info: decode_info(raw.val, *instr, *fmt),
+                    len: raw.len(),
+                });
             }
         }
 
         None
     }
 
-    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
+    pub fn from_isa(instrs: impl Iterator<Item = RVInstrDesc>) -> Self {
         let mut masks = vec![];
         for desc in instrs {
-            if desc.use_mask {
-                masks.push((
-                    DecodeMask {
-                        mask: desc.mask,
-                        key: desc.key,
-                    },
-                    desc.instr,
-                    desc.format,
-                ));
-            }
+            masks.push((
+                DecodeMask {
+                    mask: desc.mask,
+                    key: desc.key,
+                },
+                desc.instr,
+                desc.format,
+            ));
         }
 
         log::info!("Mask decoder loads {} instructions", masks.len());

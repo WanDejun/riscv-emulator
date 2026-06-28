@@ -1,11 +1,14 @@
 use smallvec::SmallVec;
 
-use crate::isa::riscv::{
-    RiscvTypes,
-    decoder::{DecodeInstr, DecoderTrait, decode_info},
-    instruction::{
-        instr_table::{RVInstrDesc, RiscvInstr},
-        *,
+use crate::isa::{
+    InstrLen,
+    riscv::{
+        RawInstr,
+        decoder::{DecodeInstr, decode_info},
+        instruction::{
+            instr_table::{RVInstrDesc, RiscvInstr},
+            *,
+        },
     },
 };
 
@@ -60,15 +63,11 @@ pub(super) struct Decoder {
     )>,
 }
 
-impl DecoderTrait<RiscvTypes> for Decoder {
-    fn from_isa(instrs: &[RVInstrDesc]) -> Self {
+impl Decoder {
+    pub fn from_isa(instrs: impl Iterator<Item = RVInstrDesc>) -> Self {
         let mut decode_table = vec![(PartialDecode::Unknown, SmallMap::new()); 1 << 7];
 
         for desc in instrs {
-            if desc.use_mask {
-                continue;
-            }
-
             let RVInstrDesc {
                 opcode,
                 funct3,
@@ -100,11 +99,7 @@ impl DecoderTrait<RiscvTypes> for Decoder {
                     map.insert((opcode, funct3, 0), (instr, format));
                 }
 
-                InstrFormat::J
-                | InstrFormat::U
-                | InstrFormat::None
-                | InstrFormat::R4_rm
-                | InstrFormat::R_rm => {
+                _ => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::Complete;
                     map.insert((opcode, funct3, funct7), (instr, format));
@@ -117,7 +112,10 @@ impl DecoderTrait<RiscvTypes> for Decoder {
         Decoder { decode_table }
     }
 
-    fn decode(&self, instr: u32) -> Option<DecodeInstr> {
+    pub fn decode(&self, instr: RawInstr) -> Option<DecodeInstr> {
+        let len = instr.len();
+        let instr = instr.val;
+
         let opcode = (instr & 0b1111111) as u8;
         let funct3 = ((instr >> 12) & 0b111) as u8;
         let funct7 = (instr >> 25) as u8;
@@ -133,6 +131,10 @@ impl DecoderTrait<RiscvTypes> for Decoder {
             }
         };
 
-        return Some(DecodeInstr(instr_kind, decode_info(instr, instr_kind, fmt)));
+        return Some(DecodeInstr {
+            instr: instr_kind,
+            info: decode_info(instr, instr_kind, fmt),
+            len,
+        });
     }
 }

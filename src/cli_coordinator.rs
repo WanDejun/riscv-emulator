@@ -1,6 +1,5 @@
 #[cfg(all(feature = "native-cli", feature = "multithreading"))]
 mod imp {
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use lazy_static::lazy_static;
     use std::sync::{Arc, Condvar, Mutex};
 
@@ -11,12 +10,9 @@ mod imp {
         Paused,
     }
 
-    /// A coordinator to pause or resume the interaction between [`CliUart`] and the terminal.
+    /// A coordinator to pause or resume the background terminal I/O thread, for debugger.
     /// It is implemented as a global singleton, accessible via [`CliCoordinator::global()`].
-    /// This also ensures the correct status of raw mode.
-    ///
-    /// [`CliUart`]: crate::device::cli_uart::CliUart
-    /// [`spawn_io_thread`]: crate::device::cli_uart::spawn_io_thread
+    // TODO: currently structure cann't make sure output queue empty.
     #[derive(Clone)]
     pub struct CliCoordinator {
         state: Arc<(Mutex<CliThreadState>, Condvar)>,
@@ -55,8 +51,7 @@ mod imp {
                 }
             }
 
-            disable_raw_mode().unwrap();
-            log::trace!("Terminal resumed and raw mode disabled");
+            log::trace!("Terminal resumed.");
         }
 
         pub fn resume_uart(&self) {
@@ -86,41 +81,12 @@ mod imp {
                 }
             }
 
-            enable_raw_mode().unwrap();
-            log::trace!("Terminal resumed and raw mode enabled");
+            log::trace!("Terminal resumed.");
         }
     }
 }
 
-#[cfg(all(feature = "native-cli", not(feature = "multithreading")))]
-mod imp {
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-
-    #[derive(Clone)]
-    pub struct CliCoordinator;
-
-    impl CliCoordinator {
-        pub fn new() -> Self {
-            Self
-        }
-
-        pub fn global() -> &'static CliCoordinator {
-            static INSTANCE: CliCoordinator = CliCoordinator;
-            &INSTANCE
-        }
-
-        pub fn pause_uart_without_wait(&self) {}
-        pub fn pause_uart(&self) {
-            disable_raw_mode().unwrap();
-        }
-        pub fn resume_uart(&self) {}
-        pub fn confirm_pause_and_wait(&self) {
-            enable_raw_mode().unwrap();
-        }
-    }
-}
-
-#[cfg(feature = "web")]
+#[cfg(not(feature = "multithreading"))]
 mod imp {
     #[derive(Clone)]
     pub struct CliCoordinator;

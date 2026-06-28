@@ -236,10 +236,13 @@ impl DeviceTrait for MemoryMapIO {
 
 #[cfg(test)]
 mod test {
-    use crate::device::{
-        config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
-        fast_uart::FastUart16550,
-        power_manager::PowerManager,
+    use crate::{
+        byte_io::ByteSource,
+        device::{
+            config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE, UART_BASE, UART_SIZE},
+            fast_uart::FastUart16550,
+            power_manager::PowerManager,
+        },
     };
 
     use super::*;
@@ -247,7 +250,8 @@ mod test {
     #[test]
     fn mmio_mem_test() {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
-        let uart1 = FastUart16550::new();
+
+        let (uart1, _port) = FastUart16550::new();
         let power_manager = PowerManager::new();
         let table = vec![
             MemoryMapItem::new(
@@ -276,8 +280,7 @@ mod test {
     #[test]
     fn mmio_stdout_test() {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
-        let uart1 = FastUart16550::new();
-        let io = uart1.get_io_channel();
+        let (uart1, mut port1) = FastUart16550::new();
         let power_manager = PowerManager::new();
         let table = vec![
             MemoryMapItem::new(
@@ -293,9 +296,7 @@ mod test {
         mmio.write_by_type(UART_BASE + 0x00, 'a' as u8).unwrap();
         assert_ne!((mmio.read_by_type::<u8>(UART_BASE + 5).unwrap() & 0x20), 0);
         let mut data = Vec::new();
-        while let Ok(v) = io.output_rx.try_recv() {
-            data.push(v);
-        }
+        port1.drain_to(&mut data);
         assert_eq!(data.len(), 1);
         assert_eq!(data[0], 'a' as u8);
     }

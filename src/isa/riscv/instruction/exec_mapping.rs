@@ -1,4 +1,4 @@
-use std::hint::unlikely;
+use std::hint::{cold_path, unlikely};
 
 use crate::{
     config::arch_config::WordType,
@@ -8,12 +8,12 @@ use crate::{
         riscv::{
             csr_reg::{
                 PrivilegeLevel,
-                csr_macro::{Minstret, Mstatus},
+                csr_macro::{Minstret, Misa, Mstatus},
             },
             executor::RVCPU,
             instruction::{
-                RVInstrInfo, exec_atomic_function::*, exec_function::*, exec_vector_function::*,
-                instr_table::RiscvInstr,
+                RVInstrInfo, exec_atomic_function::*, exec_compress_function::*, exec_function::*,
+                exec_vector_function::*, instr_table::RiscvInstr,
             },
             trap::{
                 Exception::{self, IllegalInstruction},
@@ -100,8 +100,8 @@ pub(in crate::isa::riscv) fn get_exec_func(
 
                 // > "The JAL and JALR instructions will generate an instruction-address-misaligned exception
                 // if the target address is not aligned to a four-byte boundary."
-                // TODO: Remember that this check in `JAL` and `JALR` should be disabled if 16-bit instructions are enabled.
-                if unlikely((target & 0x3) != 0) {
+                if !cpu.csr.get_by_type_existing::<Misa>().c_enabled() && (target & 0x3) != 0 {
+                    cold_path();
                     return Err(Exception::InstructionMisaligned);
                 }
 
@@ -372,6 +372,64 @@ pub(in crate::isa::riscv) fn get_exec_func(
             cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
             Ok(())
         },
+
+        //---------------------------------------
+        // RV_C
+        //---------------------------------------
+        RiscvInstr::C_ADD | RiscvInstr::C_ADDI | RiscvInstr::C_ADDI16SP => {
+            exec_compress_arith::<ExecAdd>
+        }
+        RiscvInstr::C_ADDW | RiscvInstr::C_ADDIW => exec_compress_arith::<ExecAddw>,
+        RiscvInstr::C_ADDI4SPN => exec_addi4spn,
+        RiscvInstr::C_SLLI => exec_compress_arith::<ExecSLL>,
+        RiscvInstr::C_SRLI => exec_compress_arith::<ExecSRL>,
+        RiscvInstr::C_SRAI => exec_compress_arith::<ExecSRA>,
+
+        RiscvInstr::C_MV => exec_compress_mv,
+
+        RiscvInstr::C_AND | RiscvInstr::C_ANDI => exec_compress_arith::<ExecAnd>,
+        RiscvInstr::C_OR => exec_compress_arith::<ExecOr>,
+        RiscvInstr::C_XOR => exec_compress_arith::<ExecXor>,
+        RiscvInstr::C_SUB => exec_compress_arith::<ExecSub>,
+        RiscvInstr::C_SUBW => exec_compress_arith::<ExecSubw>,
+
+        RiscvInstr::C_NOP => exec_compress_nop,
+        RiscvInstr::C_EBREAK => |_info, _cpu| Err(Exception::Breakpoint),
+
+        RiscvInstr::C_LI | RiscvInstr::C_LUI => exec_compress_li,
+
+        // Integer load / store
+        RiscvInstr::C_LW => exec_compress_load::<u32, true>,
+        RiscvInstr::C_LD => exec_compress_load::<u64, false>,
+        RiscvInstr::C_LWSP => exec_compress_load_sp::<u32, true>,
+        RiscvInstr::C_LDSP => exec_compress_load_sp::<u64, false>,
+        RiscvInstr::C_SW => exec_compress_store::<u32>,
+        RiscvInstr::C_SD => exec_compress_store::<u64>,
+        RiscvInstr::C_SWSP => exec_compress_store_sp::<u32>,
+        RiscvInstr::C_SDSP => exec_compress_store_sp::<u64>,
+
+        // Float load / store
+        RiscvInstr::C_FLW => exec_compress_float_load::<f32>,
+        RiscvInstr::C_FLD => exec_compress_float_load::<f64>,
+        RiscvInstr::C_FLWSP => exec_compress_float_load_sp::<f32>,
+        RiscvInstr::C_FLDSP => exec_compress_float_load_sp::<f64>,
+        RiscvInstr::C_FSW => exec_compress_float_store::<f32>,
+        RiscvInstr::C_FSD => exec_compress_float_store::<f64>,
+        RiscvInstr::C_FSWSP => exec_compress_float_store_sp::<f32>,
+        RiscvInstr::C_FSDSP => exec_compress_float_store_sp::<f64>,
+
+        // Branch
+        RiscvInstr::C_BEQZ => exec_compress_branch::<ExecEqual>,
+        RiscvInstr::C_BNEZ => exec_compress_branch::<ExecNotEqual>,
+
+        // Jump
+        RiscvInstr::C_J => exec_compress_jump::<false>,
+        RiscvInstr::C_JAL => exec_compress_jump::<true>,
+        RiscvInstr::C_JR => exec_compress_jump_reg::<false>,
+        RiscvInstr::C_JALR => exec_compress_jump_reg::<true>,
+
+        // Reserved / canonical illegal encoding (e.g. 0x0000).
+        RiscvInstr::ILLEGAL => |_info, _cpu| Err(Exception::IllegalInstruction),
 
         //---------------------------------------
         // RV_V

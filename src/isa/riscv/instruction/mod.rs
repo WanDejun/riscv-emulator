@@ -1,4 +1,6 @@
 mod exec_atomic_function;
+mod exec_compress_function;
+mod exec_core;
 mod exec_float_function;
 mod exec_vector_function;
 
@@ -23,6 +25,8 @@ use crate::{
 ///
 /// It takes a closure `f` that performs the actual instruction logic.
 /// If `f` executes successfully, it will increase PC by 4 and increase the Minstret CSR by 1.
+///
+/// Don't use this for C extension.
 #[inline(always)]
 pub(super) fn normal_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
 where
@@ -30,6 +34,18 @@ where
 {
     f(cpu)?;
     cpu.pc = cpu.pc.wrapping_add(4);
+    cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
+    Ok(())
+}
+
+/// A helper function for normal instruction execution in the C extension.
+#[inline(always)]
+pub(super) fn normal_compress_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
+where
+    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
+{
+    f(cpu)?;
+    cpu.pc = cpu.pc.wrapping_add(2);
     cpu.csr.get_by_type_existing::<Minstret>().wrapping_add(1);
     Ok(())
 }
@@ -50,6 +66,26 @@ where
     }
 
     normal_exec(cpu, f)?;
+
+    save_fflags_to_cpu(cpu);
+
+    Ok(())
+}
+
+/// A helper function for normal float instruction execution in the C extension.
+#[inline(always)]
+pub(super) fn normal_compress_float_exec<F>(
+    cpu: &mut RVCPU,
+    f: F,
+) -> Result<(), riscv::trap::Exception>
+where
+    F: FnOnce(&mut RVCPU) -> Result<(), riscv::trap::Exception>,
+{
+    if cpu.csr.get_by_type_existing::<Mstatus>().get_fs() == 0 {
+        return Err(riscv::trap::Exception::IllegalInstruction);
+    }
+
+    normal_compress_exec(cpu, f)?;
 
     save_fflags_to_cpu(cpu);
 
@@ -165,10 +201,49 @@ pub enum RVInstrInfo {
         vm: bool,
         func6: u8,
     },
+
+    // Compressed
+    CR {
+        rd_rs1: u8,
+        rs2: u8,
+    },
+    CI {
+        rd_rs1: u8,
+        imm: WordType,
+    },
+    CSS {
+        rs2: u8,
+        imm: WordType,
+    },
+    CIW {
+        rd: u8,
+        imm: WordType,
+    },
+    CL {
+        rd: u8,
+        rs1: u8,
+        imm: WordType,
+    },
+    CS {
+        rs1: u8,
+        rs2: u8,
+        imm: WordType,
+    },
+    CA {
+        rd_rs1: u8,
+        rs2: u8,
+    },
+    CB {
+        rd_rs1: u8,
+        imm: WordType,
+    },
+    CJ {
+        target: WordType,
+    },
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstrFormat {
     None,
     R,
@@ -181,6 +256,16 @@ pub enum InstrFormat {
     J,
     A,
     V,
+
+    CI,
+    CIW,
+    CA,
+    CB,
+    CJ,
+    CL,
+    CR,
+    CS,
+    CSS,
 }
 
 // define a single enum for every instruction

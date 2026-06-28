@@ -25,7 +25,9 @@ mod vclock;
 #[cfg(feature = "native-cli")]
 pub mod gdb;
 
+pub mod background;
 pub mod board;
+pub mod byte_io;
 pub mod cli_coordinator;
 pub mod config;
 pub mod device;
@@ -156,13 +158,11 @@ impl Emulator {
         &mut self.board
     }
 
-    #[cfg(feature = "web")]
-    pub fn push_uart_input_bytes(&self, bytes: &[u8]) {
+    pub fn push_uart_input_bytes(&mut self, bytes: &[u8]) {
         self.board.push_uart_input(bytes);
     }
 
-    #[cfg(feature = "web")]
-    pub fn take_uart_output_bytes(&self) -> Vec<u8> {
+    pub fn take_uart_output_bytes(&mut self) -> Vec<u8> {
         self.board.take_uart_output()
     }
 }

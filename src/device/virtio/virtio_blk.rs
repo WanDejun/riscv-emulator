@@ -8,13 +8,10 @@ use std::{
 use log::error;
 use num_enum::TryFromPrimitive;
 
-use crate::{
-    device::virtio::{
-        virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
-        virtio_mmio::VirtIODeviceStatus,
-        virtio_queue::{VirtQueue, VirtQueueDesc},
-    },
-    emulator_panic,
+use crate::device::virtio::{
+    virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
+    virtio_mmio::VirtIODeviceStatus,
+    virtio_queue::{VirtQueue, VirtQueueDesc},
 };
 
 pub(super) const SECTOR_SIZE: usize = 512;
@@ -211,7 +208,7 @@ impl VirtIOBlkDevice {
         {
             file = file_result;
         } else {
-            emulator_panic!("Can not find file: {}.", file_path);
+            panic!("Can not find file: {}.", file_path);
         }
         let size = file.seek(SeekFrom::End(0)).unwrap();
 

@@ -7,19 +7,16 @@ use rand_chacha::ChaCha12Rng;
 use crate::{
     config::arch_config::{REGFILE_CNT, WordType},
     device::mmio::MemoryMapIO,
-    isa::{
-        DecoderTrait,
-        riscv::{
-            csr_reg::{
-                NamedCsrReg,
-                csr_macro::{Mstatus, Vl, Vtype},
-            },
-            decoder::DecodeInstr,
-            executor::RVCPU,
-            instruction::{RVInstrInfo, instr_table::RiscvInstr},
-            mmu::VirtAddrManager,
-            vector::types::{Vlmul, Vsew},
+    isa::riscv::{
+        csr_reg::{
+            NamedCsrReg,
+            csr_macro::{Mstatus, Vl, Vtype},
         },
+        decoder::DecodeInstr,
+        executor::RVCPU,
+        instruction::{RVInstrInfo, instr_table::RiscvInstr},
+        mmu::VirtAddrManager,
+        vector::types::{Vlmul, Vsew},
     },
     ram::Ram,
     ram_config::{self, BASE_ADDR},
@@ -257,7 +254,7 @@ where
     G: FnOnce(CPUChecker) -> CPUChecker,
 {
     let mut cpu = build(TestCPUBuilder::new()).build();
-    let DecodeInstr(instr, info) = cpu.decoder.decode(raw_instr).unwrap();
+    let DecodeInstr { instr, info, .. } = cpu.decoder.decode(raw_instr.into()).unwrap();
     // FIXME: [`RVCPU::execute`] don't handle the raised exception
     cpu.execute(instr, info).unwrap();
     check(CPUChecker::new(&mut cpu));

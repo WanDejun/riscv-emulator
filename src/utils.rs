@@ -11,6 +11,19 @@ use crate::{
     fpu::soft_float::APFloatOf,
 };
 
+#[macro_export]
+macro_rules! debug_unreachable {
+    () => {
+        if cfg!(debug_assertions) {
+            panic!()
+        } else {
+            unsafe {
+                std::hint::unreachable_unchecked();
+            }
+        }
+    };
+}
+
 pub struct BiMap<K, V> {
     pub forward: std::collections::BTreeMap<K, V>,
     pub backward: std::collections::BTreeMap<V, K>,
@@ -687,21 +700,6 @@ pub(crate) const fn make_mask(left: usize, right: usize) -> WordType {
     BIT_ONES_ARRAY[width] << left
 }
 
-pub fn disable_terminal_raw_mode() {
-    #[cfg(not(feature = "web"))]
-    {
-        let _ = crossterm::terminal::disable_raw_mode();
-    }
-}
-
-#[macro_export]
-macro_rules! emulator_panic {
-    ($($arg:tt)*) => {{
-        $crate::utils::disable_terminal_raw_mode();
-
-        panic!($($arg)*);
-    }};
-}
 #[cfg(test)]
 mod test {
     use super::*;
