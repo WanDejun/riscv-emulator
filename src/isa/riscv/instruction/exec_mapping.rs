@@ -1,5 +1,3 @@
-use std::hint::{cold_path, unlikely};
-
 use crate::{
     config::arch_config::WordType,
     fpu::soft_float::*,
@@ -8,7 +6,7 @@ use crate::{
         riscv::{
             csr_reg::{
                 PrivilegeLevel,
-                csr_macro::{Minstret, Misa, Mstatus},
+                csr_macro::{Minstret, Mstatus},
             },
             executor::RVCPU,
             instruction::{
@@ -98,12 +96,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             if let RVInstrInfo::J { rd, imm } = inst_info {
                 let target = cpu.pc.wrapping_add(imm); // imm has been sign_extended
 
-                // > "The JAL and JALR instructions will generate an instruction-address-misaligned exception
-                // if the target address is not aligned to a four-byte boundary."
-                if !cpu.csr.get_by_type_existing::<Misa>().c_enabled() && (target & 0x3) != 0 {
-                    cold_path();
-                    return Err(Exception::InstructionMisaligned);
-                }
+                super::check_jump_alignment(cpu, target)?;
 
                 cpu.reg_file.write(rd, cpu.pc.wrapping_add(4));
                 cpu.pc = target;
@@ -120,10 +113,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
                 let val = cpu.reg_file.read(rs1, 0).0;
                 let target: WordType = val.wrapping_add(imm) & !1; // imm has been sign_extended
 
-                // Same as JAL
-                if unlikely((target & 0x3) != 0) {
-                    return Err(Exception::InstructionMisaligned);
-                }
+                super::check_jump_alignment(cpu, target)?;
 
                 cpu.pc = target;
                 cpu.reg_file.write(rd, t);

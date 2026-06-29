@@ -439,6 +439,12 @@ mod tests {
             |builder| builder.reg(15, 123).reg(8, ram_config::BASE_ADDR + 72),
             |checker| checker.mem_base::<u32>(36, 123),
         );
+
+        run_test_exec_decode(
+            0xfef43423, // sd a5,-24(s0)
+            |builder| builder.reg(15, 123).reg(8, ram_config::BASE_ADDR + 24),
+            |checker| checker.mem_base::<u32>(0, 123),
+        );
     }
 
     #[test]
