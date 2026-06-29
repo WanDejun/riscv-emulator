@@ -500,7 +500,19 @@ fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
                 palette.data((imm >> 12).to_string().as_str())
             )
         }
-        RVInstrInfo::V { .. } => unimplemented!(),
+        RVInstrInfo::V {
+            rs1, rs2, rd, vm, ..
+        } => {
+            let vector_reg_name = |id: u8| -> String { "v".to_string() + &id.to_string() };
+            format!(
+                "{} {}, {}, {}, {}",
+                palette.instr(instr.name()),
+                palette.reg(vector_reg_name(rd).as_str(), 0),
+                palette.reg(vector_reg_name(rs1).as_str(), 0),
+                palette.reg(vector_reg_name(rs2).as_str(), 0),
+                palette.data(if vm { "vm" } else { "" }),
+            )
+        }
 
         RVInstrInfo::CR { rd_rs1, rs2 } => {
             format!(
