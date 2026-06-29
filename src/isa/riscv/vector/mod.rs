@@ -337,7 +337,6 @@ impl Vector {
 
     // This method will ignore segment argument, so DO NOT use this in load/store instruction.
     #[inline]
-    #[cfg(test)]
     pub(super) fn read_as_type<T>(&self, idx: u8) -> Result<&[T], Exception> {
         self.vector_regfile
             .read_as_type(self.config.vlmul.get_lmul(), idx)

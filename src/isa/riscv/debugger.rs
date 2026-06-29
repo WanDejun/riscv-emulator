@@ -118,6 +118,13 @@ impl DebugTarget<RiscvTypes> for RVCPU {
         (self.fpu.load::<f32>(idx), self.fpu.load::<f64>(idx))
     }
 
+    fn read_vector_reg<T>(&self, idx: u8) -> Option<&[T]> {
+        match self.vector.read_as_type(idx) {
+            Ok(data) => Some(data),
+            Err(_) => None,
+        }
+    }
+
     /// match input {
     ///     Some() => `Read Write`,
     ///     None => `Read Only`,
@@ -611,6 +618,10 @@ impl<'a, B: Board> Debugger<'a, B> {
 
     pub fn write_float_reg(&mut self, idx: u8, value: f64) {
         self.board.cpu_mut().fpu.store(idx, value);
+    }
+
+    pub fn read_vector_reg<T>(&self, idx: u8) -> Option<&[T]> {
+        self.board.cpu().read_vector_reg(idx)
     }
 
     pub fn read_instr(&mut self, addr: WordType) -> Option<RawInstr> {

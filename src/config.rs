@@ -49,6 +49,7 @@ pub mod arch_config {
                     endian: $endian:path,
                     reg_name: $reg_name: expr,
                     float_reg_name: $float_reg_name: expr,
+                    vector_reg_name: $vector_reg_name: expr,
                 }
             ),* $(,)?
         ) => {
@@ -79,6 +80,12 @@ pub mod arch_config {
 
                 #[cfg(feature = $feature)]
                 pub const FLOAT_REG_NAME: [&str; FLOAT_REGFILE_CNT] = $float_reg_name;
+
+                #[cfg(feature = $feature)]
+                pub const VECTOR_REGFILE_CNT: usize = $vector_reg_name.len();
+
+                #[cfg(feature = $feature)]
+                pub const VECTOR_REG_NAME: [&str; VECTOR_REGFILE_CNT] = $vector_reg_name;
             )*
         };
     }
@@ -94,6 +101,7 @@ pub mod arch_config {
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
                                             "a", 0, 7;  "s", 2, 11;     "t", 3, 6),
             float_reg_name: gen_reg_name_list!("ft", 0, 7; "fs", 0, 1; "fa", 0, 7; "fs", 2, 11; "ft", 8, 11),
+            vector_reg_name: gen_reg_name_list!("v", 0, 32),
         },
         @item "riscv64" => {
             arch: Arch::RISCV64,
@@ -104,6 +112,7 @@ pub mod arch_config {
                                             "tp";       "t", 0, 2;      "s0/fp";    "s1";
                                             "a", 0, 7;  "s", 2, 11;     "t", 3, 6),
             float_reg_name: gen_reg_name_list!("ft", 0, 7; "fs", 0, 1; "fa", 0, 7; "fs", 2, 11; "ft", 8, 11),
+            vector_reg_name: gen_reg_name_list!("v", 0, 32),
         }
     }
 }

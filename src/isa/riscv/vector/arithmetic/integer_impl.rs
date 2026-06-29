@@ -391,6 +391,7 @@ fn write_mask_bit(mask: &mut [u8], index: usize, value: bool) {
     }
 }
 
+#[macro_export]
 macro_rules! dispatch_integer_sew {
     ($sew:expr, |$ty:ident| $body:block) => {
         match $sew {

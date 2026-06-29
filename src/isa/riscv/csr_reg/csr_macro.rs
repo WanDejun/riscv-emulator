@@ -333,7 +333,7 @@ gen_csr_regfile! {
         6,  1, ube;
         7,  1, mpie;
         8,  1, spp;
-        9,  2, vs, validate_readonly;
+        9,  2, vs;
         11, 2, mpp;
         13, 2, fs;
         15, 2, xs, validate_readonly;

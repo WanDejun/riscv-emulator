@@ -98,6 +98,17 @@ impl Printer {
                     f64_val,
                 );
             }
+            CommandOutput::VReg { name, val } => {
+                println!("{} = {{", palette.reg(name, 0));
+                val.iter().for_each(|(c, data)| {
+                    println!(
+                        "\t{} = {}, ",
+                        palette.data(c),
+                        palette.data(format!("{:?}", data).as_str())
+                    );
+                });
+                println!("\n}}")
+            }
             CommandOutput::Translate {
                 virt_addr,
                 phys_addr,

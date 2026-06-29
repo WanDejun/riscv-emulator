@@ -7,12 +7,15 @@ use riscv_emulator::cli_coordinator::CliCoordinator;
 
 use riscv_emulator::{
     board::Board,
-    config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, WordType},
-    isa::InstrLen,
-    isa::riscv::{
-        csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
-        debugger::{Address, Debugger},
-        mmu::AccessType,
+    config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, VECTOR_REG_NAME, WordType},
+    dispatch_integer_sew,
+    isa::{
+        InstrLen,
+        riscv::{
+            csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
+            debugger::{Address, Debugger},
+            mmu::AccessType,
+        },
     },
     load::ELFLoader,
 };
@@ -151,6 +154,30 @@ impl<'a, B: Board> Handler<'a, B> {
                     f64_val,
                 })
             }
+            PrintCmd::VReg { reg } => {
+                let idx = parse_vector_reg(&reg)?;
+                let value = [(8, "d"), (4, "w"), (2, "h"), (1, "b")]
+                    .iter()
+                    .map(|(size, size_prompt)| {
+                        (
+                            size_prompt.to_string(),
+                            dispatch_integer_sew!(*size, |T| {
+                                self.dbg
+                                    .read_vector_reg::<T>(idx)
+                                    .unwrap()
+                                    .iter()
+                                    .map(|v| *v as WordType)
+                                    .collect()
+                            }),
+                        )
+                    })
+                    .collect();
+
+                Ok(CommandOutput::VReg {
+                    name: VECTOR_REG_NAME[idx as usize].to_string(),
+                    val: value,
+                })
+            }
             PrintCmd::Priv => Ok(CommandOutput::Privilege(self.dbg.get_current_privilege())),
         }
     }
@@ -163,6 +190,7 @@ impl<'a, B: Board> Handler<'a, B> {
             PrintCmd::Mem { addr, len, virt } => PrintObject::Mem(parse_u64(&addr)?, len, virt),
             PrintCmd::Csr { addr } => PrintObject::CSR(parse_csr(&addr)?),
             PrintCmd::FReg { reg } => PrintObject::FReg(parse_float_reg(&reg)?),
+            PrintCmd::VReg { reg, .. } => PrintObject::VReg(parse_vector_reg(&reg)?),
             PrintCmd::Priv => PrintObject::Privilege,
         };
         self.watch_list.push(obj);
@@ -177,6 +205,7 @@ impl<'a, B: Board> Handler<'a, B> {
             PrintCmd::Mem { addr, len, virt } => PrintObject::Mem(parse_u64(&addr)?, len, virt),
             PrintCmd::Csr { addr } => PrintObject::CSR(parse_csr(&addr)?),
             PrintCmd::FReg { reg } => PrintObject::FReg(parse_float_reg(&reg)?),
+            PrintCmd::VReg { reg, .. } => PrintObject::VReg(parse_vector_reg(&reg)?),
             PrintCmd::Priv => PrintObject::Privilege,
         };
         self.watch_list.retain(|item| *item != target);
@@ -285,6 +314,10 @@ impl<'a, B: Board> Handler<'a, B> {
                 PrintObject::FReg(idx) => {
                     let name = FLOAT_REG_NAME[idx as usize].to_string();
                     self.handle_print(PrintCmd::FReg { reg: name })?
+                }
+                PrintObject::VReg(idx) => {
+                    let name = VECTOR_REG_NAME[idx as usize].to_string();
+                    self.handle_print(PrintCmd::VReg { reg: name })?
                 }
                 PrintObject::Privilege => self.handle_print(PrintCmd::Priv)?,
             };
@@ -408,6 +441,10 @@ fn parse_common_reg(s: &str) -> Result<u8, String> {
 
 fn parse_float_reg(s: &str) -> Result<u8, String> {
     parse_reg(s, &FLOAT_REG_NAME, 'f')
+}
+
+fn parse_vector_reg(s: &str) -> Result<u8, String> {
+    parse_reg(s, &FLOAT_REG_NAME, 'v')
 }
 
 fn parse_csr(s: &str) -> Result<WordType, String> {

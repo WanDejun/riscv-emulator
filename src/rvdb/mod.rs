@@ -145,6 +145,8 @@ pub enum PrintCmd {
     Csr { addr: String },
     /// Floating-point register
     FReg { reg: String },
+    /// Vector register
+    VReg { reg: String },
     /// Privilege level
     Priv,
 }
@@ -176,6 +178,7 @@ pub enum PrintObject {
     Mem(u64, u32, bool), // addr, len, is_virt
     CSR(WordType),
     FReg(u8),
+    VReg(u8), // index
     Privilege,
 }
 
@@ -203,6 +206,10 @@ pub enum CommandOutput {
         name: String,
         f32_val: f32,
         f64_val: f64,
+    },
+    VReg {
+        name: String,
+        val: Vec<(String, Vec<WordType>)>,
     },
     Csr {
         name: String,
