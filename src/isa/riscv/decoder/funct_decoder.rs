@@ -1,3 +1,5 @@
+use std::hint::likely;
+
 use smallvec::SmallVec;
 
 use crate::isa::{
@@ -54,6 +56,153 @@ impl<K: Ord + Copy, V> SmallMap<K, V> {
     fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
+}
+
+fn fix_vector_instr_decode(vector_instr: RiscvInstr, raw_vec_instr: u32) -> Option<RiscvInstr> {
+    let vm = ((raw_vec_instr >> 25) & 1) != 0;
+    let rs1 = (raw_vec_instr >> 15) & 0b11111;
+    let rs2 = (raw_vec_instr >> 20) & 0b11111;
+
+    let instr = match vector_instr {
+        // The funct decoder keys vector arithmetic instructions by
+        // opcode/funct3/funct6/vm.  Several RVV encodings use vm, rs1 or rs2 as
+        // secondary opcode bits, so fix those aliases before decode_info is
+        // built and execution is dispatched.
+        RiscvInstr::VMADC_VV | RiscvInstr::VMADC_VVM => {
+            if vm {
+                RiscvInstr::VMADC_VV
+            } else {
+                RiscvInstr::VMADC_VVM
+            }
+        }
+        RiscvInstr::VMSBC_VV | RiscvInstr::VMSBC_VVM => {
+            if vm {
+                RiscvInstr::VMSBC_VV
+            } else {
+                RiscvInstr::VMSBC_VVM
+            }
+        }
+        RiscvInstr::VMADC_VX | RiscvInstr::VMADC_VXM => {
+            if vm {
+                RiscvInstr::VMADC_VX
+            } else {
+                RiscvInstr::VMADC_VXM
+            }
+        }
+        RiscvInstr::VMSBC_VX | RiscvInstr::VMSBC_VXM => {
+            if vm {
+                RiscvInstr::VMSBC_VX
+            } else {
+                RiscvInstr::VMSBC_VXM
+            }
+        }
+        RiscvInstr::VMADC_VI | RiscvInstr::VMADC_VIM => {
+            if vm {
+                RiscvInstr::VMADC_VI
+            } else {
+                RiscvInstr::VMADC_VIM
+            }
+        }
+
+        RiscvInstr::VMERGE_VVM | RiscvInstr::VMV_V_V => {
+            if vm {
+                if rs2 != 0 {
+                    return None;
+                }
+                RiscvInstr::VMV_V_V
+            } else {
+                RiscvInstr::VMERGE_VVM
+            }
+        }
+        RiscvInstr::VMERGE_VXM | RiscvInstr::VMV_V_X => {
+            if vm {
+                if rs2 != 0 {
+                    return None;
+                }
+                RiscvInstr::VMV_V_X
+            } else {
+                RiscvInstr::VMERGE_VXM
+            }
+        }
+        RiscvInstr::VMERGE_VIM | RiscvInstr::VMV_V_I => {
+            if vm {
+                if rs2 != 0 {
+                    return None;
+                }
+                RiscvInstr::VMV_V_I
+            } else {
+                RiscvInstr::VMERGE_VIM
+            }
+        }
+
+        RiscvInstr::VMV1R_V | RiscvInstr::VMV2R_V | RiscvInstr::VMV4R_V | RiscvInstr::VMV8R_V => {
+            if !vm {
+                return None;
+            }
+            match rs1 {
+                0 => RiscvInstr::VMV1R_V,
+                1 => RiscvInstr::VMV2R_V,
+                3 => RiscvInstr::VMV4R_V,
+                7 => RiscvInstr::VMV8R_V,
+                _ => return None,
+            }
+        }
+
+        RiscvInstr::VZEXT_VF2
+        | RiscvInstr::VZEXT_VF4
+        | RiscvInstr::VZEXT_VF8
+        | RiscvInstr::VSEXT_VF2
+        | RiscvInstr::VSEXT_VF4
+        | RiscvInstr::VSEXT_VF8 => match rs1 {
+            2 => RiscvInstr::VZEXT_VF8,
+            3 => RiscvInstr::VSEXT_VF8,
+            4 => RiscvInstr::VZEXT_VF4,
+            5 => RiscvInstr::VSEXT_VF4,
+            6 => RiscvInstr::VZEXT_VF2,
+            7 => RiscvInstr::VSEXT_VF2,
+            _ => return None,
+        },
+
+        RiscvInstr::VCPOP_M | RiscvInstr::VFIRST_M | RiscvInstr::VMV_X_S => match rs1 {
+            0 if vm => RiscvInstr::VMV_X_S,
+            16 => RiscvInstr::VCPOP_M,
+            17 => RiscvInstr::VFIRST_M,
+            _ => return None,
+        },
+        RiscvInstr::VMSBF_M
+        | RiscvInstr::VMSIF_M
+        | RiscvInstr::VMSOF_M
+        | RiscvInstr::VIOTA_M
+        | RiscvInstr::VID_V => match rs1 {
+            1 => RiscvInstr::VMSBF_M,
+            2 => RiscvInstr::VMSOF_M,
+            3 => RiscvInstr::VMSIF_M,
+            16 => RiscvInstr::VIOTA_M,
+            17 if rs2 == 0 => RiscvInstr::VID_V,
+            _ => return None,
+        },
+
+        RiscvInstr::VADC_VVM | RiscvInstr::VADC_VXM | RiscvInstr::VADC_VIM if vm => return None,
+        RiscvInstr::VSBC_VVM | RiscvInstr::VSBC_VXM if vm => return None,
+        RiscvInstr::VCOMPRESS_VM if !vm => return None,
+        RiscvInstr::VMV_S_X if !vm || rs2 != 0 => return None,
+        RiscvInstr::VMAND_MM
+        | RiscvInstr::VMNAND_MM
+        | RiscvInstr::VMANDN_MM
+        | RiscvInstr::VMXOR_MM
+        | RiscvInstr::VMOR_MM
+        | RiscvInstr::VMNOR_MM
+        | RiscvInstr::VMORN_MM
+        | RiscvInstr::VMXNOR_MM
+            if !vm =>
+        {
+            return None;
+        }
+
+        _ => vector_instr,
+    };
+
+    Some(instr)
 }
 
 pub(super) struct Decoder {
@@ -136,6 +285,11 @@ impl Decoder {
             PartialDecode::Unknown => {
                 return None;
             }
+        };
+        let instr_kind = if likely(fmt != InstrFormat::V) {
+            instr_kind
+        } else {
+            fix_vector_instr_decode(instr_kind, instr)?
         };
 
         return Some(DecodeInstr {

@@ -260,6 +260,16 @@ mod tests {
             | ((funct7 as u32) << 25)
     }
 
+    fn get_instr_v(opcode: u8, funct3: u8, func6: u8, vm: bool, rd: u8, rs1: u8, rs2: u8) -> u32 {
+        (opcode as u32)
+            | ((rd as u32) << 7)
+            | ((funct3 as u32) << 12)
+            | ((rs1 as u32) << 15)
+            | ((rs2 as u32) << 20)
+            | ((vm as u32) << 25)
+            | ((func6 as u32) << 26)
+    }
+
     fn get_instr_i(opcode: u8, funct3: u8, rd: u8, rs1: u8, imm: u32) -> u32 {
         (opcode as u32)
             | ((rd as u32) << 7)
@@ -323,6 +333,11 @@ mod tests {
                     len: raw.len(),
                 }
             );
+        }
+
+        fn check_illegal(&mut self, instr: u32) {
+            let decoded = self.decoder.decode(instr.into());
+            assert!(decoded.is_none(), "{instr:#010x} decoded as {decoded:?}");
         }
     }
 
@@ -473,6 +488,148 @@ mod tests {
                 rd: 10,
             },
         );
+    }
+
+    #[test]
+    fn test_decoder_rvv_secondary_opcode_fields() {
+        let mut checker = Checker::new();
+
+        checker.check(
+            get_instr_v(0x57, 0b000, 0b010001, true, 1, 2, 3),
+            RiscvInstr::VMADC_VV,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 2,
+                rs2: 3,
+                vm: true,
+                func6: 0b010001,
+            },
+        );
+        checker.check(
+            get_instr_v(0x57, 0b000, 0b010001, false, 1, 2, 3),
+            RiscvInstr::VMADC_VVM,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 2,
+                rs2: 3,
+                vm: false,
+                func6: 0b010001,
+            },
+        );
+
+        checker.check(
+            get_instr_v(0x57, 0b000, 0b010111, false, 1, 2, 3),
+            RiscvInstr::VMERGE_VVM,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 2,
+                rs2: 3,
+                vm: false,
+                func6: 0b010111,
+            },
+        );
+        checker.check(
+            get_instr_v(0x57, 0b000, 0b010111, true, 1, 2, 0),
+            RiscvInstr::VMV_V_V,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 2,
+                rs2: 0,
+                vm: true,
+                func6: 0b010111,
+            },
+        );
+        checker.check_illegal(get_instr_v(0x57, 0b000, 0b010111, true, 1, 2, 3));
+
+        checker.check(
+            get_instr_v(0x57, 0b011, 0b100111, true, 1, 1, 8),
+            RiscvInstr::VMV2R_V,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 1,
+                rs2: 8,
+                vm: true,
+                func6: 0b100111,
+            },
+        );
+        checker.check_illegal(get_instr_v(0x57, 0b011, 0b100111, true, 1, 2, 8));
+        checker.check_illegal(get_instr_v(0x57, 0b011, 0b100111, false, 1, 1, 8));
+
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010010, false, 1, 3, 8),
+            RiscvInstr::VSEXT_VF8,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 3,
+                rs2: 8,
+                vm: false,
+                func6: 0b010010,
+            },
+        );
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010010, true, 1, 4, 8),
+            RiscvInstr::VZEXT_VF4,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 4,
+                rs2: 8,
+                vm: true,
+                func6: 0b010010,
+            },
+        );
+        checker.check_illegal(get_instr_v(0x57, 0b010, 0b010010, true, 1, 8, 8));
+
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010000, true, 1, 0, 8),
+            RiscvInstr::VMV_X_S,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 0,
+                rs2: 8,
+                vm: true,
+                func6: 0b010000,
+            },
+        );
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010000, false, 1, 16, 8),
+            RiscvInstr::VCPOP_M,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 16,
+                rs2: 8,
+                vm: false,
+                func6: 0b010000,
+            },
+        );
+        checker.check_illegal(get_instr_v(0x57, 0b010, 0b010000, false, 1, 0, 8));
+
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010100, false, 1, 1, 8),
+            RiscvInstr::VMSBF_M,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 1,
+                rs2: 8,
+                vm: false,
+                func6: 0b010100,
+            },
+        );
+        checker.check(
+            get_instr_v(0x57, 0b010, 0b010100, true, 1, 17, 0),
+            RiscvInstr::VID_V,
+            RVInstrInfo::V {
+                rd: 1,
+                rs1: 17,
+                rs2: 0,
+                vm: true,
+                func6: 0b010100,
+            },
+        );
+        checker.check_illegal(get_instr_v(0x57, 0b010, 0b010100, true, 1, 17, 8));
+
+        checker.check_illegal(get_instr_v(0x57, 0b010, 0b010111, false, 1, 2, 3));
+        checker.check_illegal(get_instr_v(0x57, 0b110, 0b010000, false, 1, 2, 0));
+        checker.check_illegal(get_instr_v(0x57, 0b010, 0b011001, false, 1, 2, 3));
     }
 
     #[test]
