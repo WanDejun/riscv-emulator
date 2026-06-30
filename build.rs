@@ -29,6 +29,10 @@ fn get_atomic_funct7(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 27, 31)) << 2
 }
 
+fn get_vector_funct7(s: &str) -> u64 {
+    to_bits(get_instr_bits(s, 26, 31)) << 1
+}
+
 fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
@@ -218,6 +222,8 @@ fn parse_instr<'a>(
             let funct3 = get_funct3(encoding);
             let funct7 = if format == "A" {
                 get_atomic_funct7(encoding)
+            } else if format == "V" {
+                get_vector_funct7(encoding)
             } else {
                 get_funct7(encoding)
             };
@@ -231,6 +237,7 @@ fn parse_instr<'a>(
                 || fields.is_empty()
                 || fields.contains(&"rm")
                 || ext == "rv_s"
+                || ext == "rv_f"
                 || ext == "rv_d"
                 || is_vector_config(encoding);
 

@@ -71,46 +71,46 @@ static inline void rvv_store_i8_v8(int8_t* dst) {
 }
 
 #define RVV_WRAP_VV_I32(name, asm_name)                                                  \
-    static inline void rvv_##name##_vv_i32(int32_t* dst, const int32_t* lhs,             \
-                                           const int32_t* rhs, size_t n) {               \
-        while (n) {                                                                       \
+    static inline void rvv_##name##_vv_i32(                                              \
+        int32_t* dst, const int32_t* lhs, const int32_t* rhs, size_t n) {                \
+        while (n) {                                                                      \
             size_t vl = rvv_vsetvl_e32m1(n);                                             \
             rvv_load_i32_v16(lhs);                                                       \
             rvv_load_i32_v8(rhs);                                                        \
-            asm volatile(asm_name " v24, v16, v8" ::: "memory");                        \
+            asm volatile(asm_name " v24, v16, v8" ::: "memory");                         \
             rvv_store_i32_v24(dst);                                                      \
-            lhs += vl;                                                                    \
-            rhs += vl;                                                                    \
-            dst += vl;                                                                    \
-            n -= vl;                                                                      \
-        }                                                                                 \
+            lhs += vl;                                                                   \
+            rhs += vl;                                                                   \
+            dst += vl;                                                                   \
+            n -= vl;                                                                     \
+        }                                                                                \
     }
 
 #define RVV_WRAP_VX_I32(name, asm_name)                                                  \
-    static inline void rvv_##name##_vx_i32(int32_t* dst, const int32_t* src, int32_t x,  \
-                                           size_t n) {                                   \
-        while (n) {                                                                       \
+    static inline void rvv_##name##_vx_i32(                                              \
+        int32_t* dst, const int32_t* src, int32_t x, size_t n) {                         \
+        while (n) {                                                                      \
             size_t vl = rvv_vsetvl_e32m1(n);                                             \
             rvv_load_i32_v8(src);                                                        \
-            asm volatile(asm_name " v24, v8, %0" : : "r"(x) : "memory");                \
+            asm volatile(asm_name " v24, v8, %0" : : "r"(x) : "memory");                 \
             rvv_store_i32_v24(dst);                                                      \
-            src += vl;                                                                    \
-            dst += vl;                                                                    \
-            n -= vl;                                                                      \
-        }                                                                                 \
+            src += vl;                                                                   \
+            dst += vl;                                                                   \
+            n -= vl;                                                                     \
+        }                                                                                \
     }
 
 #define RVV_WRAP_VI_I32(name, asm_name, imm)                                             \
     static inline void rvv_##name##_vi_i32(int32_t* dst, const int32_t* src, size_t n) { \
-        while (n) {                                                                       \
+        while (n) {                                                                      \
             size_t vl = rvv_vsetvl_e32m1(n);                                             \
             rvv_load_i32_v8(src);                                                        \
-            asm volatile(asm_name " v24, v8, " #imm ::: "memory");                      \
+            asm volatile(asm_name " v24, v8, " #imm ::: "memory");                       \
             rvv_store_i32_v24(dst);                                                      \
-            src += vl;                                                                    \
-            dst += vl;                                                                    \
-            n -= vl;                                                                      \
-        }                                                                                 \
+            src += vl;                                                                   \
+            dst += vl;                                                                   \
+            n -= vl;                                                                     \
+        }                                                                                \
     }
 
 RVV_WRAP_VV_I32(add, "vadd.vv")
@@ -147,21 +147,21 @@ RVV_WRAP_VI_I32(srl1, "vsrl.vi", 1)
 RVV_WRAP_VI_I32(sra1, "vsra.vi", 1)
 
 #define RVV_WRAP_MASK_VV_I32(name, asm_name)                                             \
-    static inline void rvv_##name##_vv_i32(uint8_t* mask_out, const int32_t* lhs,        \
-                                           const int32_t* rhs, size_t n) {               \
-        while (n) {                                                                       \
+    static inline void rvv_##name##_vv_i32(                                              \
+        uint8_t* mask_out, const int32_t* lhs, const int32_t* rhs, size_t n) {           \
+        while (n) {                                                                      \
             size_t vl = rvv_vsetvl_e32m1(n);                                             \
             rvv_load_i32_v16(lhs);                                                       \
             rvv_load_i32_v8(rhs);                                                        \
-            asm volatile(asm_name " v0, v16, v8\n\tvsm.v v0, (%0)"                      \
+            asm volatile(asm_name " v0, v16, v8\n\tvsm.v v0, (%0)"                       \
                          :                                                               \
-                         : "r"(mask_out)                                                \
-                         : "memory");                                                   \
-            lhs += vl;                                                                    \
-            rhs += vl;                                                                    \
+                         : "r"(mask_out)                                                 \
+                         : "memory");                                                    \
+            lhs += vl;                                                                   \
+            rhs += vl;                                                                   \
             mask_out += (vl + 7) / 8;                                                    \
-            n -= vl;                                                                      \
-        }                                                                                 \
+            n -= vl;                                                                     \
+        }                                                                                \
     }
 
 /* These helpers materialize mask registers with vsm.v. They are useful for
@@ -174,13 +174,20 @@ RVV_WRAP_MASK_VV_I32(msle, "vmsle.vv")
 RVV_WRAP_MASK_VV_I32(msltu, "vmsltu.vv")
 RVV_WRAP_MASK_VV_I32(msleu, "vmsleu.vv")
 
-static inline void rvv_merge_vvm_i32(int32_t* dst, const int32_t* a, const int32_t* b,
-                                     const uint8_t* mask, size_t n) {
+static inline void rvv_merge_vvm_i32(
+    int32_t* dst,
+    const int32_t* a,
+    const int32_t* b,
+    const uint8_t* mask,
+    size_t n) {
     while (n) {
         size_t vl = rvv_vsetvl_e32m1(n);
         rvv_load_i32_v16(a);
         rvv_load_i32_v8(b);
-        asm volatile("vlm.v v0, (%0)\n\tvmerge.vvm v24, v8, v16, v0" : : "r"(mask) : "memory");
+        asm volatile("vlm.v v0, (%0)\n\tvmerge.vvm v24, v8, v16, v0"
+                     :
+                     : "r"(mask)
+                     : "memory");
         rvv_store_i32_v24(dst);
         a += vl;
         b += vl;
@@ -190,7 +197,8 @@ static inline void rvv_merge_vvm_i32(int32_t* dst, const int32_t* a, const int32
     }
 }
 
-static inline void rvv_merge_eq_i32(int32_t* dst, const int32_t* a, const int32_t* b, size_t n) {
+static inline void
+rvv_merge_eq_i32(int32_t* dst, const int32_t* a, const int32_t* b, size_t n) {
     while (n) {
         size_t vl = rvv_vsetvl_e32m1(n);
         rvv_load_i32_v16(a);
@@ -204,8 +212,11 @@ static inline void rvv_merge_eq_i32(int32_t* dst, const int32_t* a, const int32_
     }
 }
 
-static inline long rvv_mseq_count_first_i32(const int32_t* lhs, const int32_t* rhs, size_t n,
-                                            long* first_out) {
+static inline long rvv_mseq_count_first_i32(
+    const int32_t* lhs,
+    const int32_t* rhs,
+    size_t n,
+    long* first_out) {
     long total = 0;
     long first = -1;
     long offset = 0;
@@ -234,8 +245,8 @@ static inline long rvv_mseq_count_first_i32(const int32_t* lhs, const int32_t* r
     return total;
 }
 
-static inline void rvv_saxpy_i32(int32_t* dst, const int32_t* x, const int32_t* y, int32_t a,
-                                 size_t n) {
+static inline void
+rvv_saxpy_i32(int32_t* dst, const int32_t* x, const int32_t* y, int32_t a, size_t n) {
     while (n) {
         size_t vl = rvv_vsetvl_e32m1(n);
         rvv_load_i32_v8(x);
@@ -249,7 +260,8 @@ static inline void rvv_saxpy_i32(int32_t* dst, const int32_t* x, const int32_t* 
     }
 }
 
-static inline void rvv_dot_i32(int32_t* tmp, const int32_t* a, const int32_t* b, size_t n) {
+static inline void
+rvv_dot_i32(int32_t* tmp, const int32_t* a, const int32_t* b, size_t n) {
     while (n) {
         size_t vl = rvv_vsetvl_e32m1(n);
         rvv_load_i32_v8(a);
@@ -277,12 +289,15 @@ static inline void rvv_slidedown1_i32(int32_t* dst, const int32_t* src, size_t n
     rvv_store_i32_v24(dst);
 }
 
-static inline void rvv_gather_i32(int32_t* dst, const int32_t* src, const uint32_t* index,
-                                  size_t n) {
+static inline void
+rvv_gather_i32(int32_t* dst, const int32_t* src, const uint32_t* index, size_t n) {
     while (n) {
         size_t vl = rvv_vsetvl_e32m1(n);
         rvv_load_i32_v8(src);
-        asm volatile("vle32.v v16, (%0)\n\tvrgather.vv v24, v8, v16" : : "r"(index) : "memory");
+        asm volatile("vle32.v v16, (%0)\n\tvrgather.vv v24, v8, v16"
+                     :
+                     : "r"(index)
+                     : "memory");
         rvv_store_i32_v24(dst);
         dst += vl;
         index += vl;
@@ -290,12 +305,16 @@ static inline void rvv_gather_i32(int32_t* dst, const int32_t* src, const uint32
     }
 }
 
-static inline void rvv_narrow_shift_i32_to_i16_m2(int16_t* dst, const int32_t* src, uint32_t shift,
-                                                  size_t n) {
+static inline void rvv_narrow_shift_i32_to_i16_m2(
+    int16_t* dst,
+    const int32_t* src,
+    uint32_t shift,
+    size_t n) {
     while (n) {
         size_t vl;
-        asm volatile("vsetvli %0, %3, e16, m1, tu, mu\n\t"
+        asm volatile("vsetvli %0, %3, e32, m2, tu, mu\n\t"
                      "vle32.v v8, (%1)\n\t"
+                     "vsetvli %0, %3, e16, m1, tu, mu\n\t"
                      "vnsra.wx v24, v8, %2\n\t"
                      "vse16.v v24, (%4)"
                      : "=&r"(vl)
@@ -307,15 +326,13 @@ static inline void rvv_narrow_shift_i32_to_i16_m2(int16_t* dst, const int32_t* s
     }
 }
 
-static inline void rvv_move_scalar_pair_i32(int32_t* dst, const int32_t* src, int32_t value) {
+static inline void
+rvv_move_scalar_pair_i32(int32_t* dst, const int32_t* src, int32_t value) {
     int32_t out;
     rvv_vsetvl_e32m1(1);
     rvv_load_i32_v8(src);
     asm volatile("vmv.s.x v8, %1\n\tvmv.x.s %0, v8" : "=r"(out) : "r"(value) : "memory");
-    asm volatile("sw %0, 0(%1)"
-                 :
-                 : "r"(out), "r"(dst)
-                 : "memory");
+    asm volatile("sw %0, 0(%1)" : : "r"(out), "r"(dst) : "memory");
 }
 
 static inline long rvv_mask_cpop_first(const uint8_t* mask, size_t n, long* first_out) {

@@ -9,7 +9,7 @@ use crate::{
             },
             executor::RVCPU,
             instruction::{RVInstrInfo, exec_function::ExecMove, normal_vector_exec},
-            trap::Exception,
+            trap::Exception::{self, IllegalInstruction},
             vector::{
                 VectorMemException,
                 arithmetic::{
@@ -1300,11 +1300,17 @@ pub(super) fn vec_integer_spec_op<const VINSTR: usize>(
                 }
                 vector_spec_instr::MOVE_SX => {
                     let (rs1, vd) = (rs1, rd);
+                    if rs2 != 0b00000 {
+                        return Err(IllegalInstruction);
+                    }
                     let x1 = cpu.reg_file.read(rs1, 0).0;
                     cpu.vector.exec_move_scalar_to_element(x1, vd, vstart)
                 }
                 vector_spec_instr::MOVE_XS => {
                     let (vs2, rd) = (rs2, rd);
+                    if rs1 != 0b00000 {
+                        return Err(IllegalInstruction);
+                    }
                     if let Some(value) = cpu.vector.exec_move_element_to_scalar(vs2, vstart)? {
                         cpu.write_reg(rd, value);
                     }

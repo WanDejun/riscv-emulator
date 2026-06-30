@@ -93,7 +93,14 @@ impl Decoder {
                         map.insert((opcode, funct3, funct7_a), (instr, format));
                     }
                 }
-                InstrFormat::I | InstrFormat::S | InstrFormat::B | InstrFormat::V => {
+                InstrFormat::V => {
+                    let (partial, map) = &mut decode_table[opcode as usize];
+                    *partial = PartialDecode::RequireF7;
+                    let funct6_vm = funct7 | 0b01;
+                    map.insert((opcode, funct3, funct6_vm), (instr, format));
+                    map.insert((opcode, funct3, funct6_vm & !0b01), (instr, format));
+                }
+                InstrFormat::I | InstrFormat::S | InstrFormat::B => {
                     let (partial, map) = &mut decode_table[opcode as usize];
                     *partial = PartialDecode::RequireF3;
                     map.insert((opcode, funct3, 0), (instr, format));

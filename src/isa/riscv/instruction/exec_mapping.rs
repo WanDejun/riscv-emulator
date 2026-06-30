@@ -790,10 +790,12 @@ pub(in crate::isa::riscv) fn get_exec_func(
         RiscvInstr::VMORN_MM => vec_bit_op_vv::<VectorOpOrn>,
         RiscvInstr::VMXNOR_MM => vec_bit_op_vv::<VectorOpXnor>,
 
-        RiscvInstr::VCPOP_M | RiscvInstr::VFIRST_M => {
+        RiscvInstr::VCPOP_M | RiscvInstr::VFIRST_M | RiscvInstr::VMV_X_S => {
             |inst_info: RVInstrInfo, cpu: &mut RVCPU| {
                 if let RVInstrInfo::V { rs1, .. } = inst_info {
-                    if rs1 == 0b10000 {
+                    if rs1 == 0b00000 {
+                        vec_integer_spec_op::<{ vector_spec_instr::MOVE_XS }>(inst_info, cpu) // Vector Scalar Move Instructions
+                    } else if rs1 == 0b10000 {
                         vec_integer_spec_op::<{ vector_spec_instr::CPOP_M }>(inst_info, cpu) // count population in mask vcpop.m
                     } else if rs1 == 0b10001 {
                         vec_integer_spec_op::<{ vector_spec_instr::FIRST_M }>(inst_info, cpu) // find first set bit in mask vfirst.m
@@ -835,8 +837,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
             }
         }
 
-        RiscvInstr::VMV_S_X => vec_integer_spec_op::<{ vector_spec_instr::MOVE_SX }>, // Vector Scalar Move Instructions
-        RiscvInstr::VMV_X_S => vec_integer_spec_op::<{ vector_spec_instr::MOVE_XS }>,
+        RiscvInstr::VMV_S_X => vec_integer_spec_op::<{ vector_spec_instr::MOVE_SX }>, // Vector Scalar Move InstructionsF
         // RiscvInstr::VFMV_S_F => unimplemented!(),
         // RiscvInstr::VFMV_F_S => unimplemented!(),
 
