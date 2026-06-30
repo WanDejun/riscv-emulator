@@ -341,11 +341,53 @@ static int run_instruction_smoke(void) {
     return 1;
 }
 
+static void
+pack_chunk_masks(uint8_t* mask, const int* select_a, size_t n) {
+    size_t out = 0;
+    for (size_t base = 0, remaining = n; remaining != 0;) {
+        size_t vl = rvv_vsetvl_e32m1(remaining);
+        uint8_t byte = 0;
+        for (size_t i = 0; i < vl; ++i) {
+            if (select_a[base + i])
+                byte |= (uint8_t)(1u << i);
+        }
+        mask[out++] = byte;
+        base += vl;
+        remaining -= vl;
+    }
+}
+
+static int run_mask_instruction_smoke(void) {
+    enum { N = 9 };
+    static int32_t a[N] = { 10, 11, 12, 13, 14, 15, 16, 17, 18 };
+    static int32_t b[N] = { -1, -2, -3, -4, -5, -6, -7, -8, -9 };
+    static int32_t got[N];
+    static int32_t expected[N];
+    static uint8_t mask[(N + 7) / 8 + N];
+    static int select_a[N] = { 1, 0, 1, 1, 0, 0, 1, 0, 1 };
+    long first = -1;
+    long count = rvv_mask_cpop_first((const uint8_t[]){ 0b01010110 }, 8, &first);
+
+    if (!check_scalar("vlm.v/vcpop.m", count, 4))
+        return 0;
+    if (!check_scalar("vlm.v/vfirst.m", first, 1))
+        return 0;
+
+    pack_chunk_masks(mask, select_a, N);
+    rvv_merge_vvm_i32(got, a, b, mask, N);
+    for (size_t i = 0; i < N; ++i)
+        expected[i] = select_a[i] ? a[i] : b[i];
+
+    return check_i32("vlm.v/vmerge.vvm", got, expected, N);
+}
+
 int main(void) {
     TEST_START(__BASE_FILE__);
     rvv_enable();
 
     if (!run_instruction_smoke())
+        fail();
+    if (!run_mask_instruction_smoke())
         fail();
     if (!run_saxpy())
         fail();
