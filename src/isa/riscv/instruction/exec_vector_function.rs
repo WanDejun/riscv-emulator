@@ -198,7 +198,7 @@ fn do_vector_unit_stride_load<const EEW: u8>(
         func6,
     } = info
     {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_decode(func6);
+        let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
         debug_assert_eq!(mop, 0b00);
 
         let base_addr = cpu.reg_file.read(rs1, 0).0;
@@ -226,7 +226,12 @@ fn do_vector_unit_stride_load<const EEW: u8>(
                 res = vector.load_whole_register(vd, nf, vstart, base_addr, &mut cpu.memory.mmio);
             }
             // unit-stride, mask load, EEW=8
-            0b01011 => unimplemented!(),
+            0b01011 => {
+                if EEW != 0 || (nf, mew, mop, vm) != (0, 0, 0b00, true) {
+                    return Err(Exception::IllegalInstruction);
+                }
+                res = vector.mask_load(vd, vstart, base_addr, &mut cpu.memory.mmio);
+            }
             // unit-stride fault-only-first
             0b10000 => unimplemented!(),
             _ => return Err(Exception::IllegalInstruction),
@@ -376,7 +381,12 @@ fn do_vector_unit_stride_store<const EEW: u8>(
                 res = vector.store_whole_register(vs3, nf, vstart, base_addr, &mut cpu.memory.mmio);
             }
             // unit-stride, mask store, EEW=8
-            0b01011 => unimplemented!(),
+            0b01011 => {
+                if EEW != 0 || (nf, mew, mop, vm) != (0, 0, 0b00, true) {
+                    return Err(Exception::IllegalInstruction);
+                }
+                res = vector.mask_store(vs3, vstart, base_addr, &mut cpu.memory.mmio);
+            }
             _ => return Err(Exception::IllegalInstruction),
         }
 
@@ -1731,6 +1741,45 @@ mod test {
     }
 
     #[test]
+    fn mask_load_uses_ceil_vl_over_8_bytes_and_restores_config() {
+        let base_addr = TEST_DATA_BASE + 0x500;
+        let initial = vec![0xffu8; VLEN_BYTE * Vlmul::M4.get_lmul() as usize];
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        for (i, value) in [0b1010_0101u8, 0b0001_0011u8, 0xeeu8]
+            .into_iter()
+            .enumerate()
+        {
+            unsafe {
+                ram_ref
+                    .as_mut_unchecked()
+                    .write(TEST_DATA_ADDR_OFFSET + 0x500 + i as WordType, value)
+                    .unwrap();
+            }
+        }
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
+        cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
+        cpu.vector
+            .set_config((Vlmul::M4, Vsew::E32, false, false, 13));
+        cpu.vector
+            .write_as_type::<u8>(Vlmul::M4.get_lmul(), 8, &initial);
+
+        cpu.vector
+            .mask_load(8, 0, base_addr, &mut cpu.memory.mmio)
+            .unwrap();
+
+        let got = cpu.vector.read_as_type::<u8>(8).unwrap();
+        assert_eq!(got.len(), VLEN_BYTE * Vlmul::M4.get_lmul() as usize);
+        assert_eq!(&got[..3], &[0b1010_0101, 0b0001_0011, 0xff]);
+        assert_eq!(got[3], 0xff);
+        assert_eq!(
+            cpu.vector.read_as_type::<u32>(8).unwrap().len(),
+            VLEN_BYTE * 4 / 4
+        );
+    }
+
+    #[test]
     fn vector_load_fault_records_vstart_and_stops() {
         let mut cpu = TestCPUBuilder::new()
             .vector_status(Vlmul::M1, Vsew::E32, false, false)
@@ -1988,6 +2037,91 @@ mod test {
                     checker = checker.mem::<u16>(addr, val as WordType);
                 }
                 checker.pc(0x2004)
+            },
+        );
+    }
+
+    #[test]
+    fn mask_store_uses_ceil_vl_over_8_bytes_and_restores_config() {
+        let base_addr = TEST_DATA_BASE + 0x700;
+        let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
+        for i in 0..3 {
+            unsafe {
+                ram_ref
+                    .as_mut_unchecked()
+                    .write(TEST_DATA_ADDR_OFFSET + 0x700 + i as WordType, 0xeeu8)
+                    .unwrap();
+            }
+        }
+        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
+        cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
+        cpu.vector
+            .set_config((Vlmul::M4, Vsew::E32, false, false, 13));
+        let mut source = vec![0u8; VLEN_BYTE * Vlmul::M4.get_lmul() as usize];
+        source[..3].copy_from_slice(&[0b1010_0101, 0b0001_0011, 0x77]);
+        cpu.vector
+            .write_as_type::<u8>(Vlmul::M4.get_lmul(), 8, &source);
+
+        cpu.vector
+            .mask_store(8, 0, base_addr, &mut cpu.memory.mmio)
+            .unwrap();
+
+        assert_eq!(
+            cpu.memory.read::<u8>(base_addr, &mut cpu.csr).unwrap(),
+            0b1010_0101
+        );
+        assert_eq!(
+            cpu.memory.read::<u8>(base_addr + 1, &mut cpu.csr).unwrap(),
+            0b0001_0011
+        );
+        assert_eq!(
+            cpu.memory.read::<u8>(base_addr + 2, &mut cpu.csr).unwrap(),
+            0xee
+        );
+        assert_eq!(
+            cpu.vector.read_as_type::<u32>(8).unwrap().len(),
+            VLEN_BYTE * 4 / 4
+        );
+    }
+
+    #[test]
+    fn mask_load_and_store_decode_execute() {
+        let source_mask = [0b1010_0101u8, 0b0101_1010u8];
+        let mut source_reg = vec![0u8; VLEN_BYTE];
+        source_reg[..source_mask.len()].copy_from_slice(&source_mask);
+        run_test_exec_decode(
+            0x02b0_8407, // vlm.v v8, (x1)
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E8, false, false)
+                    .reg(1, TEST_DATA_BASE)
+                    .mem::<u8>(TEST_DATA_BASE, source_mask[0])
+                    .mem::<u8>(TEST_DATA_BASE + 1, source_mask[1])
+                    .pc(0x2000)
+            },
+            |checker| {
+                let mut expected = vec![0u8; VLEN_BYTE];
+                expected[..source_mask.len()].copy_from_slice(&source_mask);
+                checker.reg_vec(8, expected.as_slice()).pc(0x2004)
+            },
+        );
+
+        run_test_exec_decode(
+            0x02b0_8427, // vsm.v v8, (x1)
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E8, false, false)
+                    .reg(1, TEST_DATA_BASE)
+                    .reg_vec(1, 8, &source_reg)
+                    .pc(0x2000)
+            },
+            |checker| {
+                checker
+                    .mem::<u8>(TEST_DATA_BASE, source_mask[0] as WordType)
+                    .mem::<u8>(TEST_DATA_BASE + 1, source_mask[1] as WordType)
+                    .pc(0x2004)
             },
         );
     }

@@ -432,6 +432,29 @@ impl Vector {
         Ok(())
     }
 
+    /// Execute `vlm.v`: load `ceil(vl / 8)` bytes into one mask register.
+    ///
+    /// Mask load/store instructions encode EEW=8 and unit stride, but their
+    /// element count is bytes of mask data rather than vector data elements.
+    /// Temporarily narrow the execution view so the normal unit-stride helper
+    /// can provide address generation, precise faults, and register access.
+    pub(super) fn mask_load(
+        &mut self,
+        vd: u8,
+        vstart: usize,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), VectorMemException> {
+        let saved_config = self.config;
+        self.config.vlmul = Vlmul::M1;
+        self.config.vsew = Vsew::E8;
+        self.config.vl = saved_config.vl.div_ceil(8);
+
+        let res = self.stride_load(vd, Vsew::E8, 1, None, false, vstart, base_addr, mem);
+        self.config = saved_config;
+        res
+    }
+
     /// Execute vl[nf]r.v — whole vector register load, always unmasked.
     ///
     /// The raw `nf` field encodes the register count as:
@@ -611,6 +634,24 @@ impl Vector {
             }
         }
         Ok(())
+    }
+
+    /// Execute `vsm.v`: store `ceil(vl / 8)` bytes from one mask register.
+    pub(super) fn mask_store(
+        &mut self,
+        vs: u8,
+        vstart: usize,
+        base_addr: WordType,
+        mem: &mut MemoryMapIO,
+    ) -> Result<(), VectorMemException> {
+        let saved_config = self.config;
+        self.config.vlmul = Vlmul::M1;
+        self.config.vsew = Vsew::E8;
+        self.config.vl = saved_config.vl.div_ceil(8);
+
+        let res = self.stride_store(vs, Vsew::E8, 1, None, false, vstart, base_addr, mem);
+        self.config = saved_config;
+        res
     }
 
     pub(super) fn indexed_ordered_store(

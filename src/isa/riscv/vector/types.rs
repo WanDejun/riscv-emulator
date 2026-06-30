@@ -139,6 +139,7 @@ impl RVVElemMutTy {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct VectorConfig {
     pub(crate) vlmul: Vlmul,
     pub(crate) vsew: Vsew,
