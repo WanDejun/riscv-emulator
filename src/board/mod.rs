@@ -25,4 +25,7 @@ pub trait Board {
             }
         }
     }
+
+    fn pause_background_work(&mut self);
+    fn resume_background_work(&mut self);
 }

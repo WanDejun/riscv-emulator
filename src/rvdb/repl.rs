@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+use std::io::stdin;
 use std::process::exit;
 
 use super::Cli;
@@ -6,7 +8,7 @@ use super::CommandOutput;
 use super::handler::Handler;
 use super::printer::Printer;
 use clap::Parser;
-use riscv_emulator::{board::Board, cli_coordinator::CliCoordinator};
+use riscv_emulator::board::Board;
 use rustyline::error::ReadlineError;
 
 const PROMPT: &str = "(rvdb) ";
@@ -19,7 +21,11 @@ pub struct DebugREPL<'a, B: Board> {
 
 impl<'a, B: Board> DebugREPL<'a, B> {
     pub fn new(board: &'a mut B) -> Self {
-        CliCoordinator::global().pause_uart();
+        if stdin().is_terminal() {
+            crossterm::terminal::disable_raw_mode().unwrap();
+        }
+        board.pause_background_work();
+
         Self {
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
             handler: Handler::new(board),
@@ -89,5 +95,50 @@ impl<'a, B: Board> DebugREPL<'a, B> {
         let argv = line.split_whitespace().map(|s| s.to_string());
         let cli = Cli::try_parse_from(argv).map_err(|e| e.to_string())?;
         self.handler.handle(cli)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{sync::mpsc, thread, time::Duration};
+
+    fn should_end_within<T, F>(
+        d: Duration,
+        f: F,
+    ) -> Result<T, Box<dyn std::any::Any + Send + 'static>>
+    where
+        T: Send + 'static,
+        F: Send + 'static + FnOnce() -> T,
+    {
+        let (done_tx, done_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let val = f();
+            done_tx.send(()).expect("Unable to send completion signal");
+            val
+        });
+
+        match done_rx.recv_timeout(d) {
+            Ok(_) => handle.join(),
+            Err(_) => panic!("Thread took too long"),
+        }
+    }
+
+    fn should_success_within<T, F>(d: Duration, f: F) -> T
+    where
+        T: Send + 'static,
+        F: Send + 'static + FnOnce() -> T,
+    {
+        should_end_within(d, f).expect("thread panicked")
+    }
+
+    use super::*;
+    use riscv_emulator::board::virt::VirtBoard;
+
+    #[test]
+    fn drop_should_not_hang() {
+        should_success_within(Duration::from_millis(100), || {
+            let mut board = VirtBoard::from_binary(&[]);
+            let _repl = DebugREPL::new(&mut board);
+        });
     }
 }

@@ -3,7 +3,6 @@
 // and leave this as a fallback for old version of Windows that doesn't have a terminal emulator.
 
 use super::*;
-use crate::cli_coordinator::CliCoordinator;
 use crate::device::power_manager::{POWER_OFF_CODE, POWER_STATUS};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::sync::atomic::Ordering;
@@ -28,9 +27,7 @@ impl TerminalIOContext {
 
 impl ByteSink for TerminalIOContext {
     #[inline]
-    fn before_receive(&mut self) {
-        CliCoordinator::global().confirm_pause_and_wait();
-    }
+    fn before_receive(&mut self) {}
 
     #[inline]
     fn do_receive(&mut self, byte: u8) {

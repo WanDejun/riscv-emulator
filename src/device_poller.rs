@@ -34,6 +34,7 @@ impl<F: PollingFn + Send> PollingEventTrait for PollingFnWrapper<F> {
     }
 }
 
+// TODO: `PollerCore` is unnecessary after `BackgroundExecutor` has been extracted.
 struct PollerCore {
     events: Arc<Mutex<Vec<Box<dyn PollingEventTrait>>>>,
 
