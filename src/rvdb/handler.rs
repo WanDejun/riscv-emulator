@@ -1,9 +1,9 @@
-use std::fs;
+use std::{
+    fs,
+    io::{IsTerminal, stdin},
+};
 
 use super::*;
-
-#[cfg(not(test))]
-use riscv_emulator::cli_coordinator::CliCoordinator;
 
 use riscv_emulator::{
     board::Board,
@@ -226,17 +226,15 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 
     fn handle_continue(&mut self, steps: u64) -> Result<CommandOutput, String> {
-        #[cfg(not(test))]
-        {
-            CliCoordinator::global().resume_uart();
+        if stdin().is_terminal() {
             crossterm::terminal::enable_raw_mode().unwrap();
         }
+        self.dbg.board_mut().resume_background_work();
 
         let rst = self.dbg.continue_until_step(steps);
 
-        #[cfg(not(test))]
-        {
-            CliCoordinator::global().pause_uart();
+        self.dbg.board_mut().pause_background_work();
+        if stdin().is_terminal() {
             crossterm::terminal::disable_raw_mode().unwrap();
         }
 

@@ -10,10 +10,7 @@ pub use imp::BackgroundExecutor;
 #[cfg(feature = "multithreading")]
 mod imp {
     use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
+        sync::{Arc, Condvar, Mutex},
         thread,
         time::Duration,
     };
@@ -21,7 +18,7 @@ mod imp {
     type ExecTask = Box<dyn FnMut() -> bool + Send>;
 
     /// How long the worker sleeps after an iteration in which no task made progress.
-    const IDLE_BACKOFF: Duration = Duration::from_millis(10);
+    const IDLE_BACKOFF: Duration = Duration::from_millis(5);
 
     enum ExecContext {
         Running {
@@ -38,17 +35,24 @@ mod imp {
         }
     }
 
-    pub struct BackgroundExecutor {
-        /// Cleared on shutdown; observed by the worker.
-        running: Arc<AtomicBool>,
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ThreadState {
+        Running,
+        Pausing,
+        Paused,
+        Stopping,
+        Stopped,
+    }
 
+    pub struct BackgroundExecutor {
+        state_cvar: Arc<(Mutex<ThreadState>, Condvar)>,
         context: ExecContext,
     }
 
     impl BackgroundExecutor {
         pub fn new() -> Self {
             Self {
-                running: Arc::new(AtomicBool::new(true)),
+                state_cvar: Arc::new((Mutex::new(ThreadState::Stopped), Condvar::new())),
                 context: ExecContext::Stopped { poll_tasks: vec![] },
             }
         }
@@ -71,32 +75,109 @@ mod imp {
                 return;
             };
 
+            {
+                let (state, _cvar) = &*self.state_cvar;
+                *state.lock().unwrap() = ThreadState::Running;
+            }
+
             // Start polling thread
-            let running = self.running.clone();
+            let state_cvar = self.state_cvar.clone();
 
             self.context = ExecContext::Running {
                 poll_worker: thread::spawn(move || {
-                    while running.load(Ordering::Relaxed) {
-                        if !poll_round(&mut poll_tasks) {
-                            thread::sleep(IDLE_BACKOFF);
+                    let (lock, cvar) = &*state_cvar;
+
+                    loop {
+                        let mut state = lock.lock().unwrap();
+                        match *state {
+                            ThreadState::Running => {
+                                drop(state);
+                                if poll_round(&mut poll_tasks) {
+                                    continue;
+                                }
+
+                                // sleep when make no progess
+                                let mut state = lock.lock().unwrap();
+                                if *state == ThreadState::Running {
+                                    state = cvar.wait_timeout(state, IDLE_BACKOFF).unwrap().0;
+                                }
+                            }
+                            ThreadState::Pausing | ThreadState::Paused => {
+                                // do one more time to ensure uart output queue empty etc.
+                                poll_round(&mut poll_tasks);
+
+                                *state = ThreadState::Paused;
+                                cvar.notify_one();
+
+                                while *state == ThreadState::Paused {
+                                    state = cvar.wait(state).unwrap();
+                                }
+                            }
+                            ThreadState::Stopping => {
+                                *state = ThreadState::Stopped;
+                                return poll_tasks;
+                            }
+                            ThreadState::Stopped => {
+                                unreachable!(
+                                    "background thread is executing while its state is stopped"
+                                );
+                            }
                         }
                     }
-                    poll_tasks
                 }),
             };
         }
 
-        pub fn poll_once(&mut self) {}
+        pub fn poll_if_single_thread_mode(&mut self) {}
 
-        /// Signal threads to stop and join the worker.
+        pub fn pause_and_wait(&mut self) {
+            let (lock, cvar) = &*self.state_cvar;
+            let mut state = lock.lock().unwrap();
+
+            if *state == ThreadState::Stopped {
+                log::error!(
+                    "trying to pause background thread while it is stopped or never started"
+                );
+                panic!();
+            }
+
+            // avoid dead lock that both main thread and backgroud thread is waiting.
+            if *state != ThreadState::Running {
+                cvar.notify_one();
+            }
+
+            *state = ThreadState::Pausing;
+
+            while *state != ThreadState::Paused {
+                state = cvar.wait(state).unwrap();
+            }
+        }
+
+        pub fn resume(&mut self) {
+            let (lock, cvar) = &*self.state_cvar;
+            let mut state = lock.lock().unwrap();
+
+            *state = ThreadState::Running;
+            cvar.notify_one();
+        }
+
+        /// Background thread will poll again before actual exited.
         pub fn shutdown(&mut self) {
             let ExecContext::Running { poll_worker } = std::mem::take(&mut self.context) else {
                 log::warn!("try to shutdown executor when not running");
                 return;
             };
 
-            // let the worker thread exit.
-            self.running.store(false, Ordering::Relaxed);
+            // Pauses first to force poll again before exit.
+            self.pause_and_wait();
+
+            {
+                let (lock, cvar) = &*self.state_cvar;
+                let mut state = lock.lock().unwrap();
+                // avoid dead lock because background thread is paused (waiting)
+                cvar.notify_one();
+                *state = ThreadState::Stopping;
+            }
 
             self.context = ExecContext::Stopped {
                 poll_tasks: poll_worker.join().unwrap(),
@@ -139,12 +220,16 @@ mod imp {
         pub fn start(&mut self) {}
 
         /// Run every polling task once on the calling thread
-        pub fn poll_once(&mut self) {
+        pub fn poll_if_single_thread_mode(&mut self) {
             for task in self.poll_tasks.iter_mut() {
                 let _ = task();
             }
         }
 
         pub fn shutdown(&mut self) {}
+
+        pub fn pause_and_wait(&mut self) {}
+
+        pub fn resume(&mut self) {}
     }
 }

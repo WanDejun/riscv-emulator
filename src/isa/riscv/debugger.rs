@@ -319,6 +319,10 @@ pub struct Debugger<'a, B: Board> {
 }
 
 impl<'a, B: Board> Debugger<'a, B> {
+    pub fn board_mut(&mut self) -> &mut B {
+        self.board
+    }
+
     pub fn new(board: &'a mut B) -> Self {
         board.cpu_mut().debug = true;
         let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
@@ -705,6 +709,14 @@ mod test {
 
         fn loader(&self) -> Option<&crate::load::ELFLoader> {
             None
+        }
+
+        fn pause_background_work(&mut self) {
+            unimplemented!()
+        }
+
+        fn resume_background_work(&mut self) {
+            unimplemented!()
         }
     }
 

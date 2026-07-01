@@ -144,25 +144,25 @@ impl RVBoardBuilder {
 
             // TODO: make this configurable
             // uart <-> std I/O
-            use crate::{byte_io::TerminalIOContext, device_poller::PollingFnWrapper};
+            use crate::byte_io::TerminalIOContext;
 
             let mut ctx = TerminalIOContext::new();
             let mut uart_port1 = uart_port1.clone();
 
             let input_term = std::io::stdin().is_terminal();
 
-            self.device_poller
-                .add_event(Box::new(PollingFnWrapper::new(move || {
-                    // stdin -> uart
-                    if input_term {
-                        ctx.drain_to(&mut uart_port1);
-                    }
+            self.background.add_polling_task(move || {
+                let mut progress: bool = false;
+                // stdin -> uart
+                if input_term {
+                    progress |= ctx.drain_to(&mut uart_port1);
+                }
 
-                    // uart -> stdout
-                    uart_port1.drain_to(&mut ctx);
+                // uart -> stdout
+                progress |= uart_port1.drain_to(&mut ctx);
 
-                    None
-                })));
+                progress
+            });
         }
 
         const MTIME_OFFSET: u64 = 0xbff8;
@@ -346,8 +346,7 @@ impl Board for VirtBoard {
         if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
             self.plic_freq_counter = 0;
 
-            // TODO: use external irq lines to trigger plic interrupts.
-            self.background.poll_once();
+            self.background.poll_if_single_thread_mode();
             self.device_poller.trigger_external_interrupt();
 
             self.plic.borrow_mut().try_get_interrupt(0);
@@ -389,6 +388,14 @@ impl Board for VirtBoard {
 
     fn loader(&self) -> Option<&crate::load::ELFLoader> {
         self.loader.as_ref()
+    }
+
+    fn pause_background_work(&mut self) {
+        self.background.pause_and_wait();
+    }
+
+    fn resume_background_work(&mut self) {
+        self.background.resume();
     }
 }
 
