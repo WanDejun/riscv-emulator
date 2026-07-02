@@ -21,18 +21,6 @@ fn get_funct3(s: &str) -> u64 {
     to_bits(get_instr_bits(s, 12, 14))
 }
 
-fn get_funct7(s: &str) -> u64 {
-    to_bits(get_instr_bits(s, 25, 31))
-}
-
-fn get_atomic_funct7(s: &str) -> u64 {
-    to_bits(get_instr_bits(s, 27, 31)) << 2
-}
-
-fn get_vector_funct7(s: &str) -> u64 {
-    to_bits(get_instr_bits(s, 26, 31)) << 1
-}
-
 fn hex_to_u64(s: &str) -> u64 {
     u64::from_str_radix(s.trim_start_matches("0x"), 16).unwrap()
 }
@@ -92,17 +80,7 @@ fn is_vector_arith(encoding: &str) -> bool {
     get_opcode(encoding) == 0b1010111 // vector arithmetic instructions
 }
 
-fn is_vector_config(encoding: &str) -> bool {
-    get_opcode(encoding) == 0b1010111 && get_funct3(encoding) == 0b111 // vector configuration instructions
-}
-
 fn vector_ignore_instr(name: &str, encoding: &str) -> bool {
-    let re_ls_ignore1 = Regex::new("v[ls].*ei?[0-9]+.*_v").unwrap();
-    let re_ls_ignore2 = Regex::new("v[ls]([0-9]+r|m)_v").unwrap(); // VS1R_V
-    let re_ls_reserve = Regex::new("v[ls]e[0-9]+_v").unwrap();
-    let ignore_load_store = (re_ls_ignore1.is_match(name) || re_ls_ignore2.is_match(name))
-        && !re_ls_reserve.is_match(name);
-
     let re_float_ignore = Regex::new("v.*red.*").unwrap();
     let is_float_func3 = match get_funct3(encoding) {
         0b001 | 0b101 => true,
@@ -110,7 +88,7 @@ fn vector_ignore_instr(name: &str, encoding: &str) -> bool {
     }; // floating-point instructions
     let is_float = (is_vector_arith(encoding) && is_float_func3) || re_float_ignore.is_match(name);
 
-    ignore_load_store || is_float
+    is_float
 }
 
 fn get_instr_type(fields: Vec<&str>, name: &str, _ext: &str, encoding: &str) -> &'static str {
@@ -217,40 +195,15 @@ fn parse_instr<'a>(
                 .collect::<Vec<_>>();
 
             let format = get_instr_type(fields.clone(), name, ext, encoding);
-
-            let opcode = get_opcode(encoding);
-            let funct3 = get_funct3(encoding);
-            let funct7 = if format == "A" {
-                get_atomic_funct7(encoding)
-            } else if format == "V" {
-                get_vector_funct7(encoding)
-            } else {
-                get_funct7(encoding)
-            };
-
             let mask = hex_to_u64(instr_str(instr, name, "mask"));
             let key = hex_to_u64(instr_str(instr, name, "match"));
 
-            // use mask to identify instructions instead of opcode/funct3/funct7.
-            let use_mask = fields.contains(&"shamtd")
-                || fields.contains(&"shamtw")
-                || fields.is_empty()
-                || fields.contains(&"rm")
-                || ext == "rv_s"
-                || ext == "rv_f"
-                || ext == "rv_d"
-                || is_vector_config(encoding);
-
             let s = format!(
-                "{} {{\n    opcode: {},\n    funct3: {},\n    funct7: {},\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n    use_mask: {},\n}}",
+                "{} {{\n    format: InstrFormat::{},\n    mask: {},\n    key: {},\n}}",
                 name.to_uppercase(),
-                opcode,
-                funct3,
-                funct7,
                 format,
                 mask,
                 key,
-                use_mask
             );
 
             isa_dict
@@ -286,9 +239,8 @@ fn main() {
         m.insert("rv64_c", "RV64C");
         m.insert("rv_c_d", "RVC_D");
 
-        // Synthetic extension for instructions we define ourselves (see
-        // data/instr_dict_illegal.json), kept separate from the auto-generated
-        // instr_dict.json.
+        // we defined illegal instruction (all zero) as an instruction for convenience,
+        // kept separate from the auto-generated instr_dict.json
         m.insert("rv_illegal", "RVIllegal");
 
         #[cfg(feature = "custom-instr")]

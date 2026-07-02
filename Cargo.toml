@@ -42,7 +42,7 @@ bitflags = { version = "2.9.3" }
 rustc_apfloat = "0.2.3"
 num_enum = { version = "0.7.4" }
 bit-set = { version = "0.8.0" }
-bit-vec = {version = "0.9.1"}
+bit-vec = { version = "0.9.1" }
 gdbstub_arch = "0.3.3"
 num-traits = "0.2.19"
 
@@ -75,8 +75,10 @@ required-features = ["native-cli"]
 # > Note: If you're using lld (which is the default since Rust 1.90.0) or mold on Linux, you must use the --no-rosegment flag.
 # > Otherwise perf will not be able to generate accurate stack traces (explanation).
 # See: https://github.com/flamegraph-rs/flamegraph
-[profile.dev]
+[profile.flamegraph]
+inherits = "release"
 rustflags = ["-Clink-arg=-Wl,--no-rosegment"]
+debug = true
 
 [profile.fast-debug]
 inherits = "dev"

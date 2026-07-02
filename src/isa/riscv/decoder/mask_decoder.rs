@@ -43,7 +43,14 @@ impl MaskDecoder {
             ));
         }
 
+        // sort by desending popcount(mask), so that overlapped mask can work fine.
+        masks.sort_by_key(|(mask, _, _)| mask.mask.count_zeros());
+
         log::info!("Mask decoder loads {} instructions", masks.len());
+
+        for (_, instr, _) in masks.iter() {
+            log::debug!("[decoder] mask decoder handling {:?}", instr);
+        }
 
         Self { masks }
     }

@@ -284,13 +284,9 @@ macro_rules! define_riscv_isa {
     ( $tot_instr_name:ident,
         $( $isa_name:ident, $isa_table_name:ident, {$(
                 $name:ident {
-                    opcode: $opcode:literal,
-                    funct3: $funct3:literal,
-                    funct7: $funct7:literal,
                     format: $fmt:expr,
                     mask: $mask:literal,
                     key: $key:literal,
-                    use_mask: $use_mask:literal,
                 }),* $(,)?
             }
         ),* $(,)?
@@ -312,28 +308,20 @@ macro_rules! define_riscv_isa {
 
         #[derive(Debug, Clone)]
         pub struct RVInstrDesc {
-            pub opcode: u8,
-            pub funct3: u8,
-            pub funct7: u8,
             pub instr: $tot_instr_name,
             pub format: InstrFormat,
             pub mask: u32,
             pub key: u32,
-            pub use_mask: bool,
         }
 
         $(
             pub const $isa_table_name: &[RVInstrDesc] = &[
                 $(
                     RVInstrDesc {
-                        opcode: $opcode,
-                        funct3: $funct3,
-                        funct7: $funct7,
                         instr: $tot_instr_name::$name,
                         format: $fmt,
                         mask: $mask,
                         key: $key,
-                        use_mask: $use_mask,
                     }
                 ),*
             ];

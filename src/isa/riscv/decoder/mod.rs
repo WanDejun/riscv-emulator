@@ -38,7 +38,7 @@ impl Display for DecodeInstr {
 }
 
 pub struct Decoder {
-    funct3_decoder: funct_decoder::Decoder,
+    funct_decoder: funct_decoder::Decoder,
     mask_decoder: mask_decoder::MaskDecoder,
     compress_decoder: compress_decoder::CompressedDecoder,
     /// `misa` extension bitmap of the ISA this decoder was built for.
@@ -74,17 +74,14 @@ impl Decoder {
 
         #[allow(unused_mut)]
         let mut isa = builder.build();
-        // Custom instructions are not a standard extension and have no place in
-        // an ISA string, so they live outside `ISABuilder`.
+
         #[cfg(feature = "custom-instr")]
         {
             isa.extend_from_slice(TABLE_RVCUSTOM0);
             isa.extend_from_slice(TABLE_RVCUSTOM1);
         }
 
-        let mut decoder = Self::from_isa(isa);
-        decoder.extension_bits = extension_bits;
-        decoder
+        Self::from_isa(isa, extension_bits)
     }
 }
 
@@ -93,26 +90,31 @@ fn is_compressed(desc: &RVInstrDesc) -> bool {
 }
 
 impl Decoder {
-    pub fn from_isa(instrs: Vec<RVInstrDesc>) -> Self {
+    pub fn from_isa(instrs: Vec<RVInstrDesc>, extension_bits: WordType) -> Self {
+        let compress =
+            CompressedDecoder::from_isa(instrs.iter().filter(|d| is_compressed(d)).cloned());
+
+        let mut funct = funct_decoder::Decoder::new();
+        let mut remain = vec![];
+
+        let mut funct_count = 0;
+        for desc in instrs.iter().filter(|d| !is_compressed(d)).cloned() {
+            if funct.try_insert(desc.clone()) {
+                funct_count += 1;
+            } else {
+                remain.push(desc);
+            }
+        }
+
+        let mask = mask_decoder::MaskDecoder::from_isa(remain.into_iter());
+
+        log::info!("funct_decoder has {} instructions.", funct_count);
+
         Self {
-            compress_decoder: CompressedDecoder::from_isa(
-                instrs.iter().filter(|d| is_compressed(d)).cloned(),
-            ),
-            mask_decoder: mask_decoder::MaskDecoder::from_isa(
-                instrs
-                    .iter()
-                    .filter(|d| !is_compressed(d) && d.use_mask)
-                    .cloned(),
-            ),
-            funct3_decoder: funct_decoder::Decoder::from_isa(
-                instrs
-                    .iter()
-                    .filter(|d| !is_compressed(d) && !d.use_mask)
-                    .cloned(),
-            ),
-            // Unknown when building from a raw instruction list; the
-            // builder-aware constructors set this via `from_builder`.
-            extension_bits: 0,
+            compress_decoder: compress,
+            funct_decoder: funct,
+            mask_decoder: mask,
+            extension_bits: extension_bits,
         }
     }
 
@@ -120,8 +122,8 @@ impl Decoder {
         if instr.len() == 2 {
             self.compress_decoder.decode(instr)
         } else {
-            None.or_else(|| self.mask_decoder.decode(instr))
-                .or_else(|| self.funct3_decoder.decode(instr))
+            None.or_else(|| self.funct_decoder.decode(instr))
+                .or_else(|| self.mask_decoder.decode(instr))
         }
     }
 }
