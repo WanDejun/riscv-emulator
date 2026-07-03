@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub(super) struct TestCPUBuilder {
-    cpu: RVCPU,
+    cpu: Box<RVCPU>,
 }
 
 impl TestCPUBuilder {
@@ -32,7 +32,9 @@ impl TestCPUBuilder {
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
-        let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
+        let mut cpu = Box::new(RVCPU::from_vaddr_manager(
+            VirtAddrManager::from_ram_and_mmio(ram_ref, mmio),
+        ));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1); // Enable vector unit by default for convenience
         Self { cpu: cpu }
@@ -140,7 +142,7 @@ impl TestCPUBuilder {
         self
     }
 
-    pub(super) fn build(self) -> RVCPU {
+    pub(super) fn build(self) -> Box<RVCPU> {
         self.cpu
     }
 }

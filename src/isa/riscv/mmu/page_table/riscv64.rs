@@ -146,16 +146,22 @@ impl Cacheable for WalkInfo {
 }
 
 pub struct PageTableWalker {
-    tlb: SetCache<WalkInfo, 64, 8>,
+    tlb: Cache<DirectCache<WalkInfo, 512>>,
     root_address: WordType,
     mode: VirtualMemoryMode,
     ad_update_policy: AdUpdatePolicy,
 }
 
+impl Drop for PageTableWalker {
+    fn drop(&mut self) {
+        log::info!("tlb hit rate: {}", self.tlb.hit_rate())
+    }
+}
+
 impl PageTableWalker {
     pub fn new(root_address: WordType, mode: VirtualMemoryMode) -> Self {
         Self {
-            tlb: SetCache::new(),
+            tlb: Cache::new(),
             root_address,
             mode,
             ad_update_policy: AdUpdatePolicy::FaultOnClear,
@@ -208,7 +214,7 @@ impl PageTableWalker {
             info
         } else {
             let info = self.walk_pte(mem, vaddr.vpn())?;
-            // self.tlb.put(vaddr.vpn().address, info);
+            self.tlb.put(vaddr.vpn().address, info);
             info
         };
 

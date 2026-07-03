@@ -692,11 +692,11 @@ mod test {
     use super::*;
 
     struct TestEmptyBoard {
-        cpu: RVCPU,
+        cpu: Box<RVCPU>,
     }
 
     impl TestEmptyBoard {
-        fn new(cpu: RVCPU) -> Self {
+        fn new(cpu: Box<RVCPU>) -> Self {
             Self { cpu }
         }
     }
@@ -731,7 +731,7 @@ mod test {
         }
     }
 
-    fn create_debugger(cpu: RVCPU) -> Debugger<'static, TestEmptyBoard> {
+    fn create_debugger(cpu: Box<RVCPU>) -> Debugger<'static, TestEmptyBoard> {
         Debugger::new(Box::leak(Box::new(TestEmptyBoard::new(cpu))))
     }
 

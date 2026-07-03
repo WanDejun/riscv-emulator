@@ -360,10 +360,6 @@ impl Board for VirtBoard {
             cold_path();
             self.cpu.power_off()?;
 
-            log::info!("iCache hit for {} times.", self.cpu.icache_cnt);
-            let rate = self.cpu.icache_cnt as f64 / self.clock.now() as f64;
-            log::info!("iCache hit rate {}", rate);
-
             self.status = BoardStatus::Halt;
 
             log::info!("Total cycles: {}", self.clock.now());

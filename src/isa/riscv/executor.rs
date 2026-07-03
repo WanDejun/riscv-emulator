@@ -8,7 +8,7 @@ use crate::{
     fpu::soft_float::SoftFPU,
     isa::{
         InstrLen,
-        cache::{Cache, SetCache},
+        cache::{Cache, CachePolicy, DirectCache},
         riscv::{
             RawInstr,
             csr_reg::{CsrRegFile, NamedCsrReg, PrivilegeLevel, csr_macro::*},
@@ -54,14 +54,12 @@ pub struct RVCPU {
     pub(crate) debug: bool,
     pub(crate) debug_info: DebugInfo,
 
-    pub(crate) icache_cnt: usize,
-
     pub(super) reg_file: RegFile,
     pub(super) memory: VirtAddrManager,
     pub(super) pc: WordType,
     pub(super) decoder: Decoder,
     pub(super) csr: CsrRegFile,
-    pub(super) icache: SetCache<DecodeInstr, 256, 8>,
+    pub(super) icache: Cache<DirectCache<DecodeInstr, 8192>>,
     pub(super) fpu: SoftFPU,
     pub(super) vector: Vector,
 
@@ -70,6 +68,12 @@ pub struct RVCPU {
 
     /// The trap value pending to be written to `mtval`/`stval`.
     pub(super) pending_tval: Option<WordType>,
+}
+
+impl Drop for RVCPU {
+    fn drop(&mut self) {
+        log::info!("iCache hit rate {}", self.icache.hit_rate());
+    }
 }
 
 impl RVCPU {
@@ -107,14 +111,13 @@ impl RVCPU {
         Self {
             debug: false,
             debug_info: DebugInfo::new(),
-            icache_cnt: 0,
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
             decoder,
             csr: csr,
             vector: Vector::new(),
-            icache: SetCache::new(),
+            icache: Cache::new(),
             fpu,
             time_addr: None,
             pending_tval: None,
@@ -181,6 +184,7 @@ impl RVCPU {
             let satp = self.csr.get_by_type_existing::<Satp>();
             self.memory.set_mode(satp.get_mode() as u8);
             self.memory.set_root_ppn(satp.get_ppn() as u64);
+            self.memory.flush_tlb();
         }
 
         Ok(())
@@ -234,7 +238,6 @@ impl RVCPU {
 
         let DecodeInstr { instr, info, len } = if let Some(decode_instr) = self.icache.get(self.pc)
         {
-            self.icache_cnt += 1;
             decode_instr
         } else {
             let raw_instr = match self.ifetch() {

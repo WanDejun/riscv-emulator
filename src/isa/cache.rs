@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use crate::config::arch_config::WordType;
 
 pub trait Cacheable: Clone + Copy {
@@ -13,10 +15,68 @@ pub trait Cacheable: Clone + Copy {
     }
 }
 
-pub(super) trait Cache<T: Cacheable> {
+/// A thin warpper that provide hit rate statistics.
+pub(super) struct Cache<P: CachePolicy> {
+    policy: P,
+    hit_count: Cell<u64>,
+    access_count: Cell<u64>,
+}
+
+impl<P: CachePolicy> Cache<P> {
+    pub fn hit_rate(&self) -> f64 {
+        self.hit_count.get() as f64 / self.access_count.get() as f64
+    }
+
+    pub fn hit_count(&self) -> u64 {
+        self.hit_count.get()
+    }
+
+    pub fn access_count(&self) -> u64 {
+        self.access_count.get()
+    }
+}
+
+impl<P: CachePolicy> CachePolicy for Cache<P> {
+    type T = P::T;
+
+    fn new() -> Self {
+        Self {
+            policy: P::new(),
+            hit_count: Cell::new(0),
+            access_count: Cell::new(0),
+        }
+    }
+
+    #[inline]
+    fn get(&self, addr: WordType) -> Option<Self::T> {
+        self.access_count.update(|cnt| cnt + 1);
+        self.policy
+            .get(addr)
+            .inspect(|_| self.hit_count.update(|cnt| cnt + 1))
+    }
+
+    #[inline]
+    fn put(&mut self, addr: WordType, data: Self::T) {
+        self.policy.put(addr, data)
+    }
+
+    #[inline]
+    fn invalidate(&mut self, addr: WordType) {
+        self.policy.invalidate(addr);
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.policy.clear();
+    }
+}
+
+pub(super) trait CachePolicy {
+    type T: Cacheable;
+
     fn new() -> Self;
-    fn get(&self, addr: WordType) -> Option<T>;
-    fn put(&mut self, addr: WordType, data: T);
+    fn get(&self, addr: WordType) -> Option<Self::T>;
+    fn put(&mut self, addr: WordType, data: Self::T);
     fn invalidate(&mut self, addr: WordType);
     fn clear(&mut self);
 }
@@ -32,7 +92,9 @@ impl<T: Cacheable, const N: usize> DirectCache<T, N> {
     }
 }
 
-impl<T: Cacheable, const N: usize> Cache<T> for DirectCache<T, N> {
+impl<T: Cacheable, const N: usize> CachePolicy for DirectCache<T, N> {
+    type T = T;
+
     fn new() -> Self {
         debug_assert!(N > 0 && (N & (N - 1)) == 0, "N must be a power of two");
         Self {
@@ -106,8 +168,8 @@ impl<T: Cacheable, const W: usize> CacheSet<T, W> {
 /// ```
 /// SetCache<DecodeInstr, 4, 2> // 4 sets, 2 ways per set
 /// ```
-pub(super) struct SetCache<I: Cacheable, const S: usize, const W: usize> {
-    cache: [CacheSet<I, W>; S],
+pub(super) struct SetCache<T: Cacheable, const S: usize, const W: usize> {
+    cache: [CacheSet<T, W>; S],
 }
 
 impl<T: Cacheable, const S: usize, const W: usize> SetCache<T, S, W> {
@@ -117,7 +179,9 @@ impl<T: Cacheable, const S: usize, const W: usize> SetCache<T, S, W> {
     }
 }
 
-impl<T: Cacheable, const S: usize, const W: usize> Cache<T> for SetCache<T, S, W> {
+impl<T: Cacheable, const S: usize, const W: usize> CachePolicy for SetCache<T, S, W> {
+    type T = T;
+
     fn new() -> Self {
         debug_assert!(S > 0 && (S & (S - 1)) == 0, "S must be a power of two.");
         debug_assert!(W > 0 && (W & (W - 1)) == 0, "W must be a power of two.");
@@ -158,7 +222,9 @@ pub(super) struct NullCache<T: Cacheable> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: Cacheable> Cache<T> for NullCache<T> {
+impl<T: Cacheable> CachePolicy for NullCache<T> {
+    type T = T;
+
     fn new() -> Self {
         Self {
             _phantom: std::marker::PhantomData,
@@ -187,7 +253,7 @@ mod tests {
         const ADDR_SHIFT_BITS: usize = 0;
     }
 
-    fn test_cache_common<C: Cache<MockCacheable>>() {
+    fn test_cache_common<C: CachePolicy<T = MockCacheable>>() {
         let mut cache = C::new();
 
         assert_eq!(cache.get(0), None);
