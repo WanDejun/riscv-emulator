@@ -1,4 +1,4 @@
-use core::panic;
+use core::{fmt, panic};
 
 use crate::{
     config::arch_config::{WordType, XLEN},
@@ -128,6 +128,30 @@ impl Exception {
             MemError::LoadPageFault => Exception::InstructionPageFault,
             _ => unreachable!("Invalid instruction fetch error: {:?}", err),
         }
+    }
+}
+
+impl fmt::Display for Exception {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Exception::InstructionMisaligned => "instruction address is misaligned",
+            Exception::InstructionFault => "instruction access fault",
+            Exception::IllegalInstruction => "illegal instruction",
+            Exception::Breakpoint => "breakpoint",
+            Exception::LoadMisaligned => "load address is misaligned",
+            Exception::LoadFault => "load access fault",
+            Exception::StoreMisaligned => "store address is misaligned",
+            Exception::StoreFault => "store access fault",
+            Exception::UserEnvCall => "environment call from user mode",
+            Exception::SupervisorEnvCall => "environment call from supervisor mode",
+            Exception::HypervisionEnvCall => "environment call from hypervisor mode",
+            Exception::MachineEnvCall => "environment call from machine mode",
+            Exception::InstructionPageFault => "instruction page fault",
+            Exception::LoadPageFault => "load page fault",
+            Exception::Unknown => "unknown exception",
+            Exception::StorePageFault => "store page fault",
+        };
+        f.write_str(message)
     }
 }
 

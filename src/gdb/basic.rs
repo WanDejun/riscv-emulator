@@ -11,7 +11,7 @@ use crate::config::arch_config::{FLOAT_REGFILE_CNT, REGFILE_CNT, WordType};
 use crate::isa::riscv::csr_reg::PrivilegeLevel;
 use crate::isa::riscv::debugger::Address;
 
-impl<'a, B: Board> target::Target for GdbDebugger<'a, B> {
+impl<B: Board> target::Target for GdbDebugger<B> {
     type Arch = desc::Riscv64;
     type Error = &'static str;
 
@@ -26,7 +26,7 @@ impl<'a, B: Board> target::Target for GdbDebugger<'a, B> {
     }
 }
 
-impl<'a, B: Board> SingleThreadBase for GdbDebugger<'a, B> {
+impl<B: Board> SingleThreadBase for GdbDebugger<B> {
     fn read_registers(
         &mut self,
         regs: &mut <Self::Arch as gdbstub::arch::Arch>::Registers,
@@ -95,7 +95,7 @@ impl<'a, B: Board> SingleThreadBase for GdbDebugger<'a, B> {
     }
 }
 
-impl<'a, B: Board> SingleRegisterAccess<()> for GdbDebugger<'a, B> {
+impl<B: Board> SingleRegisterAccess<()> for GdbDebugger<B> {
     fn read_register(
         &mut self,
         _tid: (),
@@ -191,7 +191,7 @@ impl<'a, B: Board> SingleRegisterAccess<()> for GdbDebugger<'a, B> {
     }
 }
 
-impl<'a, B: Board> ext::base::singlethread::SingleThreadResume for GdbDebugger<'a, B> {
+impl<B: Board> ext::base::singlethread::SingleThreadResume for GdbDebugger<B> {
     fn resume(&mut self, signal: Option<Signal>) -> Result<(), Self::Error> {
         if signal.is_some() {
             return Err("no support for continuing with signal");
@@ -210,7 +210,7 @@ impl<'a, B: Board> ext::base::singlethread::SingleThreadResume for GdbDebugger<'
     }
 }
 
-impl<'a, B: Board> target::ext::base::singlethread::SingleThreadSingleStep for GdbDebugger<'a, B> {
+impl<B: Board> target::ext::base::singlethread::SingleThreadSingleStep for GdbDebugger<B> {
     fn step(&mut self, signal: Option<Signal>) -> Result<(), Self::Error> {
         if signal.is_some() {
             return Err("no support for stepping with signal");
@@ -230,8 +230,7 @@ mod tests {
 
     #[test]
     fn read_addrs_fails_when_any_byte_is_unreadable() {
-        let mut board = VirtBoard::from_binary(&[]);
-        let mut debugger = GdbDebugger::new(&mut board);
+        let mut debugger = GdbDebugger::new(VirtBoard::from_binary(&[]));
         let mut data = [0xaa; 4];
 
         assert!(SingleThreadBase::read_addrs(&mut debugger, 0, &mut data).is_err());

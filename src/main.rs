@@ -3,7 +3,6 @@
 #![feature(generic_const_exprs)]
 
 mod logging;
-mod rvdb;
 mod welcome;
 
 use std::fs;
@@ -15,9 +14,10 @@ use riscv_emulator::board::Board;
 use riscv_emulator::gdb;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
+use riscv_emulator::rvdb::NativeREPL;
 use riscv_emulator::{DeviceConfig, EmulatorConfigurator, board::virt::VirtBoard};
 
-use crate::{logging::LogLevel, rvdb::DebugREPL, welcome::display_welcome_message};
+use crate::{logging::LogLevel, welcome::display_welcome_message};
 
 lazy_static! {
     static ref cli_args: Args = Args::parse();
@@ -220,15 +220,19 @@ fn main() {
     };
 
     if cli_args.debug {
-        let mut repl = DebugREPL::new(&mut board);
+        let mut repl = NativeREPL::new(board);
         if let Some(script) = &cli_args.script {
             let script_content = std::fs::read_to_string(script).unwrap();
             let lines: Vec<String> = script_content.lines().map(|s| s.to_string()).collect();
-            repl.run_script(&lines);
+            let should_exit = repl.run_script(&lines);
+            if should_exit {
+                return;
+            }
         }
         repl.run();
+        return;
     } else if cli_args.gdb {
-        if let Err(e) = gdb::event_loop(&mut board, gdb::Config::Tcp(1234)) {
+        if let Err(e) = gdb::event_loop(board, gdb::Config::Tcp(1234)) {
             log::error!("{:?}", e);
             panic!();
         }

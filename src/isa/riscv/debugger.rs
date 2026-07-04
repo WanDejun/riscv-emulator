@@ -34,13 +34,13 @@ pub enum DebugEvent {
 
 #[derive(thiserror::Error, Debug)]
 pub enum DebugError {
-    #[error("target exception: {0:?}")]
+    #[error("target exception: {0}")]
     TargetException(<RiscvTypes as ISATypes>::StepException),
 
-    #[error("memory error: {0:?}")]
+    #[error("memory error: {0}")]
     MemoryError(MemError),
 
-    #[error("CSR {0:?} not exist")]
+    #[error("CSR {0} does not exist")]
     CSRNotExist(WordType),
 
     #[error("symbol {0} not found in symbol table")]
@@ -317,20 +317,29 @@ impl FtraceState {
 
 const MAX_HISTORY: usize = 1024;
 
-pub struct Debugger<'a, B: Board> {
+pub struct Debugger<B: Board> {
     breakpoints: Vec<Breakpoint>,
-    board: &'a mut B,
+    board: B,
     history: VecDeque<(WordType, Option<RawInstr>)>,
     ftrace: FtraceState,
     symtab: Option<SymTab>,
 }
 
-impl<'a, B: Board> Debugger<'a, B> {
+impl<B: Board> Debugger<B> {
+    pub fn board(&self) -> &B {
+        &self.board
+    }
+
     pub fn board_mut(&mut self) -> &mut B {
+        &mut self.board
+    }
+
+    pub fn into_board(mut self) -> B {
+        self.board.cpu_mut().debug = false;
         self.board
     }
 
-    pub fn new(board: &'a mut B) -> Self {
+    pub fn new(mut board: B) -> Self {
         board.cpu_mut().debug = true;
         let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
 
@@ -339,7 +348,7 @@ impl<'a, B: Board> Debugger<'a, B> {
             board,
             history: VecDeque::with_capacity(MAX_HISTORY),
             ftrace: FtraceState::new(),
-            symtab: symtab,
+            symtab,
         }
     }
 
@@ -353,8 +362,9 @@ impl<'a, B: Board> Debugger<'a, B> {
         if self.history.len() == MAX_HISTORY {
             self.history.pop_front();
         }
-        let instr = self.read_instr(self.read_pc());
-        self.history.push_back((self.read_pc(), instr));
+        let pc = self.read_pc();
+        let instr = self.read_instr(pc);
+        self.history.push_back((pc, instr));
     }
 
     /// Get the latest k history.
@@ -442,7 +452,7 @@ impl<'a, B: Board> Debugger<'a, B> {
     }
 
     pub fn symbol_by_addr(&self, addr: u64) -> Result<&String, DebugError> {
-        let Some(symtab) = &self.symtab else {
+        let Some(symtab) = self.symbol_table() else {
             return Err(DebugError::NoSymbolTable);
         };
         symtab
@@ -454,7 +464,7 @@ impl<'a, B: Board> Debugger<'a, B> {
     }
 
     pub fn symbol_in_addr_range(&self, addr: u64) -> Result<&String, DebugError> {
-        let Some(symtab) = &self.symtab else {
+        let Some(symtab) = self.symbol_table() else {
             return Err(DebugError::NoSymbolTable);
         };
         symtab
@@ -466,7 +476,7 @@ impl<'a, B: Board> Debugger<'a, B> {
     }
 
     pub fn addr_by_symbol(&self, func_name: &str) -> Result<u64, DebugError> {
-        let Some(symtab) = &self.symtab else {
+        let Some(symtab) = self.symbol_table() else {
             return Err(DebugError::NoSymbolTable);
         };
         symtab
@@ -729,10 +739,14 @@ mod test {
         fn resume_background_work(&mut self) {
             unimplemented!()
         }
+
+        fn take_uart_output(&mut self) -> Vec<u8> {
+            unimplemented!()
+        }
     }
 
-    fn create_debugger(cpu: Box<RVCPU>) -> Debugger<'static, TestEmptyBoard> {
-        Debugger::new(Box::leak(Box::new(TestEmptyBoard::new(cpu))))
+    fn create_debugger(cpu: Box<RVCPU>) -> Debugger<TestEmptyBoard> {
+        Debugger::new(TestEmptyBoard::new(cpu))
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{config::arch_config::WordType, device_poller::PollingEventTrait};
 
 macro_rules! dispatch_read_write {
@@ -56,6 +58,20 @@ pub enum MemError {
     StorePageFault,
     StoreMisaligned,
     StoreFault,
+}
+
+impl fmt::Display for MemError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            MemError::LoadPageFault => "load page fault",
+            MemError::LoadMisaligned => "load address is misaligned",
+            MemError::LoadFault => "load access fault",
+            MemError::StorePageFault => "store page fault",
+            MemError::StoreMisaligned => "store address is misaligned",
+            MemError::StoreFault => "store access fault",
+        };
+        f.write_str(message)
+    }
 }
 
 macro_rules! impl_read_for_type {

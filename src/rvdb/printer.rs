@@ -1,9 +1,5 @@
-use crate::rvdb::DbgInstrLine;
-
-use super::CommandOutput;
-use crossterm::style::Stylize;
-use lazy_static::lazy_static;
-use riscv_emulator::{
+use super::{CommandOutput, DbgInstrLine};
+use crate::{
     config::arch_config::{REG_NAME, WordType},
     isa::riscv::{
         RawInstr,
@@ -14,76 +10,187 @@ use riscv_emulator::{
     },
 };
 
-lazy_static! {
-    static ref palette: OutputPalette = OutputPalette {};
+#[derive(Clone, Copy)]
+enum AnsiColor {
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    BrightBlack,
 }
 
-struct OutputPalette;
+impl AnsiColor {
+    const fn sgr_code(self) -> u8 {
+        match self {
+            AnsiColor::Red => 31,
+            AnsiColor::Green => 32,
+            AnsiColor::Yellow => 33,
+            AnsiColor::Blue => 34,
+            AnsiColor::Magenta => 35,
+            AnsiColor::Cyan => 36,
+            AnsiColor::BrightBlack => 90,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AnsiStyle {
+    foreground: AnsiColor,
+}
+
+impl AnsiStyle {
+    const fn foreground(color: AnsiColor) -> Self {
+        Self { foreground: color }
+    }
+
+    fn paint(self, value: &str) -> String {
+        let code = self.foreground.sgr_code();
+        format!("\x1b[{code}m{value}\x1b[0m")
+    }
+}
+
+struct OutputPalette {
+    ansi_color: bool,
+    index: AnsiStyle,
+    address: AnsiStyle,
+    register: AnsiStyle,
+    csr: AnsiStyle,
+    instruction: AnsiStyle,
+    arrow: AnsiStyle,
+    data: AnsiStyle,
+    identifier: AnsiStyle,
+    invalid: AnsiStyle,
+    privilege: AnsiStyle,
+}
 
 impl OutputPalette {
-    fn index(&self, index: &str) -> impl std::fmt::Display {
-        index.yellow()
+    const fn new(ansi_color: bool) -> Self {
+        use AnsiColor::*;
+
+        Self {
+            ansi_color,
+            index: AnsiStyle::foreground(Yellow),
+            address: AnsiStyle::foreground(Blue),
+            register: AnsiStyle::foreground(Magenta),
+            csr: AnsiStyle::foreground(BrightBlack),
+            instruction: AnsiStyle::foreground(Green),
+            arrow: AnsiStyle::foreground(Cyan),
+            data: AnsiStyle::foreground(Yellow),
+            identifier: AnsiStyle::foreground(Yellow),
+            invalid: AnsiStyle::foreground(Red),
+            privilege: AnsiStyle::foreground(BrightBlack),
+        }
     }
 
-    fn addr(&self, addr: &str) -> impl std::fmt::Display {
-        addr.blue()
+    fn paint(&self, value: &str, style: AnsiStyle) -> String {
+        if self.ansi_color {
+            style.paint(value)
+        } else {
+            value.to_string()
+        }
     }
 
-    fn reg(&self, reg: &str, padding: usize) -> impl std::fmt::Display {
-        format!("{:<width$}", reg, width = padding).magenta()
+    fn index(&self, index: &str) -> String {
+        self.paint(index, self.index)
     }
 
-    fn csr(&self, csr: &str) -> impl std::fmt::Display {
-        csr.dark_grey()
+    fn addr(&self, addr: &str) -> String {
+        self.paint(addr, self.address)
     }
 
-    fn instr(&self, instr: &str) -> impl std::fmt::Display {
-        instr.green()
+    fn reg(&self, reg: &str, padding: usize) -> String {
+        self.paint(&format!("{:<width$}", reg, width = padding), self.register)
     }
 
-    fn arrow(&self, ch: &str) -> impl std::fmt::Display {
-        ch.cyan()
+    fn csr(&self, csr: &str) -> String {
+        self.paint(csr, self.csr)
     }
 
-    fn data(&self, value: &str) -> impl std::fmt::Display {
-        value.yellow()
+    fn instr(&self, instr: &str) -> String {
+        self.paint(instr, self.instruction)
     }
 
-    fn identifier(&self, value: &str) -> impl std::fmt::Display {
-        value.yellow()
+    fn arrow(&self, ch: &str) -> String {
+        self.paint(ch, self.arrow)
     }
 
-    fn invalid(&self, value: &str) -> impl std::fmt::Display {
-        value.red()
+    fn data(&self, value: &str) -> String {
+        self.paint(value, self.data)
     }
 
-    fn privilege(&self, value: &str) -> impl std::fmt::Display {
-        value.dark_grey()
+    fn identifier(&self, value: &str) -> String {
+        self.paint(value, self.identifier)
+    }
+
+    fn invalid(&self, value: &str) -> String {
+        self.paint(value, self.invalid)
+    }
+
+    fn privilege(&self, value: &str) -> String {
+        self.paint(value, self.privilege)
     }
 }
 
-pub struct Printer;
+pub struct Printer {
+    output_palette: OutputPalette,
+}
 
 impl Printer {
-    pub fn new() -> Self {
-        Self
+    pub fn plain() -> Self {
+        Self {
+            output_palette: OutputPalette::new(false),
+        }
     }
 
-    pub fn print(&self, output: &CommandOutput) {
+    pub fn ansi_color() -> Self {
+        Self {
+            output_palette: OutputPalette::new(true),
+        }
+    }
+
+    pub(crate) fn render(&self, output: &CommandOutput) -> String {
+        self.render_with_active_palette(output)
+    }
+
+    #[cfg(feature = "native-cli")]
+    pub(crate) fn print(&self, output: &CommandOutput) {
+        print!("{}", self.render(output));
+    }
+
+    fn render_with_active_palette(&self, output: &CommandOutput) -> String {
+        use std::fmt::Write;
+
+        let mut text = String::new();
+        let palette = &self.output_palette;
+
         match output {
             CommandOutput::None => {}
             CommandOutput::Exit => {}
 
             CommandOutput::Pc(pc) => {
-                println!("pc = {}", format_addr(*pc));
+                writeln!(text, "pc = {}", palette.format_addr(*pc)).unwrap();
             }
             CommandOutput::Reg { name, val } => {
-                println!("{} = {}", palette.reg(name, 3), format_data(*val));
+                writeln!(
+                    text,
+                    "{} = {}",
+                    palette.reg(name, 3),
+                    palette.format_data(*val)
+                )
+                .unwrap();
             }
             CommandOutput::Regs(regs) => {
                 for (idx, (name, val)) in regs.iter().enumerate() {
-                    print!("x{:<3} ", idx);
-                    println!("{} = {}", palette.reg(name, 5), format_data(*val));
+                    writeln!(
+                        text,
+                        "x{:<3} {} = {}",
+                        idx,
+                        palette.reg(name, 5),
+                        palette.format_data(*val)
+                    )
+                    .unwrap();
                 }
             }
             CommandOutput::FReg {
@@ -91,38 +198,48 @@ impl Printer {
                 f32_val,
                 f64_val,
             } => {
-                println!(
+                writeln!(
+                    text,
                     "{} = {{f32: {}, f64: {}}}",
                     palette.reg(name, 0),
                     f32_val,
                     f64_val,
-                );
+                )
+                .unwrap();
             }
             CommandOutput::VReg { name, val } => {
-                println!("{} = {{", palette.reg(name, 0));
+                writeln!(text, "{} = {{", palette.reg(name, 0)).unwrap();
                 val.iter().for_each(|(c, data)| {
-                    println!(
+                    writeln!(
+                        text,
                         "\t{} = {}, ",
                         palette.data(c),
                         palette.data(format!("{:?}", data).as_str())
-                    );
+                    )
+                    .unwrap();
                 });
-                println!("\n}}")
+                text.push_str("\n}\n");
             }
             CommandOutput::Translate {
                 virt_addr,
                 phys_addr,
             } => {
-                println!("{} -> {}", format_addr(*virt_addr), format_addr(*phys_addr));
+                writeln!(
+                    text,
+                    "{} -> {}",
+                    palette.format_addr(*virt_addr),
+                    palette.format_addr(*phys_addr)
+                )
+                .unwrap();
             }
             CommandOutput::Csr { name, val } => {
                 if let Some(v) = val {
                     #[cfg(feature = "riscv64")]
-                    println!("{} = {}", name, format_data_64(*v));
+                    writeln!(text, "{} = {}", name, palette.format_data_64(*v)).unwrap();
                     #[cfg(feature = "riscv32")]
-                    println!("{} = {}", name, format_data(*v));
+                    writeln!(text, "{} = {}", name, palette.format_data(*v)).unwrap();
                 } else {
-                    println!("Illegal CSR.");
+                    text.push_str("Illegal CSR.\n");
                 }
             }
             CommandOutput::Mem { addr, data } => {
@@ -133,53 +250,71 @@ impl Printer {
 
                 while i < len {
                     if i % BYTE_PER_LINE == 0 {
-                        print!("{}: ", format_address(curr_addr));
+                        write!(text, "{}: ", palette.format_address(curr_addr)).unwrap();
                     }
 
                     if let Some(byte) = data[i as usize] {
-                        print!("{} ", format!("{:02x}", byte));
+                        write!(text, "{:02x} ", byte).unwrap();
                     } else {
-                        print!("?? ");
+                        text.push_str("?? ");
                     }
 
                     curr_addr = curr_addr + 1;
                     i += 1;
                     if i % BYTE_PER_LINE == 0 {
-                        println!();
+                        text.push('\n');
                     }
                 }
                 if len > 0 && len % BYTE_PER_LINE != 0 {
-                    println!();
+                    text.push('\n');
                 }
             }
             CommandOutput::Privilege(privilege) => {
-                println!("{}", format_privilege(*privilege));
+                writeln!(text, "{}", palette.format_privilege(*privilege)).unwrap();
             }
 
             CommandOutput::History(history) => {
                 for (i, line) in history.iter().enumerate() {
-                    println!("  [{}] {}", format_idx(i), format_instr(line),);
+                    writeln!(
+                        text,
+                        "  [{}] {}",
+                        palette.format_idx(i),
+                        palette.format_instr(line)
+                    )
+                    .unwrap();
                 }
             }
             CommandOutput::CodeList(lines) => {
                 for line in lines {
                     if line.is_current_pc {
-                        print!("{} ", palette.arrow(">"));
+                        write!(text, "{} ", palette.arrow(">")).unwrap();
                     } else {
-                        print!("  ");
+                        text.push_str("  ");
                     }
 
-                    println!("{}", format_instr_detailed(line));
+                    writeln!(text, "{}", palette.format_instr_detailed(line)).unwrap();
                 }
             }
             CommandOutput::Breakpoints(bps) => {
                 for bp in bps {
-                    println!("{}: {}", format_idx(bp.id), format_address(bp.addr));
+                    writeln!(
+                        text,
+                        "{}: {}",
+                        palette.format_idx(bp.id),
+                        palette.format_address(bp.addr)
+                    )
+                    .unwrap();
                 }
             }
             CommandOutput::Symbols(symbols) => {
                 for (name, addr) in symbols {
-                    println!("{}: {}", format_addr(*addr), palette.identifier(name));
+                    writeln!(
+                        text,
+                        "{}: {}",
+                        palette.format_addr(*addr),
+                        palette.identifier(name)
+                    )
+                    .unwrap();
                 }
             }
 
@@ -188,50 +323,69 @@ impl Printer {
                     match trace {
                         debugger::FuncTrace::Call { name, addr } => {
                             let name = name.clone().unwrap_or("???".to_string());
-                            println!(
+                            writeln!(
+                                text,
                                 "Call   -> [{}@{}]",
                                 palette.identifier(&name),
-                                format_addr(*addr)
-                            );
+                                palette.format_addr(*addr)
+                            )
+                            .unwrap();
                         }
                         debugger::FuncTrace::Return { name, addr } => {
                             let name = name.clone().unwrap_or("???".to_string());
-                            println!(
+                            writeln!(
+                                text,
                                 "Return <- [{}@{}]",
                                 palette.identifier(&name),
-                                format_addr(*addr)
-                            );
+                                palette.format_addr(*addr)
+                            )
+                            .unwrap();
                         }
                     }
                 }
             }
             CommandOutput::FTraceStat(stats) => {
-                println!(
+                writeln!(
+                    text,
                     "ftrace: {}",
                     if stats.enabled { "running" } else { "stopped" }
-                );
-                println!("queue: {} / {}", stats.queue_len, debugger::MAX_FTRACE);
-                println!("calls: {}", stats.call_count);
-                println!("returns: {}", stats.return_count);
-                println!("unknown calls: {}", stats.unknown_calls);
-                println!("unknown returns: {}", stats.unknown_returns);
+                )
+                .unwrap();
+                writeln!(
+                    text,
+                    "queue: {} / {}",
+                    stats.queue_len,
+                    debugger::MAX_FTRACE
+                )
+                .unwrap();
+                writeln!(text, "calls: {}", stats.call_count).unwrap();
+                writeln!(text, "returns: {}", stats.return_count).unwrap();
+                writeln!(text, "unknown calls: {}", stats.unknown_calls).unwrap();
+                writeln!(text, "unknown returns: {}", stats.unknown_returns).unwrap();
 
                 if !stats.per_func.is_empty() {
-                    println!("function stats:");
+                    text.push_str("function stats:\n");
                     let mut per_func = stats.per_func.clone().into_iter().collect::<Vec<_>>();
                     per_func.sort_by_key(|(_, e)| e.calls + e.returns);
                     for (name, entry) in per_func.into_iter().rev() {
-                        println!(
+                        writeln!(
+                            text,
                             "{} calls={:<5} returns={:<5}",
                             palette.identifier(&format!("{:<32}", name)),
                             entry.calls,
                             entry.returns,
-                        );
+                        )
+                        .unwrap();
                     }
                 }
             }
             CommandOutput::FTraceStatus { enabled } => {
-                println!("ftrace {}", if *enabled { "started" } else { "stopped" });
+                writeln!(
+                    text,
+                    "ftrace {}",
+                    if *enabled { "started" } else { "stopped" }
+                )
+                .unwrap();
             }
 
             CommandOutput::ContinueDone {
@@ -242,373 +396,387 @@ impl Printer {
             } => {
                 match event {
                     debugger::DebugEvent::StepCompleted => {
-                        println!("Completed, next: {}", format_instr(instr));
+                        writeln!(text, "Completed, next: {}", palette.format_instr(instr)).unwrap();
                     }
                     debugger::DebugEvent::BreakpointHit => {
-                        println!(
+                        writeln!(
+                            text,
                             "Breakpoint hit after {} steps: {}",
                             steps,
-                            format_instr(instr)
-                        );
+                            palette.format_instr(instr)
+                        )
+                        .unwrap();
                     }
                     debugger::DebugEvent::BoardHalted => {
                         if *steps == 0 {
-                            println!("Board already halted");
+                            text.push_str("Board already halted\n");
                         } else {
-                            println!(
+                            writeln!(
+                                text,
                                 "Board halted after {} steps: {}",
                                 steps,
-                                format_instr(instr)
-                            );
+                                palette.format_instr(instr)
+                            )
+                            .unwrap();
                         }
                     }
                 }
                 for res in watch_results {
-                    self.print(res);
+                    text.push_str(&self.render_with_active_palette(res));
                 }
             }
 
             CommandOutput::BreakpointSet { ok, addr, symbol } => {
+                let addr_text = palette.format_address(*addr).to_string();
                 if *ok {
                     if let Some(sym) = symbol {
-                        println!("Breakpoint set at {} <{}>", sym, format_address(*addr));
+                        writeln!(text, "Breakpoint set at {} <{}>", sym, addr_text).unwrap();
                     } else {
-                        println!("Breakpoint set at {}", format_address(*addr));
+                        writeln!(text, "Breakpoint set at {}", addr_text).unwrap();
                     }
                 } else {
-                    println!("Breakpoint already exists at {}", format_address(*addr));
+                    writeln!(text, "Breakpoint already exists at {}", addr_text).unwrap();
                 }
             }
             CommandOutput::BreakpointCleared { ok, addr, symbol } => {
+                let addr_text = palette.format_address(*addr).to_string();
                 if *ok {
                     if let Some(sym) = symbol {
-                        println!("Breakpoint removed at {} <{}>", sym, format_address(*addr));
+                        writeln!(text, "Breakpoint removed at {} <{}>", sym, addr_text).unwrap();
                     } else {
-                        println!("Breakpoint removed at {}", format_address(*addr));
+                        writeln!(text, "Breakpoint removed at {}", addr_text).unwrap();
                     }
                 } else {
-                    println!("Breakpoint not found at {}", format_address(*addr));
+                    writeln!(text, "Breakpoint not found at {}", addr_text).unwrap();
                 }
             }
         }
+
+        text
     }
 }
 
-fn format_idx(idx: usize) -> impl std::fmt::Display {
-    palette.index(&format!("{:2}", idx)).to_string()
-}
-
-fn format_addr(word: WordType) -> impl std::fmt::Display {
-    palette.addr(&format!("0x{:08x}", word)).to_string()
-}
-
-fn format_address(addr: Address) -> impl std::fmt::Display {
-    match addr {
-        Address::Phys(addr) => format!("paddr({})", format_addr(addr)),
-        Address::Virt(addr) => format!("vaddr({})", format_addr(addr)),
+impl OutputPalette {
+    fn format_idx(&self, idx: usize) -> impl std::fmt::Display {
+        self.index(&format!("{:2}", idx)).to_string()
     }
-}
 
-fn format_data(data: WordType) -> impl std::fmt::Display {
-    palette.data(&format!("0x{:08x}", data)).to_string()
-}
-
-fn format_privilege(privilege: PrivilegeLevel) -> impl std::fmt::Display {
-    palette.privilege(&format!("{:?}", privilege)).to_string()
-}
-
-fn format_data_64(data: WordType) -> impl std::fmt::Display {
-    palette.data(&format!("0x{:016x}", data)).to_string()
-}
-
-fn format_instr(instr: &DbgInstrLine) -> impl std::fmt::Display {
-    if let Some(symbol) = &instr.symbol {
-        format!(
-            "{}: {} {}",
-            format_addr(instr.addr),
-            format_asm(instr.decoded),
-            palette.identifier(&symbol)
-        )
-    } else {
-        format!("{}: {}", format_addr(instr.addr), format_asm(instr.decoded))
+    fn format_addr(&self, word: WordType) -> impl std::fmt::Display {
+        self.addr(&format!("0x{:08x}", word)).to_string()
     }
-}
 
-fn format_instr_detailed(instr: &DbgInstrLine) -> impl std::fmt::Display {
-    if let Some(symbol) = &instr.symbol {
-        format!(
-            "{}: {} {} {}",
-            format_addr(instr.addr),
-            format_raw(instr.raw),
-            format_asm(instr.decoded),
-            palette.identifier(&symbol)
-        )
-    } else {
-        format!(
-            "{}: {} {}",
-            format_addr(instr.addr),
-            format_raw(instr.raw),
-            format_asm(instr.decoded)
-        )
+    fn format_address(&self, addr: Address) -> impl std::fmt::Display {
+        match addr {
+            Address::Phys(addr) => format!("paddr({})", self.format_addr(addr)),
+            Address::Virt(addr) => format!("vaddr({})", self.format_addr(addr)),
+        }
     }
-}
 
-fn format_raw(raw: Option<RawInstr>) -> impl std::fmt::Display {
-    use riscv_emulator::isa::InstrLen;
-    match raw {
-        Some(raw) if raw.len() == 2 => palette.data(&format!("0x{:04x}", raw.val)).to_string(),
-        Some(raw) => palette.data(&format!("0x{:08x}", raw.val)).to_string(),
-        None => palette.invalid("<invalid>").to_string(),
+    fn format_data(&self, data: WordType) -> impl std::fmt::Display {
+        self.data(&format!("0x{:08x}", data)).to_string()
     }
-}
 
-fn format_asm(decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
-    if decode_instr.is_none() {
-        return format!("{}", palette.invalid("<invalid instruction>"));
+    fn format_privilege(&self, privilege: PrivilegeLevel) -> impl std::fmt::Display {
+        self.privilege(&format!("{:?}", privilege)).to_string()
     }
-    let DecodeInstr { instr, info, .. } = unsafe { decode_instr.unwrap_unchecked() };
-    match info {
-        RVInstrInfo::I { rd, rs1, imm } => match instr {
-            RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
-                format!(
-                    "{} {},{},{}",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.csr(
-                        CSR_NAME
-                            .get(&imm)
-                            .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                    ),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                )
-            }
-            RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
-                format!(
-                    "{} {},{},{}",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.csr(
-                        CSR_NAME
-                            .get(&imm)
-                            .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                    ),
-                    palette.data(rs1.to_string().as_str()),
-                )
-            }
-            _ => {
-                format!(
-                    "{} {},{},{}",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    palette.data(imm.to_string().as_str()),
-                )
-            }
-        },
 
-        RVInstrInfo::R { rs1, rs2, rd } => {
+    fn format_data_64(&self, data: WordType) -> impl std::fmt::Display {
+        self.data(&format!("0x{:016x}", data)).to_string()
+    }
+
+    fn format_instr(&self, instr: &DbgInstrLine) -> impl std::fmt::Display {
+        if let Some(symbol) = &instr.symbol {
             format!(
-                "{} {},{},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0)
+                "{}: {} {}",
+                self.format_addr(instr.addr),
+                self.format_asm(instr.decoded),
+                self.identifier(&symbol)
+            )
+        } else {
+            format!(
+                "{}: {}",
+                self.format_addr(instr.addr),
+                self.format_asm(instr.decoded)
             )
         }
+    }
 
-        RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
+    fn format_instr_detailed(&self, instr: &DbgInstrLine) -> impl std::fmt::Display {
+        if let Some(symbol) = &instr.symbol {
             format!(
-                "{} {},{},{} rm={}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
+                "{}: {} {} {}",
+                self.format_addr(instr.addr),
+                self.format_raw(instr.raw),
+                self.format_asm(instr.decoded),
+                self.identifier(&symbol)
+            )
+        } else {
+            format!(
+                "{}: {} {}",
+                self.format_addr(instr.addr),
+                self.format_raw(instr.raw),
+                self.format_asm(instr.decoded)
+            )
+        }
+    }
+
+    fn format_raw(&self, raw: Option<RawInstr>) -> impl std::fmt::Display {
+        use crate::isa::InstrLen;
+        match raw {
+            Some(raw) if raw.len() == 2 => self.data(&format!("0x{:04x}", raw.val)).to_string(),
+            Some(raw) => self.data(&format!("0x{:08x}", raw.val)).to_string(),
+            None => self.invalid("<invalid>").to_string(),
+        }
+    }
+
+    fn format_asm(&self, decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
+        if decode_instr.is_none() {
+            return format!("{}", self.invalid("<invalid instruction>"));
+        }
+        let DecodeInstr { instr, info, .. } = unsafe { decode_instr.unwrap_unchecked() };
+        match info {
+            RVInstrInfo::I { rd, rs1, imm } => match instr {
+                RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
+                    format!(
+                        "{} {},{},{}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.csr(
+                            CSR_NAME
+                                .get(&imm)
+                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                        ),
+                        self.reg(REG_NAME[rs1 as usize], 0),
+                    )
+                }
+                RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
+                    format!(
+                        "{} {},{},{}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.csr(
+                            CSR_NAME
+                                .get(&imm)
+                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
+                        ),
+                        self.data(rs1.to_string().as_str()),
+                    )
+                }
+                _ => {
+                    format!(
+                        "{} {},{},{}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.reg(REG_NAME[rs1 as usize], 0),
+                        self.data(imm.to_string().as_str()),
+                    )
+                }
+            },
+
+            RVInstrInfo::R { rs1, rs2, rd } => {
+                format!(
+                    "{} {},{},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0)
+                )
+            }
+
+            RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
+                format!(
+                    "{} {},{},{} rm={}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    rm,
+                )
+            }
+
+            RVInstrInfo::R4_rm {
+                rs1,
+                rs2,
+                rs3,
+                rd,
                 rm,
-            )
-        }
-
-        RVInstrInfo::R4_rm {
-            rs1,
-            rs2,
-            rs3,
-            rd,
-            rm,
-        } => {
-            format!(
-                "{} {},{},{},{} rm={}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-                palette.reg(REG_NAME[rs3 as usize], 0),
-                rm
-            )
-        }
-
-        RVInstrInfo::A {
-            rs1,
-            rs2,
-            rd,
-            rl,
-            aq,
-        } => {
-            if instr.name().starts_with("amo") {
+            } => {
                 format!(
-                    "{} {},{},({}) rl={}, aq={}",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.reg(REG_NAME[rs2 as usize], 0),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    rl,
-                    aq,
-                )
-            } else {
-                // lr or sc
-                format!(
-                    "{} {},({}) rl={}, aq={}",
-                    palette.instr(instr.name()),
-                    palette.reg(REG_NAME[rd as usize], 0),
-                    palette.reg(REG_NAME[rs1 as usize], 0),
-                    rl,
-                    aq,
+                    "{} {},{},{},{} rm={}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    self.reg(REG_NAME[rs3 as usize], 0),
+                    rm
                 )
             }
-        }
 
-        RVInstrInfo::B { rs1, rs2, imm } => {
-            format!(
-                "{} {},{},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-                palette.data((imm >> 1).to_string().as_str())
-            )
-        }
+            RVInstrInfo::A {
+                rs1,
+                rs2,
+                rd,
+                rl,
+                aq,
+            } => {
+                if instr.name().starts_with("amo") {
+                    format!(
+                        "{} {},{},({}) rl={}, aq={}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.reg(REG_NAME[rs2 as usize], 0),
+                        self.reg(REG_NAME[rs1 as usize], 0),
+                        rl,
+                        aq,
+                    )
+                } else {
+                    // lr or sc
+                    format!(
+                        "{} {},({}) rl={}, aq={}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.reg(REG_NAME[rs1 as usize], 0),
+                        rl,
+                        aq,
+                    )
+                }
+            }
 
-        RVInstrInfo::J { rd, imm } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.data((imm >> 12).to_string().as_str())
-            )
-        }
+            RVInstrInfo::B { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    self.data((imm >> 1).to_string().as_str())
+                )
+            }
 
-        RVInstrInfo::S { rs1, rs2, imm } => {
-            format!(
-                "{} {},{},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-                palette.data((imm).to_string().as_str())
-            )
-        }
-        RVInstrInfo::U { rd, imm } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.data((imm >> 12).to_string().as_str())
-            )
-        }
-        RVInstrInfo::V {
-            rs1, rs2, rd, vm, ..
-        } => {
-            let vector_reg_name = |id: u8| -> String { "v".to_string() + &id.to_string() };
-            format!(
-                "{} {}, {}, {}, {}",
-                palette.instr(instr.name()),
-                palette.reg(vector_reg_name(rd).as_str(), 0),
-                palette.reg(vector_reg_name(rs1).as_str(), 0),
-                palette.reg(vector_reg_name(rs2).as_str(), 0),
-                palette.data(if vm { "vm" } else { "" }),
-            )
-        }
+            RVInstrInfo::J { rd, imm } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.data((imm >> 12).to_string().as_str())
+                )
+            }
 
-        RVInstrInfo::CR { rd_rs1, rs2 } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd_rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-            )
-        }
+            RVInstrInfo::S { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    self.data((imm).to_string().as_str())
+                )
+            }
+            RVInstrInfo::U { rd, imm } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.data((imm >> 12).to_string().as_str())
+                )
+            }
+            RVInstrInfo::V {
+                rs1, rs2, rd, vm, ..
+            } => {
+                let vector_reg_name = |id: u8| -> String { "v".to_string() + &id.to_string() };
+                format!(
+                    "{} {}, {}, {}, {}",
+                    self.instr(instr.name()),
+                    self.reg(vector_reg_name(rd).as_str(), 0),
+                    self.reg(vector_reg_name(rs1).as_str(), 0),
+                    self.reg(vector_reg_name(rs2).as_str(), 0),
+                    self.data(if vm { "vm" } else { "" }),
+                )
+            }
 
-        RVInstrInfo::CI { rd_rs1, imm } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd_rs1 as usize], 0),
-                palette.data(imm.to_string().as_str()),
-            )
-        }
+            RVInstrInfo::CR { rd_rs1, rs2 } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd_rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                )
+            }
 
-        RVInstrInfo::CSS { rs2, imm } => {
-            format!(
-                "{} {},{}(sp)",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-                palette.data(imm.to_string().as_str()),
-            )
-        }
+            RVInstrInfo::CI { rd_rs1, imm } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd_rs1 as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                )
+            }
 
-        RVInstrInfo::CIW { rd, imm } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.data(imm.to_string().as_str()),
-            )
-        }
+            RVInstrInfo::CSS { rs2, imm } => {
+                format!(
+                    "{} {},{}(sp)",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                )
+            }
 
-        RVInstrInfo::CL { rd, rs1, imm } => {
-            format!(
-                "{} {},{}({})",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd as usize], 0),
-                palette.data(imm.to_string().as_str()),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-            )
-        }
+            RVInstrInfo::CIW { rd, imm } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                )
+            }
 
-        RVInstrInfo::CS { rs1, rs2, imm } => {
-            format!(
-                "{} {},{}({})",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-                palette.data(imm.to_string().as_str()),
-                palette.reg(REG_NAME[rs1 as usize], 0),
-            )
-        }
+            RVInstrInfo::CL { rd, rs1, imm } => {
+                format!(
+                    "{} {},{}({})",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                )
+            }
 
-        RVInstrInfo::CA { rd_rs1, rs2 } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd_rs1 as usize], 0),
-                palette.reg(REG_NAME[rs2 as usize], 0),
-            )
-        }
+            RVInstrInfo::CS { rs1, rs2, imm } => {
+                format!(
+                    "{} {},{}({})",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                )
+            }
 
-        RVInstrInfo::CB { rd_rs1, imm } => {
-            format!(
-                "{} {},{}",
-                palette.instr(instr.name()),
-                palette.reg(REG_NAME[rd_rs1 as usize], 0),
-                palette.data(imm.to_string().as_str()),
-            )
-        }
+            RVInstrInfo::CA { rd_rs1, rs2 } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd_rs1 as usize], 0),
+                    self.reg(REG_NAME[rs2 as usize], 0),
+                )
+            }
 
-        RVInstrInfo::CJ { target } => {
-            format!(
-                "{} {}",
-                palette.instr(instr.name()),
-                palette.data(target.to_string().as_str()),
-            )
-        }
+            RVInstrInfo::CB { rd_rs1, imm } => {
+                format!(
+                    "{} {},{}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd_rs1 as usize], 0),
+                    self.data(imm.to_string().as_str()),
+                )
+            }
 
-        RVInstrInfo::None => {
-            format!("{}", palette.instr(instr.name()))
+            RVInstrInfo::CJ { target } => {
+                format!(
+                    "{} {}",
+                    self.instr(instr.name()),
+                    self.data(target.to_string().as_str()),
+                )
+            }
+
+            RVInstrInfo::None => {
+                format!("{}", self.instr(instr.name()))
+            }
         }
     }
 }

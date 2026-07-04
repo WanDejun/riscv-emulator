@@ -21,11 +21,11 @@ use std::os::unix::net::UnixListener;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
-struct EmuGdbEventLoop<'a, B: Board> {
-    _marker: std::marker::PhantomData<&'a B>,
+struct EmuGdbEventLoop<B: Board> {
+    _marker: std::marker::PhantomData<B>,
 }
 
-impl<'a, B: Board> EmuGdbEventLoop<'a, B> {
+impl<B: Board> EmuGdbEventLoop<B> {
     fn new() -> Self {
         Self {
             _marker: std::marker::PhantomData,
@@ -33,8 +33,8 @@ impl<'a, B: Board> EmuGdbEventLoop<'a, B> {
     }
 }
 
-impl<'a, B: Board> run_blocking::BlockingEventLoop for EmuGdbEventLoop<'a, B> {
-    type Target = GdbDebugger<'a, B>;
+impl<B: Board> run_blocking::BlockingEventLoop for EmuGdbEventLoop<B> {
+    type Target = GdbDebugger<B>;
     type Connection = Box<dyn ConnectionExt<Error = std::io::Error>>;
     type StopReason = SingleThreadStopReason<u64>;
 
@@ -48,7 +48,7 @@ impl<'a, B: Board> run_blocking::BlockingEventLoop for EmuGdbEventLoop<'a, B> {
             <Self::Connection as Connection>::Error,
         >,
     > {
-        let has_input = |dbg: &mut Debugger<'a, B>| {
+        let has_input = |dbg: &mut Debugger<B>| {
             if dbg.cycle() % 1024 == 0 {
                 conn.peek().map(|b| b.is_some()).unwrap_or(true)
             } else {
@@ -88,11 +88,11 @@ impl<'a, B: Board> run_blocking::BlockingEventLoop for EmuGdbEventLoop<'a, B> {
     }
 }
 
-fn gdb_stub_event_loop<'a, B: Board>(
-    debugger: GdbStub<GdbDebugger<'a, B>, Box<dyn ConnectionExt<Error = std::io::Error>>>,
-    mut target: GdbDebugger<'a, B>,
+fn gdb_stub_event_loop<B: Board>(
+    debugger: GdbStub<GdbDebugger<B>, Box<dyn ConnectionExt<Error = std::io::Error>>>,
+    mut target: GdbDebugger<B>,
 ) {
-    match debugger.run_blocking::<EmuGdbEventLoop<'a, B>>(&mut target) {
+    match debugger.run_blocking::<EmuGdbEventLoop<B>>(&mut target) {
         Ok(disconnect_reason) => match disconnect_reason {
             DisconnectReason::Disconnect => {
                 println!("Client disconnected")
@@ -160,7 +160,7 @@ pub enum Config {
     Uds(String),
 }
 
-pub fn event_loop(board: &mut impl Board, cfg: Config) -> DynResult<()> {
+pub fn event_loop<B: Board>(board: B, cfg: Config) -> DynResult<()> {
     let mut gdb_debugger = GdbDebugger::new(board);
 
     let misa = gdb_debugger.dbg.read_csr(Misa::get_index()).unwrap();

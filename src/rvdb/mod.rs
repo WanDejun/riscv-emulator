@@ -1,29 +1,41 @@
-mod handler;
+mod commands;
 mod printer;
-mod repl;
+mod session;
 
+mod nostd_repl;
+
+#[cfg(feature = "native-cli")]
+mod native_repl;
+
+use crate::config::arch_config::REGFILE_CNT;
+use crate::config::arch_config::WordType;
+use crate::isa::riscv::RawInstr;
+use crate::isa::riscv::csr_reg::PrivilegeLevel;
+use crate::isa::riscv::debugger;
+use crate::isa::riscv::mmu::AccessType;
+use crate::isa::riscv::{debugger::Address, decoder::DecodeInstr};
 use clap::{Parser, Subcommand};
-use riscv_emulator::config::arch_config::REGFILE_CNT;
-use riscv_emulator::config::arch_config::WordType;
-use riscv_emulator::isa::riscv::RawInstr;
-use riscv_emulator::isa::riscv::csr_reg::PrivilegeLevel;
-use riscv_emulator::isa::riscv::debugger;
-use riscv_emulator::isa::riscv::mmu::AccessType;
-use riscv_emulator::isa::riscv::{debugger::Address, decoder::DecodeInstr};
+use std::fmt;
 
-pub use repl::DebugREPL;
+pub use printer::Printer;
+pub use session::{RvdbCommandResponse, RvdbSession};
 
-#[derive(clap::ValueEnum, Debug, Clone)]
+pub use nostd_repl::{NostdREPL, REPLResponse, RvdbChannelRx, RvdbChannelTx, RvdbChannels};
+
+#[cfg(feature = "native-cli")]
+pub use native_repl::NativeREPL;
+
+#[derive(clap::ValueEnum, Debug, Clone, PartialEq, Eq)]
 enum ClapAccessType {
     Read,
     Write,
 }
 
-impl ToString for ClapAccessType {
-    fn to_string(&self) -> String {
+impl fmt::Display for ClapAccessType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ClapAccessType::Read => "read".to_string(),
-            ClapAccessType::Write => "write".to_string(),
+            ClapAccessType::Read => f.write_str("read"),
+            ClapAccessType::Write => f.write_str("write"),
         }
     }
 }
@@ -37,9 +49,9 @@ impl From<ClapAccessType> for AccessType {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, PartialEq, Eq, Parser)]
 #[command(multicall = true)]
-enum Cli {
+enum RvdbCommand {
     /// Print items such as registers, the PC, or memory.
     #[command(alias = "p", subcommand)]
     Print(PrintCmd),
@@ -110,12 +122,12 @@ enum Cli {
     Info(InfoCmd),
 
     /// Quit the debugger
-    #[command(name = "quit", aliases = ["q", "exit"]) ]
+    #[command(name = "quit", aliases = ["q", "exit"])]
     Quit,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum PrintCmd {
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum PrintCmd {
     /// Program counter
     Pc,
     /// General-purpose register
@@ -151,16 +163,16 @@ pub enum PrintCmd {
     Priv,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum InfoCmd {
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum InfoCmd {
     #[command(aliases = ["b", "bp", "break"])]
     Breakpoints,
     #[command(aliases = ["sym", "symbol"])]
     Symbols,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum FTraceCmd {
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum FTraceCmd {
     Start,
     Stop,
     Show {
@@ -171,7 +183,7 @@ pub enum FTraceCmd {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PrintObject {
+pub(crate) enum PrintObject {
     Pc,
     Reg(u8),
     Regs(u8, u8),
@@ -183,7 +195,7 @@ pub enum PrintObject {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct DbgInstrLine {
+pub(crate) struct DbgInstrLine {
     pub addr: u64,
     pub raw: Option<RawInstr>,
     pub decoded: Option<DecodeInstr>,
@@ -192,7 +204,7 @@ pub struct DbgInstrLine {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum CommandOutput {
+pub(crate) enum CommandOutput {
     None,
     Exit,
 

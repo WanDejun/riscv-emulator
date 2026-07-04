@@ -2,14 +2,14 @@ use crate::isa::riscv::debugger::Address;
 
 use super::*;
 
-impl<'a, B: Board> ext::breakpoints::Breakpoints for GdbDebugger<'a, B> {
+impl<B: Board> ext::breakpoints::Breakpoints for GdbDebugger<B> {
     #[inline(always)]
     fn support_sw_breakpoint(&mut self) -> Option<ext::breakpoints::SwBreakpointOps<'_, Self>> {
         Some(self)
     }
 }
 
-impl<'a, B: Board> ext::breakpoints::SwBreakpoint for GdbDebugger<'a, B> {
+impl<B: Board> ext::breakpoints::SwBreakpoint for GdbDebugger<B> {
     fn add_sw_breakpoint(
         &mut self,
         addr: <Self::Arch as gdbstub::arch::Arch>::Usize,

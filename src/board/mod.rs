@@ -28,4 +28,6 @@ pub trait Board {
 
     fn pause_background_work(&mut self);
     fn resume_background_work(&mut self);
+
+    fn take_uart_output(&mut self) -> Vec<u8>;
 }

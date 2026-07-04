@@ -9,7 +9,15 @@ edition = "2024"
 [features]
 multithreading = []
 native-cli = ["dep:clap", "dep:crossterm", "dep:flexi_logger", "dep:rustyline"]
-web = ["dep:wasm-bindgen", "dep:console_error_panic_hook", "dep:wasm-logger"]
+web = [
+    "dep:clap",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:console_error_panic_hook",
+    "dep:wasm-logger",
+]
 
 riscv32 = []
 riscv64 = []
@@ -45,16 +53,22 @@ bit-set = { version = "0.8.0" }
 bit-vec = { version = "0.9.1" }
 gdbstub_arch = "0.3.3"
 num-traits = "0.2.19"
+clap = { version = "4.5.43", features = ["derive"], optional = true }
+noline = { version = "0.5.1", default-features = false, features = ["alloc"] }
+embedded-io = { version = "0.6.1" }
+embedded-io-async = { version = "0.6.1" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 flexi_logger = { version = "0.31.2", optional = true }
 crossterm = { version = "0.28", optional = true }
-clap = { version = "4.5.43", features = ["derive"], optional = true }
 rustyline = { version = "17.0.1", optional = true }
 gdbstub = "0.7.10"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window"] }
+js-sys = { version = "0.3", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
 wasm-logger = { version = "0.2.0", optional = true }
 

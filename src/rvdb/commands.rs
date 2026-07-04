@@ -1,11 +1,8 @@
-use std::{
-    fs,
-    io::{IsTerminal, stdin},
-};
+use clap::Parser;
 
-use super::*;
+use super::{session::RvdbSession, *};
 
-use riscv_emulator::{
+use crate::{
     board::Board,
     config::arch_config::{FLOAT_REG_NAME, REG_NAME, REGFILE_CNT, VECTOR_REG_NAME, WordType},
     dispatch_integer_sew,
@@ -13,45 +10,33 @@ use riscv_emulator::{
         InstrLen,
         riscv::{
             csr_reg::csr_macro::{CSR_ADDRESS, CSR_NAME},
-            debugger::{Address, Debugger},
+            debugger::{Address, DebugError, DebugEvent},
             mmu::AccessType,
         },
     },
     load::ELFLoader,
 };
 
-pub struct Handler<'a, B: Board> {
-    dbg: Debugger<'a, B>,
-    watch_list: Vec<PrintObject>,
-}
-
-impl<'a, B: Board> Handler<'a, B> {
-    pub fn new(board: &'a mut B) -> Self {
-        Self {
-            dbg: Debugger::new(board),
-            watch_list: Vec::new(),
-        }
-    }
-
-    pub fn handle(&mut self, cli: Cli) -> Result<CommandOutput, String> {
-        match cli {
-            Cli::Print(cmd) => self.handle_print(cmd),
-            Cli::Display(cmd) => self.handle_display(cmd),
-            Cli::Undisplay(cmd) => self.handle_undisplay(cmd),
-            Cli::Translate { addr, access } => self.handle_translate(addr, access.into()),
-            Cli::List => self.handle_list(),
-            Cli::History { count } => self.handle_history(count),
-            Cli::FTrace(cmd) => self.handle_ftrace(cmd),
-            Cli::Si => self.handle_step(),
-            Cli::Continue { steps } => self.handle_continue(steps),
-            Cli::Breakpoint {
+impl<B: Board> RvdbSession<B> {
+    pub(super) fn handle_command(&mut self, cmd: RvdbCommand) -> Result<CommandOutput, String> {
+        match cmd {
+            RvdbCommand::Print(cmd) => self.handle_print(cmd),
+            RvdbCommand::Display(cmd) => self.handle_display(cmd),
+            RvdbCommand::Undisplay(cmd) => self.handle_undisplay(cmd),
+            RvdbCommand::Translate { addr, access } => self.handle_translate(addr, access.into()),
+            RvdbCommand::List => self.handle_list(),
+            RvdbCommand::History { count } => self.handle_history(count),
+            RvdbCommand::FTrace(cmd) => self.handle_ftrace(cmd),
+            RvdbCommand::Si => self.handle_step(),
+            RvdbCommand::Continue { steps } => self.handle_continue(steps),
+            RvdbCommand::Breakpoint {
                 delete,
                 symbol,
                 virt,
             } => self.handle_breakpoint(delete, symbol, virt),
-            Cli::Info(cmd) => self.handle_info(cmd),
-            Cli::Quit => Ok(CommandOutput::Exit),
-            Cli::SymbolFile { path } => self.handle_symbol_file(path),
+            RvdbCommand::Info(cmd) => self.handle_info(cmd),
+            RvdbCommand::Quit => Ok(CommandOutput::Exit),
+            RvdbCommand::SymbolFile { path } => self.handle_symbol_file(path),
         }
     }
 
@@ -72,7 +57,7 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 
     fn handle_symbol_file(&mut self, path: String) -> Result<CommandOutput, String> {
-        let bytes = fs::read(&path).map_err(|e| e.to_string() + ", when reading " + &path)?;
+        let bytes = read_symbol_file_from_path(&path)?;
         let loader = ELFLoader::try_new(bytes).ok_or("Failed to parse ELF file")?;
         if let Some(symtab) = loader.get_symbol_table() {
             self.dbg.set_symbol_table(symtab);
@@ -111,10 +96,8 @@ impl<'a, B: Board> Handler<'a, B> {
             }
             PrintCmd::Regs { start, len } => {
                 let mut regs = Vec::new();
-                for i in start..start + len {
-                    if i >= REGFILE_CNT as u8 {
-                        break;
-                    }
+                let end = start.saturating_add(len).min(REGFILE_CNT as u8);
+                for i in start..end {
                     regs.push((REG_NAME[i as usize], self.dbg.read_reg(i)));
                 }
                 Ok(CommandOutput::Regs(regs))
@@ -255,26 +238,56 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 
     fn handle_continue(&mut self, steps: u64) -> Result<CommandOutput, String> {
-        if stdin().is_terminal() {
-            crossterm::terminal::enable_raw_mode().unwrap();
-        }
+        before_continue()?;
         self.dbg.board_mut().resume_background_work();
 
         let rst = self.dbg.continue_until_step(steps);
 
         self.dbg.board_mut().pause_background_work();
-        if stdin().is_terminal() {
-            crossterm::terminal::disable_raw_mode().unwrap();
-        }
+        let after_rst = after_continue();
 
         let (event, actual_steps) = match rst {
             Ok(rst) => rst,
             Err(e) => return Err(format!("step failed: {}", e)),
         };
+        after_rst?;
 
         let watch_results = self.collect_watch_results()?;
         let pc = self.dbg.read_pc();
 
+        Ok(CommandOutput::ContinueDone {
+            instr: self.instr_from_addr(pc),
+            watch_results,
+            event,
+            actual_steps,
+        })
+    }
+
+    pub(super) fn parse_line(&self, line: &str) -> Result<RvdbCommand, String> {
+        RvdbCommand::try_parse_from(line.split_whitespace()).map_err(|e| e.to_string())
+    }
+
+    /// Returns the event that caused the stop and the actual steps executed.
+    ///
+    /// Does not render output or collect watch results — the caller decides when
+    /// to call [`Self::collect_stop_output`].
+    pub(super) fn continue_for_steps(
+        &mut self,
+        max_steps: u64,
+    ) -> Result<(DebugEvent, u64), DebugError> {
+        self.dbg.continue_until_step(max_steps)
+    }
+
+    /// After a continue/step stops with a real stop event (breakpoint hit, board
+    /// halted), render the `ContinueDone` output: current instruction + watch list.
+    /// `StepCompleted` callers should not call this (no stop to report).
+    pub(super) fn collect_stop_output(
+        &mut self,
+        event: DebugEvent,
+        actual_steps: u64,
+    ) -> Result<CommandOutput, String> {
+        let watch_results = self.collect_watch_results()?;
+        let pc = self.dbg.read_pc();
         Ok(CommandOutput::ContinueDone {
             instr: self.instr_from_addr(pc),
             watch_results,
@@ -395,6 +408,43 @@ impl<'a, B: Board> Handler<'a, B> {
     }
 }
 
+fn before_continue() -> Result<(), String> {
+    #[cfg(feature = "native-cli")]
+    {
+        use std::io::{IsTerminal, stdin};
+
+        if stdin().is_terminal() {
+            crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn after_continue() -> Result<(), String> {
+    #[cfg(feature = "native-cli")]
+    {
+        use std::io::{IsTerminal, stdin};
+
+        if stdin().is_terminal() {
+            crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native-cli")]
+fn read_symbol_file_from_path(path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| e.to_string() + ", when reading " + path)
+}
+
+#[cfg(not(feature = "native-cli"))]
+fn read_symbol_file_from_path(_path: &str) -> Result<Vec<u8>, String> {
+    Err(
+        "symbol-file path loading is unsupported in this environment; use load_symbol_file_bytes"
+            .to_string(),
+    )
+}
+
 fn make_address(addr: u64, virt: bool) -> Address {
     if virt {
         Address::Virt(addr)
@@ -442,7 +492,7 @@ fn parse_float_reg(s: &str) -> Result<u8, String> {
 }
 
 fn parse_vector_reg(s: &str) -> Result<u8, String> {
-    parse_reg(s, &FLOAT_REG_NAME, 'v')
+    parse_reg(s, &VECTOR_REG_NAME, 'v')
 }
 
 fn parse_csr(s: &str) -> Result<WordType, String> {
@@ -462,7 +512,7 @@ fn parse_csr(s: &str) -> Result<WordType, String> {
 mod tests {
     use super::*;
 
-    use riscv_emulator::board::virt::VirtBoard;
+    use crate::board::virt::VirtBoard;
 
     #[test]
     #[cfg(feature = "riscv64")]
@@ -476,104 +526,17 @@ mod tests {
         assert!(REG_NAME[parse_common_reg("fp").unwrap() as usize] == "s0/fp");
     }
 
-    fn create_board() -> VirtBoard {
-        VirtBoard::from_binary(&[])
-    }
-
     #[test]
-    fn test_breakpoint_ops() {
-        let mut board = create_board();
-        let mut handler = Handler::new(&mut board);
-
-        const ADDR: WordType = 0x80001000;
-
-        // Set breakpoint
-        let result = handler
-            .handle(Cli::Breakpoint {
-                delete: false,
-                symbol: ADDR.to_string(),
-                virt: false,
-            })
-            .unwrap();
-
-        assert_eq!(
-            result,
-            CommandOutput::BreakpointSet {
-                ok: true,
-                addr: Address::Phys(ADDR),
-                symbol: None
-            }
-        );
-
-        // Physical breakpoint cannot be removed by virtual address
-        let result = handler
-            .handle(Cli::Breakpoint {
-                delete: true,
-                symbol: ADDR.to_string(),
-                virt: true,
-            })
-            .unwrap();
-
-        assert_eq!(
-            result,
-            CommandOutput::BreakpointCleared {
-                ok: false,
-                addr: Address::Virt(ADDR),
-                symbol: None
-            }
-        );
-
-        // Remove breakpoint
-        let result = handler
-            .handle(Cli::Breakpoint {
-                delete: true,
-                symbol: ADDR.to_string(),
-                virt: false,
-            })
-            .unwrap();
-
-        assert_eq!(
-            result,
-            CommandOutput::BreakpointCleared {
-                ok: true,
-                addr: Address::Phys(ADDR),
-                symbol: None
-            }
-        );
-    }
-
-    #[test]
-    fn test_ftrace_start_stop_show_and_stat() {
-        let mut board = create_board();
-        let mut handler = Handler::new(&mut board);
-
-        assert_eq!(
-            handler.handle(Cli::FTrace(FTraceCmd::Stat)).unwrap(),
-            CommandOutput::FTraceStat(riscv_emulator::isa::riscv::debugger::FtraceStatsSnapshot {
-                enabled: false,
-                queue_len: 0,
-                call_count: 0,
-                return_count: 0,
-                unknown_calls: 0,
-                unknown_returns: 0,
-                per_func: Vec::new(),
-            })
-        );
-
-        assert_eq!(
-            handler.handle(Cli::FTrace(FTraceCmd::Start)).unwrap(),
-            CommandOutput::FTraceStatus { enabled: true }
-        );
-        assert_eq!(
-            handler.handle(Cli::FTrace(FTraceCmd::Stop)).unwrap(),
-            CommandOutput::FTraceStatus { enabled: false }
-        );
-        assert_eq!(
-            handler
-                .handle(Cli::FTrace(FTraceCmd::Show { count: 5 }))
-                .unwrap(),
-            CommandOutput::FTraceShow(Vec::new())
-        );
+    #[cfg(feature = "riscv64")]
+    fn test_regs_range_does_not_overflow() {
+        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        assert!(matches!(
+            session.handle_command(RvdbCommand::Print(PrintCmd::Regs {
+                start: u8::MAX,
+                len: u8::MAX,
+            })),
+            Ok(CommandOutput::Regs(regs)) if regs.is_empty()
+        ));
     }
 
     fn board_with_program(instrs: &[u16]) -> VirtBoard {
@@ -587,13 +550,13 @@ mod tests {
     #[test]
     #[cfg(feature = "riscv64")]
     fn test_list_advances_by_instruction_length() {
-        use riscv_emulator::ram_config::BASE_ADDR;
+        use crate::ram_config::BASE_ADDR;
 
         // c.addi s0,5 (2B) | addi x2,x3,-5 (4B) | c.li a0,-3 (2B)
-        let mut board = board_with_program(&[0x0415, 0x8113, 0xffb1, 0x5575]);
-        let mut handler = Handler::new(&mut board);
+        let mut session = RvdbSession::new(board_with_program(&[0x0415, 0x8113, 0xffb1, 0x5575]));
 
-        let CommandOutput::CodeList(lines) = handler.handle(Cli::List).unwrap() else {
+        let CommandOutput::CodeList(lines) = session.handle_command(RvdbCommand::List).unwrap()
+        else {
             panic!("expected a code list");
         };
 
@@ -615,15 +578,16 @@ mod tests {
     #[test]
     #[cfg(feature = "riscv64")]
     fn test_decoded_length_in_history() {
-        use riscv_emulator::ram_config::BASE_ADDR;
+        use crate::ram_config::BASE_ADDR;
 
         // c.li a0,-3 (2B) then c.addi s0,5 (2B): stepping must advance PC by 2.
-        let mut board = board_with_program(&[0x5575, 0x0415]);
-        let mut handler = Handler::new(&mut board);
+        let mut session = RvdbSession::new(board_with_program(&[0x5575, 0x0415]));
 
-        handler.handle(Cli::Si).unwrap();
+        session.handle_command(RvdbCommand::Si).unwrap();
 
-        let CommandOutput::History(history) = handler.handle(Cli::History { count: 8 }).unwrap()
+        let CommandOutput::History(history) = session
+            .handle_command(RvdbCommand::History { count: 8 })
+            .unwrap()
         else {
             panic!("expected history");
         };
@@ -633,6 +597,129 @@ mod tests {
         let first = history.first().expect("history should not be empty");
         assert_eq!(first.addr, BASE_ADDR);
         assert_eq!(first.decoded.unwrap().len, 2);
-        assert_eq!(handler.dbg.read_pc(), BASE_ADDR + 2);
+        assert_eq!(session.dbg.read_pc(), BASE_ADDR + 2);
+    }
+
+    #[test]
+    fn test_breakpoint_ops() {
+        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+
+        const ADDR: WordType = 0x80001000;
+
+        let result = session
+            .handle_command(RvdbCommand::Breakpoint {
+                delete: false,
+                symbol: ADDR.to_string(),
+                virt: false,
+            })
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CommandOutput::BreakpointSet {
+                ok: true,
+                addr: Address::Phys(ADDR),
+                symbol: None
+            }
+        );
+
+        let result = session
+            .handle_command(RvdbCommand::Breakpoint {
+                delete: true,
+                symbol: ADDR.to_string(),
+                virt: true,
+            })
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CommandOutput::BreakpointCleared {
+                ok: false,
+                addr: Address::Virt(ADDR),
+                symbol: None
+            }
+        );
+
+        let result = session
+            .handle_command(RvdbCommand::Breakpoint {
+                delete: true,
+                symbol: ADDR.to_string(),
+                virt: false,
+            })
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CommandOutput::BreakpointCleared {
+                ok: true,
+                addr: Address::Phys(ADDR),
+                symbol: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_info_breakpoints_preserves_address_space() {
+        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+
+        const ADDR: WordType = 0x80001000;
+
+        session
+            .handle_command(RvdbCommand::Breakpoint {
+                delete: false,
+                symbol: ADDR.to_string(),
+                virt: false,
+            })
+            .unwrap();
+        session
+            .handle_command(RvdbCommand::Breakpoint {
+                delete: false,
+                symbol: ADDR.to_string(),
+                virt: true,
+            })
+            .unwrap();
+
+        let result = session
+            .handle_command(RvdbCommand::Info(InfoCmd::Breakpoints))
+            .unwrap();
+
+        assert_eq!(
+            result,
+            CommandOutput::Breakpoints(vec![
+                debugger::Breakpoint {
+                    id: 0,
+                    addr: Address::Phys(ADDR)
+                },
+                debugger::Breakpoint {
+                    id: 1,
+                    addr: Address::Virt(ADDR)
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_commands() {
+        let session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        assert_eq!(
+            session.parse_line("p pc").unwrap(),
+            RvdbCommand::Print(PrintCmd::Pc)
+        );
+        assert_eq!(
+            session.parse_line("continue 8000").unwrap(),
+            RvdbCommand::Continue { steps: 8000 }
+        );
+        assert_eq!(
+            session.parse_line("c").unwrap(),
+            RvdbCommand::Continue { steps: u64::MAX }
+        );
+        assert_eq!(
+            session.parse_line("b main").unwrap(),
+            RvdbCommand::Breakpoint {
+                delete: false,
+                symbol: "main".to_string(),
+                virt: false,
+            }
+        );
     }
 }

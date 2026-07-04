@@ -25,6 +25,9 @@ mod vclock;
 #[cfg(feature = "native-cli")]
 pub mod gdb;
 
+#[cfg(any(feature = "native-cli", feature = "web"))]
+pub mod rvdb;
+
 pub mod background;
 pub mod board;
 pub mod byte_io;
@@ -123,6 +126,10 @@ impl Emulator {
 
     pub fn from_board(board: VirtBoard) -> Self {
         Self { board }
+    }
+
+    pub fn into_board(self) -> VirtBoard {
+        self.board
     }
 
     pub fn run(&mut self) -> Result<(), Exception> {

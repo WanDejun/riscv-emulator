@@ -1,35 +1,30 @@
 use std::io::IsTerminal;
 use std::io::stdin;
-use std::process::exit;
 
-use super::Cli;
+use crate::board::Board;
 
-use super::CommandOutput;
-use super::handler::Handler;
 use super::printer::Printer;
-use clap::Parser;
-use riscv_emulator::board::Board;
+use super::session::RvdbSession;
 use rustyline::error::ReadlineError;
 
 const PROMPT: &str = "(rvdb) ";
 
-pub struct DebugREPL<'a, B: Board> {
+pub struct NativeREPL<B: Board> {
     editor: rustyline::DefaultEditor,
-    handler: Handler<'a, B>,
-    printer: Printer,
+    session: RvdbSession<B>,
+    last_line: String,
 }
 
-impl<'a, B: Board> DebugREPL<'a, B> {
-    pub fn new(board: &'a mut B) -> Self {
+impl<B: Board> NativeREPL<B> {
+    pub fn new(board: B) -> Self {
         if stdin().is_terminal() {
             crossterm::terminal::disable_raw_mode().unwrap();
         }
-        board.pause_background_work();
 
         Self {
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
-            handler: Handler::new(board),
-            printer: Printer::new(),
+            session: RvdbSession::with_printer(board, Printer::ansi_color()),
+            last_line: String::new(),
         }
     }
 
@@ -44,11 +39,13 @@ impl<'a, B: Board> DebugREPL<'a, B> {
             }
             println!("{}{}", PROMPT, line);
 
-            match self.process_line(line) {
-                Ok(CommandOutput::Exit) => {
-                    exit(0);
+            match self.session.execute_line(line) {
+                Ok(response) => {
+                    print!("{}", response.text);
+                    if response.exit {
+                        return true;
+                    }
                 }
-                Ok(output) => self.printer.print(&output),
                 Err(err) => println!("Error: {}", err),
             }
         }
@@ -58,25 +55,28 @@ impl<'a, B: Board> DebugREPL<'a, B> {
 
     /// REPL main loop.
     pub fn run(&mut self) {
-        let mut last_line = String::new();
-
         loop {
             match self.editor.readline(PROMPT) {
                 Ok(line) => {
                     let mut line = line.trim();
 
                     if line.is_empty() == false {
-                        last_line = line.to_string();
-                        self.editor.add_history_entry(line).unwrap();
-                    } else if last_line.is_empty() == false {
+                        self.last_line = line.to_string();
+                        let _ = self.editor.add_history_entry(line);
+                    } else if self.last_line.is_empty() == false {
                         // Repeat the last command if the current line is empty.
-                        line = last_line.as_str();
+                        line = self.last_line.as_str();
+                    } else {
+                        continue;
                     }
 
-                    let _ = self.editor.add_history_entry(line);
-                    match self.process_line(&line) {
-                        Ok(CommandOutput::Exit) => break,
-                        Ok(output) => self.printer.print(&output),
+                    match self.session.execute_line(line) {
+                        Ok(response) => {
+                            print!("{}", response.text);
+                            if response.exit {
+                                break;
+                            }
+                        }
                         Err(err) => println!("Error: {}", err),
                     }
                 }
@@ -89,12 +89,6 @@ impl<'a, B: Board> DebugREPL<'a, B> {
                 }
             }
         }
-    }
-
-    fn process_line(&mut self, line: &str) -> Result<CommandOutput, String> {
-        let argv = line.split_whitespace().map(|s| s.to_string());
-        let cli = Cli::try_parse_from(argv).map_err(|e| e.to_string())?;
-        self.handler.handle(cli)
     }
 }
 
@@ -132,13 +126,12 @@ mod test {
     }
 
     use super::*;
-    use riscv_emulator::board::virt::VirtBoard;
+    use crate::board::virt::VirtBoard;
 
     #[test]
     fn drop_should_not_hang() {
         should_success_within(Duration::from_millis(100), || {
-            let mut board = VirtBoard::from_binary(&[]);
-            let _repl = DebugREPL::new(&mut board);
+            let _repl = NativeREPL::new(VirtBoard::from_binary(&[]));
         });
     }
 }

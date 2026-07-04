@@ -300,12 +300,14 @@ pub struct VirtBoard {
 }
 
 impl VirtBoard {
+    // TODO: return error
     pub fn from_binary(bytes: &[u8]) -> Self {
         let mut ram = Ram::new();
         load_bin(&mut ram, bytes);
         Self::from_ram(ram)
     }
 
+    // TODO: Remove this
     pub fn from_elf(bytes: Vec<u8>) -> Self {
         Self::try_from_elf(bytes).expect("ELF load failed in VirtBoard::from_elf")
     }
@@ -337,6 +339,10 @@ impl VirtBoard {
         let mut vec = Vec::new();
         self.uart_port.drain_to(&mut vec);
         vec
+    }
+
+    pub fn uart_port(&self) -> UartBytePort {
+        self.uart_port.clone()
     }
 }
 
@@ -393,8 +399,13 @@ impl Board for VirtBoard {
     fn resume_background_work(&mut self) {
         self.background.resume();
     }
-}
 
+    fn take_uart_output(&mut self) -> Vec<u8> {
+        let mut vec = Vec::new();
+        self.uart_port.drain_to(&mut vec);
+        vec
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
