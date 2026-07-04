@@ -1059,8 +1059,7 @@ pub(in crate::isa::riscv) fn get_exec_func(
         | RiscvInstr::VSOXSEG7EI64_V
         | RiscvInstr::VSOXSEG8EI64_V => vector_indexed_ordered_store::<3>,
 
-        RiscvInstr::VSLIDE1DOWN_VX | RiscvInstr::VSLIDE1UP_VX => {
-            todo!()
-        }
+        RiscvInstr::VSLIDE1UP_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDE1UP_VX }>,
+        RiscvInstr::VSLIDE1DOWN_VX => vec_integer_spec_op::<{ vector_spec_instr::SLIDE1DOWN_VX }>,
     }
 }

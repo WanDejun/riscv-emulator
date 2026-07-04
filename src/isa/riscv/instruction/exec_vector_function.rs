@@ -20,10 +20,10 @@ use crate::{
                     VectorOpIotaM, VectorOpMadc, VectorOpMerge, VectorOpMsbc, VectorOpMsbfM,
                     VectorOpMsifM, VectorOpMsofM, VectorOpNsra, VectorOpNsrl,
                     VectorOpRGatherEI16VV, VectorOpRGatherVI, VectorOpRGatherVV, VectorOpRGatherVX,
-                    VectorOpSlideDown, VectorOpSlideUp, VectorOpWideningIntegerVV,
-                    VectorOpWideningIntegerVVV, VectorOpWideningIntegerVX,
-                    VectorOpWideningIntegerVXV, VectorOpWideningIntegerWV,
-                    VectorOpWideningIntegerWX,
+                    VectorOpSlide1Down, VectorOpSlide1Up, VectorOpSlideDown, VectorOpSlideUp,
+                    VectorOpWideningIntegerVV, VectorOpWideningIntegerVVV,
+                    VectorOpWideningIntegerVX, VectorOpWideningIntegerVXV,
+                    VectorOpWideningIntegerWV, VectorOpWideningIntegerWX,
                 },
                 types::{FixedPointRoundingMode, Vsew},
             },
@@ -486,7 +486,6 @@ pub(super) fn vector_indexed_ordered_store<const EEW: u8>(
 // ---------------------------------------
 //          Vector Integer
 // ---------------------------------------
-
 pub(super) fn vec_integer_op_vv<OpIVV>(info: RVInstrInfo, cpu: &mut RVCPU) -> Result<(), Exception>
 where
     OpIVV: VectorOpIntegerVV,
@@ -1194,6 +1193,8 @@ pub(super) mod vector_spec_instr {
     pub(in super::super) const MERGE_VIM: usize = 32;
     pub(in super::super) const MOVE_SX: usize = 33;
     pub(in super::super) const MOVE_XS: usize = 34;
+    pub(in super::super) const SLIDE1UP_VX: usize = 35;
+    pub(in super::super) const SLIDE1DOWN_VX: usize = 36;
 }
 
 pub(super) fn vec_integer_spec_op<const VINSTR: usize>(
@@ -1244,6 +1245,18 @@ pub(super) fn vec_integer_spec_op<const VINSTR: usize>(
                     let x1 = cpu.reg_file.read(rs1, 0).0;
                     cpu.vector
                         .exec_integer_slidedown::<VectorOpSlideDown>(x1, vs2, vd, !vm, vstart)
+                }
+                vector_spec_instr::SLIDE1UP_VX => {
+                    let (vs2, vd) = (rs2, rd);
+                    let x1 = cpu.reg_file.read(rs1, 0).0;
+                    cpu.vector
+                        .exec_integer_slideup::<VectorOpSlide1Up>(x1, vs2, vd, !vm, vstart)
+                }
+                vector_spec_instr::SLIDE1DOWN_VX => {
+                    let (vs2, vd) = (rs2, rd);
+                    let x1 = cpu.reg_file.read(rs1, 0).0;
+                    cpu.vector
+                        .exec_integer_slidedown::<VectorOpSlide1Down>(x1, vs2, vd, !vm, vstart)
                 }
                 vector_spec_instr::GATHER_VV => {
                     let (vs1, vs2, vd) = (rs1, rs2, rd);
@@ -1856,6 +1869,78 @@ mod test {
             .csr(Vstart::get_index(), 0)
             .reg_vec(4, &expected)
             .pc(0x2004);
+    }
+
+    #[test]
+    fn slide1up_vx_decode_execute() {
+        const VS2: u8 = 16;
+        const VD: u8 = 24;
+        const RS1: u8 = 5;
+        let elem_count = VLEN_BYTE / size_of::<u16>();
+        let vs2: Vec<u16> = (0..elem_count).map(|i| 0x100 + i as u16).collect();
+        let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x900 + i as u16).collect();
+        let vs2_bytes: Vec<u8> = vs2.iter().flat_map(|value| value.to_le_bytes()).collect();
+        let old_vd_bytes: Vec<u8> = old_vd
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        let mut expected = old_vd.clone();
+        expected[0] = 0x2345;
+        expected[1..elem_count].copy_from_slice(&vs2[..elem_count - 1]);
+        let raw_instr = 0x3800_6057
+            | (1 << 25)
+            | ((VS2 as u32) << 20)
+            | ((RS1 as u32) << 15)
+            | ((VD as u32) << 7);
+
+        run_test_exec_decode(
+            raw_instr,
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E16, false, false)
+                    .reg(RS1, 0x12345)
+                    .reg_vec(1, VS2, &vs2_bytes)
+                    .reg_vec(1, VD, &old_vd_bytes)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_vec(VD, &expected).pc(0x2004),
+        );
+    }
+
+    #[test]
+    fn slide1down_vx_decode_execute() {
+        const VS2: u8 = 16;
+        const VD: u8 = 24;
+        const RS1: u8 = 5;
+        let elem_count = VLEN_BYTE / size_of::<u16>();
+        let vs2: Vec<u16> = (0..elem_count).map(|i| 0x100 + i as u16).collect();
+        let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x900 + i as u16).collect();
+        let vs2_bytes: Vec<u8> = vs2.iter().flat_map(|value| value.to_le_bytes()).collect();
+        let old_vd_bytes: Vec<u8> = old_vd
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+        let mut expected = old_vd.clone();
+        expected[..elem_count - 1].copy_from_slice(&vs2[1..elem_count]);
+        expected[elem_count - 1] = 0x2345;
+        let raw_instr = 0x3c00_6057
+            | (1 << 25)
+            | ((VS2 as u32) << 20)
+            | ((RS1 as u32) << 15)
+            | ((VD as u32) << 7);
+
+        run_test_exec_decode(
+            raw_instr,
+            |builder| {
+                builder
+                    .vector_status(Vlmul::M1, Vsew::E16, false, false)
+                    .reg(RS1, 0x12345)
+                    .reg_vec(1, VS2, &vs2_bytes)
+                    .reg_vec(1, VD, &old_vd_bytes)
+                    .pc(0x2000)
+            },
+            |checker| checker.reg_vec(VD, &expected).pc(0x2004),
+        );
     }
 
     #[test]

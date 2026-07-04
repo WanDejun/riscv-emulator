@@ -1360,6 +1360,50 @@ where
     Ok(())
 }
 
+fn vector_op_slide1up<T>(
+    x1: WordType,
+    vs2: &VGFRef,
+    _old_vd: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default + TruncateFrom<WordType>,
+{
+    let vs2 = vs2.as_slice::<T>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        let value = if index == 0 {
+            T::truncate_from(x1)
+        } else {
+            vs2.get(index - 1).copied().unwrap_or_default()
+        };
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
+fn vector_op_slide1down<T>(
+    x1: WordType,
+    vs2: &VGFRef,
+    vd: &mut VGFRefMut,
+    mask: &VecOpMask,
+) -> Result<(), Exception>
+where
+    T: Copy + Default + TruncateFrom<WordType>,
+{
+    let vs2 = vs2.as_slice::<T>();
+    for (index, element) in vd.iter_mut().enumerate() {
+        let value = if mask.is_body_index(index) && !mask.is_body_index(index + 1) {
+            // is the end element
+            T::truncate_from(x1)
+        } else {
+            vs2.get(index + 1).copied().unwrap_or_default()
+        };
+        mask.element_load(element, value, index);
+    }
+    Ok(())
+}
+
 fn vector_op_merge_vvm<T>(
     vs1: &VGFRef,
     vs2: &VGFRef,
@@ -2215,6 +2259,8 @@ pub(in crate::isa::riscv) struct VectorOpRGatherVI;
 pub(in crate::isa::riscv) struct VectorOpRGatherEI16VV;
 pub(in crate::isa::riscv) struct VectorOpSlideUp;
 pub(in crate::isa::riscv) struct VectorOpSlideDown;
+pub(in crate::isa::riscv) struct VectorOpSlide1Up;
+pub(in crate::isa::riscv) struct VectorOpSlide1Down;
 pub(in crate::isa::riscv) struct VectorOpMerge;
 pub(in crate::isa::riscv) struct VectorOpCpopM;
 pub(in crate::isa::riscv) struct VectorOpFirstM;
@@ -2589,6 +2635,33 @@ impl VectorOpIntegerVX for VectorOpSlideDown {
         dispatch_integer_sew!(vd.sew, |T| {
             vector_op_slidedown::<T>(x1 as usize, vs2, vd, mask)
         })
+    }
+}
+
+impl VectorOpIntegerVXV for VectorOpSlide1Up {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        old_vd: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs2.sew == old_vd.sew && old_vd.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| {
+            vector_op_slide1up::<T>(x1, vs2, old_vd, vd, mask)
+        })
+    }
+}
+
+impl VectorOpIntegerVX for VectorOpSlide1Down {
+    fn exec(
+        x1: WordType,
+        vs2: &VGFRef,
+        vd: &mut VGFRefMut,
+        mask: &VecOpMask,
+    ) -> Result<(), Exception> {
+        assert!(vs2.sew == vd.sew);
+        dispatch_integer_sew!(vd.sew, |T| { vector_op_slide1down::<T>(x1, vs2, vd, mask) })
     }
 }
 

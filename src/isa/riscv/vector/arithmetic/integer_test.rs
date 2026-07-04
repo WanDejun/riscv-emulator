@@ -1428,6 +1428,108 @@ fn test_vector_op_slidedown_honors_mask_and_tail() {
 }
 
 #[test]
+fn test_vector_op_slide1up_vx() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx(0x12345, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u16> = (0..elem_count).map(|i| 0x100_u16 + i as u16).collect();
+    let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x900_u16 + i as u16).collect();
+    let mut expected = old_vd.clone();
+    expected[0] = 0x2345;
+    expected[1..elem_count].copy_from_slice(&vs2[..elem_count - 1]);
+
+    run_test_integer_vxv::<VectorOpSlide1Up, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_slide1up_honors_mask_and_tail() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vx(0x55, 16, 24).with_enable_mask(true);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let vl = 3;
+    let vs2: Vec<u32> = (0..elem_count).map(|i| 0x10_u32 + i as u32).collect();
+    let old_vd: Vec<u32> = (0..elem_count).map(|i| 0x80_u32 + i as u32).collect();
+    let pred_mask = mask_from_bits([false, true, true, true]);
+    let mut expected = old_vd.clone();
+    expected[1] = vs2[0];
+    expected[2] = vs2[1];
+
+    run_test_integer_vxv::<VectorOpSlide1Up, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_slide1down_vx() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E16;
+    let param = TestOpParameter::new_vx(0x12345, 16, 24);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u16>();
+    let vs2: Vec<u16> = (0..elem_count).map(|i| 0x100_u16 + i as u16).collect();
+    let old_vd: Vec<u16> = (0..elem_count).map(|i| 0x900_u16 + i as u16).collect();
+    let mut expected = old_vd.clone();
+    expected[..elem_count - 1].copy_from_slice(&vs2[1..elem_count]);
+    expected[elem_count - 1] = 0x2345;
+
+    run_test_integer_vx::<VectorOpSlide1Down, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, elem_count as u16)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
+fn test_vector_op_slide1down_honors_mask_and_tail() {
+    const LMUL: Vlmul = Vlmul::M1;
+    const SEW: Vsew = Vsew::E32;
+    let param = TestOpParameter::new_vx(0x55, 16, 24).with_enable_mask(true);
+    let elem_count = VLEN_BYTE * LMUL.get_lmul() as usize / size_of::<u32>();
+    let vl = 3;
+    let vs2: Vec<u32> = (0..elem_count).map(|i| 0x10_u32 + i as u32).collect();
+    let old_vd: Vec<u32> = (0..elem_count).map(|i| 0x80_u32 + i as u32).collect();
+    let pred_mask = mask_from_bits([true, false, true, true]);
+    let mut expected = old_vd.clone();
+    expected[0] = vs2[1];
+    expected[2] = 0x55;
+
+    run_test_integer_vx::<VectorOpSlide1Down, _, _>(
+        param,
+        |builder| {
+            builder
+                .config(LMUL, SEW, false, false, vl as u16)
+                .reg(1, param.v0(), &pred_mask)
+                .reg(LMUL.get_lmul(), param.vs2(), &vs2)
+                .reg(LMUL.get_lmul(), param.vd(), &old_vd)
+        },
+        |checker| checker.reg(LMUL.get_lmul(), param.vd(), &expected),
+    );
+}
+
+#[test]
 fn test_vector_op_narrowing_shift_right_wv() {
     const LMUL: Vlmul = Vlmul::M1;
     const SEW: Vsew = Vsew::E8;
