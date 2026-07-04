@@ -698,323 +698,366 @@ pub(in crate::isa::riscv) fn get_exec_func(
         //-------- OPFVF (func3 = 0b101) --------
 
         //------- load store instruction. -------
-        RiscvInstr::VLM_V
-        | RiscvInstr::VLE8_V
-        | RiscvInstr::VL1RE8_V
-        | RiscvInstr::VL2RE8_V
-        | RiscvInstr::VL4RE8_V
-        | RiscvInstr::VL8RE8_V
-        | RiscvInstr::VLE8FF_V
-        | RiscvInstr::VLOXEI8_V
-        | RiscvInstr::VLOXSEG2EI8_V
-        | RiscvInstr::VLOXSEG3EI8_V
-        | RiscvInstr::VLOXSEG4EI8_V
-        | RiscvInstr::VLOXSEG5EI8_V
-        | RiscvInstr::VLOXSEG6EI8_V
-        | RiscvInstr::VLOXSEG7EI8_V
-        | RiscvInstr::VLOXSEG8EI8_V
-        | RiscvInstr::VLSE8_V
+        RiscvInstr::VLM_V => vector_mask_load::<0>,
+        RiscvInstr::VSM_V => vector_mask_store::<0>,
+
+        // Vector unit-stride loads: vl[seg]e{eew}.v
+        RiscvInstr::VLE8_V
         | RiscvInstr::VLSEG2E8_V
-        | RiscvInstr::VLSEG2E8FF_V
         | RiscvInstr::VLSEG3E8_V
-        | RiscvInstr::VLSEG3E8FF_V
         | RiscvInstr::VLSEG4E8_V
-        | RiscvInstr::VLSEG4E8FF_V
         | RiscvInstr::VLSEG5E8_V
-        | RiscvInstr::VLSEG5E8FF_V
         | RiscvInstr::VLSEG6E8_V
-        | RiscvInstr::VLSEG6E8FF_V
         | RiscvInstr::VLSEG7E8_V
+        | RiscvInstr::VLSEG8E8_V => vector_unit_stride_load::<0>,
+
+        RiscvInstr::VLE16_V
+        | RiscvInstr::VLSEG2E16_V
+        | RiscvInstr::VLSEG3E16_V
+        | RiscvInstr::VLSEG4E16_V
+        | RiscvInstr::VLSEG5E16_V
+        | RiscvInstr::VLSEG6E16_V
+        | RiscvInstr::VLSEG7E16_V
+        | RiscvInstr::VLSEG8E16_V => vector_unit_stride_load::<1>,
+
+        RiscvInstr::VLE32_V
+        | RiscvInstr::VLSEG2E32_V
+        | RiscvInstr::VLSEG3E32_V
+        | RiscvInstr::VLSEG4E32_V
+        | RiscvInstr::VLSEG5E32_V
+        | RiscvInstr::VLSEG6E32_V
+        | RiscvInstr::VLSEG7E32_V
+        | RiscvInstr::VLSEG8E32_V => vector_unit_stride_load::<2>,
+
+        RiscvInstr::VLE64_V
+        | RiscvInstr::VLSEG2E64_V
+        | RiscvInstr::VLSEG3E64_V
+        | RiscvInstr::VLSEG4E64_V
+        | RiscvInstr::VLSEG5E64_V
+        | RiscvInstr::VLSEG6E64_V
+        | RiscvInstr::VLSEG7E64_V
+        | RiscvInstr::VLSEG8E64_V => vector_unit_stride_load::<3>,
+
+        // Vector unit-stride fault-only-first loads: vl[seg]e{eew}ff.v
+        RiscvInstr::VLE8FF_V
+        | RiscvInstr::VLSEG2E8FF_V
+        | RiscvInstr::VLSEG3E8FF_V
+        | RiscvInstr::VLSEG4E8FF_V
+        | RiscvInstr::VLSEG5E8FF_V
+        | RiscvInstr::VLSEG6E8FF_V
         | RiscvInstr::VLSEG7E8FF_V
-        | RiscvInstr::VLSEG8E8_V
-        | RiscvInstr::VLSEG8E8FF_V
+        | RiscvInstr::VLSEG8E8FF_V => vector_unit_stride_fault_only_first_load::<0>,
+
+        RiscvInstr::VLE16FF_V
+        | RiscvInstr::VLSEG2E16FF_V
+        | RiscvInstr::VLSEG3E16FF_V
+        | RiscvInstr::VLSEG4E16FF_V
+        | RiscvInstr::VLSEG5E16FF_V
+        | RiscvInstr::VLSEG6E16FF_V
+        | RiscvInstr::VLSEG7E16FF_V
+        | RiscvInstr::VLSEG8E16FF_V => vector_unit_stride_fault_only_first_load::<1>,
+
+        RiscvInstr::VLE32FF_V
+        | RiscvInstr::VLSEG2E32FF_V
+        | RiscvInstr::VLSEG3E32FF_V
+        | RiscvInstr::VLSEG4E32FF_V
+        | RiscvInstr::VLSEG5E32FF_V
+        | RiscvInstr::VLSEG6E32FF_V
+        | RiscvInstr::VLSEG7E32FF_V
+        | RiscvInstr::VLSEG8E32FF_V => vector_unit_stride_fault_only_first_load::<2>,
+
+        RiscvInstr::VLE64FF_V
+        | RiscvInstr::VLSEG2E64FF_V
+        | RiscvInstr::VLSEG3E64FF_V
+        | RiscvInstr::VLSEG4E64FF_V
+        | RiscvInstr::VLSEG5E64FF_V
+        | RiscvInstr::VLSEG6E64FF_V
+        | RiscvInstr::VLSEG7E64FF_V
+        | RiscvInstr::VLSEG8E64FF_V => vector_unit_stride_fault_only_first_load::<3>,
+
+        // Vector constant-stride loads: vls[seg]e{eew}.v
+        RiscvInstr::VLSE8_V
         | RiscvInstr::VLSSEG2E8_V
         | RiscvInstr::VLSSEG3E8_V
         | RiscvInstr::VLSSEG4E8_V
         | RiscvInstr::VLSSEG5E8_V
         | RiscvInstr::VLSSEG6E8_V
         | RiscvInstr::VLSSEG7E8_V
-        | RiscvInstr::VLSSEG8E8_V
-        | RiscvInstr::VLUXEI8_V
-        | RiscvInstr::VLUXSEG2EI8_V
-        | RiscvInstr::VLUXSEG3EI8_V
-        | RiscvInstr::VLUXSEG4EI8_V
-        | RiscvInstr::VLUXSEG5EI8_V
-        | RiscvInstr::VLUXSEG6EI8_V
-        | RiscvInstr::VLUXSEG7EI8_V
-        | RiscvInstr::VLUXSEG8EI8_V => vector_load::<0>,
+        | RiscvInstr::VLSSEG8E8_V => vector_constant_stride_load::<0>,
 
-        RiscvInstr::VLE16_V
-        | RiscvInstr::VL1RE16_V
-        | RiscvInstr::VL2RE16_V
-        | RiscvInstr::VL4RE16_V
-        | RiscvInstr::VL8RE16_V
-        | RiscvInstr::VLE16FF_V
-        | RiscvInstr::VLOXEI16_V
-        | RiscvInstr::VLOXSEG2EI16_V
-        | RiscvInstr::VLOXSEG3EI16_V
-        | RiscvInstr::VLOXSEG4EI16_V
-        | RiscvInstr::VLOXSEG5EI16_V
-        | RiscvInstr::VLOXSEG6EI16_V
-        | RiscvInstr::VLOXSEG7EI16_V
-        | RiscvInstr::VLOXSEG8EI16_V
-        | RiscvInstr::VLSE16_V
-        | RiscvInstr::VLSEG2E16_V
-        | RiscvInstr::VLSEG2E16FF_V
-        | RiscvInstr::VLSEG3E16_V
-        | RiscvInstr::VLSEG3E16FF_V
-        | RiscvInstr::VLSEG4E16_V
-        | RiscvInstr::VLSEG4E16FF_V
-        | RiscvInstr::VLSEG5E16_V
-        | RiscvInstr::VLSEG5E16FF_V
-        | RiscvInstr::VLSEG6E16_V
-        | RiscvInstr::VLSEG6E16FF_V
-        | RiscvInstr::VLSEG7E16_V
-        | RiscvInstr::VLSEG7E16FF_V
-        | RiscvInstr::VLSEG8E16_V
-        | RiscvInstr::VLSEG8E16FF_V
+        RiscvInstr::VLSE16_V
         | RiscvInstr::VLSSEG2E16_V
         | RiscvInstr::VLSSEG3E16_V
         | RiscvInstr::VLSSEG4E16_V
         | RiscvInstr::VLSSEG5E16_V
         | RiscvInstr::VLSSEG6E16_V
         | RiscvInstr::VLSSEG7E16_V
-        | RiscvInstr::VLSSEG8E16_V
-        | RiscvInstr::VLUXEI16_V
-        | RiscvInstr::VLUXSEG2EI16_V
-        | RiscvInstr::VLUXSEG3EI16_V
-        | RiscvInstr::VLUXSEG4EI16_V
-        | RiscvInstr::VLUXSEG5EI16_V
-        | RiscvInstr::VLUXSEG6EI16_V
-        | RiscvInstr::VLUXSEG7EI16_V
-        | RiscvInstr::VLUXSEG8EI16_V => vector_load::<1>,
+        | RiscvInstr::VLSSEG8E16_V => vector_constant_stride_load::<1>,
 
-        RiscvInstr::VLE32_V
-        | RiscvInstr::VL1RE32_V
-        | RiscvInstr::VL2RE32_V
-        | RiscvInstr::VL4RE32_V
-        | RiscvInstr::VL8RE32_V
-        | RiscvInstr::VLE32FF_V
-        | RiscvInstr::VLOXEI32_V
-        | RiscvInstr::VLOXSEG2EI32_V
-        | RiscvInstr::VLOXSEG3EI32_V
-        | RiscvInstr::VLOXSEG4EI32_V
-        | RiscvInstr::VLOXSEG5EI32_V
-        | RiscvInstr::VLOXSEG6EI32_V
-        | RiscvInstr::VLOXSEG7EI32_V
-        | RiscvInstr::VLOXSEG8EI32_V
-        | RiscvInstr::VLSE32_V
-        | RiscvInstr::VLSEG2E32_V
-        | RiscvInstr::VLSEG2E32FF_V
-        | RiscvInstr::VLSEG3E32_V
-        | RiscvInstr::VLSEG3E32FF_V
-        | RiscvInstr::VLSEG4E32_V
-        | RiscvInstr::VLSEG4E32FF_V
-        | RiscvInstr::VLSEG5E32_V
-        | RiscvInstr::VLSEG5E32FF_V
-        | RiscvInstr::VLSEG6E32_V
-        | RiscvInstr::VLSEG6E32FF_V
-        | RiscvInstr::VLSEG7E32_V
-        | RiscvInstr::VLSEG7E32FF_V
-        | RiscvInstr::VLSEG8E32_V
-        | RiscvInstr::VLSEG8E32FF_V
+        RiscvInstr::VLSE32_V
         | RiscvInstr::VLSSEG2E32_V
         | RiscvInstr::VLSSEG3E32_V
         | RiscvInstr::VLSSEG4E32_V
         | RiscvInstr::VLSSEG5E32_V
         | RiscvInstr::VLSSEG6E32_V
         | RiscvInstr::VLSSEG7E32_V
-        | RiscvInstr::VLSSEG8E32_V
-        | RiscvInstr::VLUXEI32_V
-        | RiscvInstr::VLUXSEG2EI32_V
-        | RiscvInstr::VLUXSEG3EI32_V
-        | RiscvInstr::VLUXSEG4EI32_V
-        | RiscvInstr::VLUXSEG5EI32_V
-        | RiscvInstr::VLUXSEG6EI32_V
-        | RiscvInstr::VLUXSEG7EI32_V
-        | RiscvInstr::VLUXSEG8EI32_V => vector_load::<2>,
+        | RiscvInstr::VLSSEG8E32_V => vector_constant_stride_load::<2>,
 
-        RiscvInstr::VLE64_V
-        | RiscvInstr::VL1RE64_V
-        | RiscvInstr::VL2RE64_V
-        | RiscvInstr::VL4RE64_V
-        | RiscvInstr::VL8RE64_V
-        | RiscvInstr::VLE64FF_V
-        | RiscvInstr::VLOXEI64_V
-        | RiscvInstr::VLOXSEG2EI64_V
-        | RiscvInstr::VLOXSEG3EI64_V
-        | RiscvInstr::VLOXSEG4EI64_V
-        | RiscvInstr::VLOXSEG5EI64_V
-        | RiscvInstr::VLOXSEG6EI64_V
-        | RiscvInstr::VLOXSEG7EI64_V
-        | RiscvInstr::VLOXSEG8EI64_V
-        | RiscvInstr::VLSE64_V
-        | RiscvInstr::VLSEG2E64_V
-        | RiscvInstr::VLSEG2E64FF_V
-        | RiscvInstr::VLSEG3E64_V
-        | RiscvInstr::VLSEG3E64FF_V
-        | RiscvInstr::VLSEG4E64_V
-        | RiscvInstr::VLSEG4E64FF_V
-        | RiscvInstr::VLSEG5E64_V
-        | RiscvInstr::VLSEG5E64FF_V
-        | RiscvInstr::VLSEG6E64_V
-        | RiscvInstr::VLSEG6E64FF_V
-        | RiscvInstr::VLSEG7E64_V
-        | RiscvInstr::VLSEG7E64FF_V
-        | RiscvInstr::VLSEG8E64_V
-        | RiscvInstr::VLSEG8E64FF_V
+        RiscvInstr::VLSE64_V
         | RiscvInstr::VLSSEG2E64_V
         | RiscvInstr::VLSSEG3E64_V
         | RiscvInstr::VLSSEG4E64_V
         | RiscvInstr::VLSSEG5E64_V
         | RiscvInstr::VLSSEG6E64_V
         | RiscvInstr::VLSSEG7E64_V
-        | RiscvInstr::VLSSEG8E64_V
-        | RiscvInstr::VLUXEI64_V
+        | RiscvInstr::VLSSEG8E64_V => vector_constant_stride_load::<3>,
+
+        // Vector indexed-unordered loads: vlux[seg]ei{eew}.v
+        RiscvInstr::VLUXEI8_V
+        | RiscvInstr::VLUXSEG2EI8_V
+        | RiscvInstr::VLUXSEG3EI8_V
+        | RiscvInstr::VLUXSEG4EI8_V
+        | RiscvInstr::VLUXSEG5EI8_V
+        | RiscvInstr::VLUXSEG6EI8_V
+        | RiscvInstr::VLUXSEG7EI8_V
+        | RiscvInstr::VLUXSEG8EI8_V => vector_indexed_unordered_load::<0>,
+
+        RiscvInstr::VLUXEI16_V
+        | RiscvInstr::VLUXSEG2EI16_V
+        | RiscvInstr::VLUXSEG3EI16_V
+        | RiscvInstr::VLUXSEG4EI16_V
+        | RiscvInstr::VLUXSEG5EI16_V
+        | RiscvInstr::VLUXSEG6EI16_V
+        | RiscvInstr::VLUXSEG7EI16_V
+        | RiscvInstr::VLUXSEG8EI16_V => vector_indexed_unordered_load::<1>,
+
+        RiscvInstr::VLUXEI32_V
+        | RiscvInstr::VLUXSEG2EI32_V
+        | RiscvInstr::VLUXSEG3EI32_V
+        | RiscvInstr::VLUXSEG4EI32_V
+        | RiscvInstr::VLUXSEG5EI32_V
+        | RiscvInstr::VLUXSEG6EI32_V
+        | RiscvInstr::VLUXSEG7EI32_V
+        | RiscvInstr::VLUXSEG8EI32_V => vector_indexed_unordered_load::<2>,
+
+        RiscvInstr::VLUXEI64_V
         | RiscvInstr::VLUXSEG2EI64_V
         | RiscvInstr::VLUXSEG3EI64_V
         | RiscvInstr::VLUXSEG4EI64_V
         | RiscvInstr::VLUXSEG5EI64_V
         | RiscvInstr::VLUXSEG6EI64_V
         | RiscvInstr::VLUXSEG7EI64_V
-        | RiscvInstr::VLUXSEG8EI64_V => vector_load::<3>,
+        | RiscvInstr::VLUXSEG8EI64_V => vector_indexed_unordered_load::<3>,
+
+        // Vector indexed-ordered loads: vlox[seg]ei{eew}.v
+        RiscvInstr::VLOXEI8_V
+        | RiscvInstr::VLOXSEG2EI8_V
+        | RiscvInstr::VLOXSEG3EI8_V
+        | RiscvInstr::VLOXSEG4EI8_V
+        | RiscvInstr::VLOXSEG5EI8_V
+        | RiscvInstr::VLOXSEG6EI8_V
+        | RiscvInstr::VLOXSEG7EI8_V
+        | RiscvInstr::VLOXSEG8EI8_V => vector_indexed_ordered_load::<0>,
+
+        RiscvInstr::VLOXEI16_V
+        | RiscvInstr::VLOXSEG2EI16_V
+        | RiscvInstr::VLOXSEG3EI16_V
+        | RiscvInstr::VLOXSEG4EI16_V
+        | RiscvInstr::VLOXSEG5EI16_V
+        | RiscvInstr::VLOXSEG6EI16_V
+        | RiscvInstr::VLOXSEG7EI16_V
+        | RiscvInstr::VLOXSEG8EI16_V => vector_indexed_ordered_load::<1>,
+
+        RiscvInstr::VLOXEI32_V
+        | RiscvInstr::VLOXSEG2EI32_V
+        | RiscvInstr::VLOXSEG3EI32_V
+        | RiscvInstr::VLOXSEG4EI32_V
+        | RiscvInstr::VLOXSEG5EI32_V
+        | RiscvInstr::VLOXSEG6EI32_V
+        | RiscvInstr::VLOXSEG7EI32_V
+        | RiscvInstr::VLOXSEG8EI32_V => vector_indexed_ordered_load::<2>,
+
+        RiscvInstr::VLOXEI64_V
+        | RiscvInstr::VLOXSEG2EI64_V
+        | RiscvInstr::VLOXSEG3EI64_V
+        | RiscvInstr::VLOXSEG4EI64_V
+        | RiscvInstr::VLOXSEG5EI64_V
+        | RiscvInstr::VLOXSEG6EI64_V
+        | RiscvInstr::VLOXSEG7EI64_V
+        | RiscvInstr::VLOXSEG8EI64_V => vector_indexed_ordered_load::<3>,
+
+        // Vector load whole register: vl{nf}re{eew}.v
+        RiscvInstr::VL1RE8_V
+        | RiscvInstr::VL2RE8_V
+        | RiscvInstr::VL4RE8_V
+        | RiscvInstr::VL8RE8_V => vector_whole_register_load::<0>,
+
+        RiscvInstr::VL1RE16_V
+        | RiscvInstr::VL2RE16_V
+        | RiscvInstr::VL4RE16_V
+        | RiscvInstr::VL8RE16_V => vector_whole_register_load::<1>,
+
+        RiscvInstr::VL1RE32_V
+        | RiscvInstr::VL2RE32_V
+        | RiscvInstr::VL4RE32_V
+        | RiscvInstr::VL8RE32_V => vector_whole_register_load::<2>,
+
+        RiscvInstr::VL1RE64_V
+        | RiscvInstr::VL2RE64_V
+        | RiscvInstr::VL4RE64_V
+        | RiscvInstr::VL8RE64_V => vector_whole_register_load::<3>,
 
         RiscvInstr::VS1R_V | RiscvInstr::VS2R_V | RiscvInstr::VS4R_V | RiscvInstr::VS8R_V => {
-            vector_store::<0>
+            vector_whole_register_store::<0>
         }
 
-        RiscvInstr::VSM_V
-        | RiscvInstr::VSE8_V
-        | RiscvInstr::VSOXEI8_V
-        | RiscvInstr::VSOXSEG2EI8_V
-        | RiscvInstr::VSOXSEG3EI8_V
-        | RiscvInstr::VSOXSEG4EI8_V
-        | RiscvInstr::VSOXSEG5EI8_V
-        | RiscvInstr::VSOXSEG6EI8_V
-        | RiscvInstr::VSOXSEG7EI8_V
-        | RiscvInstr::VSOXSEG8EI8_V
-        | RiscvInstr::VSSE8_V
+        // Vector unit-stride stores: vs[seg]e{eew}.v
+        RiscvInstr::VSE8_V
         | RiscvInstr::VSSEG2E8_V
         | RiscvInstr::VSSEG3E8_V
         | RiscvInstr::VSSEG4E8_V
         | RiscvInstr::VSSEG5E8_V
         | RiscvInstr::VSSEG6E8_V
         | RiscvInstr::VSSEG7E8_V
-        | RiscvInstr::VSSEG8E8_V
-        | RiscvInstr::VSSSEG2E8_V
-        | RiscvInstr::VSSSEG3E8_V
-        | RiscvInstr::VSSSEG4E8_V
-        | RiscvInstr::VSSSEG5E8_V
-        | RiscvInstr::VSSSEG6E8_V
-        | RiscvInstr::VSSSEG7E8_V
-        | RiscvInstr::VSSSEG8E8_V
-        | RiscvInstr::VSUXEI8_V
-        | RiscvInstr::VSUXSEG2EI8_V
-        | RiscvInstr::VSUXSEG3EI8_V
-        | RiscvInstr::VSUXSEG4EI8_V
-        | RiscvInstr::VSUXSEG5EI8_V
-        | RiscvInstr::VSUXSEG6EI8_V
-        | RiscvInstr::VSUXSEG7EI8_V
-        | RiscvInstr::VSUXSEG8EI8_V => vector_store::<0>,
+        | RiscvInstr::VSSEG8E8_V => vector_unit_stride_store::<0>,
 
         RiscvInstr::VSE16_V
-        | RiscvInstr::VSOXEI16_V
-        | RiscvInstr::VSOXSEG2EI16_V
-        | RiscvInstr::VSOXSEG3EI16_V
-        | RiscvInstr::VSOXSEG4EI16_V
-        | RiscvInstr::VSOXSEG5EI16_V
-        | RiscvInstr::VSOXSEG6EI16_V
-        | RiscvInstr::VSOXSEG7EI16_V
-        | RiscvInstr::VSOXSEG8EI16_V
-        | RiscvInstr::VSSE16_V
         | RiscvInstr::VSSEG2E16_V
         | RiscvInstr::VSSEG3E16_V
         | RiscvInstr::VSSEG4E16_V
         | RiscvInstr::VSSEG5E16_V
         | RiscvInstr::VSSEG6E16_V
         | RiscvInstr::VSSEG7E16_V
-        | RiscvInstr::VSSEG8E16_V
-        | RiscvInstr::VSSSEG2E16_V
-        | RiscvInstr::VSSSEG3E16_V
-        | RiscvInstr::VSSSEG4E16_V
-        | RiscvInstr::VSSSEG5E16_V
-        | RiscvInstr::VSSSEG6E16_V
-        | RiscvInstr::VSSSEG7E16_V
-        | RiscvInstr::VSSSEG8E16_V
-        | RiscvInstr::VSUXEI16_V
-        | RiscvInstr::VSUXSEG2EI16_V
-        | RiscvInstr::VSUXSEG3EI16_V
-        | RiscvInstr::VSUXSEG4EI16_V
-        | RiscvInstr::VSUXSEG5EI16_V
-        | RiscvInstr::VSUXSEG6EI16_V
-        | RiscvInstr::VSUXSEG7EI16_V
-        | RiscvInstr::VSUXSEG8EI16_V => vector_store::<1>,
+        | RiscvInstr::VSSEG8E16_V => vector_unit_stride_store::<1>,
 
         RiscvInstr::VSE32_V
-        | RiscvInstr::VSOXEI32_V
-        | RiscvInstr::VSOXSEG2EI32_V
-        | RiscvInstr::VSOXSEG3EI32_V
-        | RiscvInstr::VSOXSEG4EI32_V
-        | RiscvInstr::VSOXSEG5EI32_V
-        | RiscvInstr::VSOXSEG6EI32_V
-        | RiscvInstr::VSOXSEG7EI32_V
-        | RiscvInstr::VSOXSEG8EI32_V
-        | RiscvInstr::VSSE32_V
         | RiscvInstr::VSSEG2E32_V
         | RiscvInstr::VSSEG3E32_V
         | RiscvInstr::VSSEG4E32_V
         | RiscvInstr::VSSEG5E32_V
         | RiscvInstr::VSSEG6E32_V
         | RiscvInstr::VSSEG7E32_V
-        | RiscvInstr::VSSEG8E32_V
-        | RiscvInstr::VSSSEG2E32_V
-        | RiscvInstr::VSSSEG3E32_V
-        | RiscvInstr::VSSSEG4E32_V
-        | RiscvInstr::VSSSEG5E32_V
-        | RiscvInstr::VSSSEG6E32_V
-        | RiscvInstr::VSSSEG7E32_V
-        | RiscvInstr::VSSSEG8E32_V
-        | RiscvInstr::VSUXEI32_V
-        | RiscvInstr::VSUXSEG2EI32_V
-        | RiscvInstr::VSUXSEG3EI32_V
-        | RiscvInstr::VSUXSEG4EI32_V
-        | RiscvInstr::VSUXSEG5EI32_V
-        | RiscvInstr::VSUXSEG6EI32_V
-        | RiscvInstr::VSUXSEG7EI32_V
-        | RiscvInstr::VSUXSEG8EI32_V => vector_store::<2>,
+        | RiscvInstr::VSSEG8E32_V => vector_unit_stride_store::<2>,
 
         RiscvInstr::VSE64_V
-        | RiscvInstr::VSOXEI64_V
-        | RiscvInstr::VSOXSEG2EI64_V
-        | RiscvInstr::VSOXSEG3EI64_V
-        | RiscvInstr::VSOXSEG4EI64_V
-        | RiscvInstr::VSOXSEG5EI64_V
-        | RiscvInstr::VSOXSEG6EI64_V
-        | RiscvInstr::VSOXSEG7EI64_V
-        | RiscvInstr::VSOXSEG8EI64_V
-        | RiscvInstr::VSSE64_V
         | RiscvInstr::VSSEG2E64_V
         | RiscvInstr::VSSEG3E64_V
         | RiscvInstr::VSSEG4E64_V
         | RiscvInstr::VSSEG5E64_V
         | RiscvInstr::VSSEG6E64_V
         | RiscvInstr::VSSEG7E64_V
-        | RiscvInstr::VSSEG8E64_V
+        | RiscvInstr::VSSEG8E64_V => vector_unit_stride_store::<3>,
+
+        // Vector constant-stride stores: vss[seg]e{eew}.v
+        RiscvInstr::VSSE8_V
+        | RiscvInstr::VSSSEG2E8_V
+        | RiscvInstr::VSSSEG3E8_V
+        | RiscvInstr::VSSSEG4E8_V
+        | RiscvInstr::VSSSEG5E8_V
+        | RiscvInstr::VSSSEG6E8_V
+        | RiscvInstr::VSSSEG7E8_V
+        | RiscvInstr::VSSSEG8E8_V => vector_constant_stride_store::<0>,
+
+        RiscvInstr::VSSE16_V
+        | RiscvInstr::VSSSEG2E16_V
+        | RiscvInstr::VSSSEG3E16_V
+        | RiscvInstr::VSSSEG4E16_V
+        | RiscvInstr::VSSSEG5E16_V
+        | RiscvInstr::VSSSEG6E16_V
+        | RiscvInstr::VSSSEG7E16_V
+        | RiscvInstr::VSSSEG8E16_V => vector_constant_stride_store::<1>,
+
+        RiscvInstr::VSSE32_V
+        | RiscvInstr::VSSSEG2E32_V
+        | RiscvInstr::VSSSEG3E32_V
+        | RiscvInstr::VSSSEG4E32_V
+        | RiscvInstr::VSSSEG5E32_V
+        | RiscvInstr::VSSSEG6E32_V
+        | RiscvInstr::VSSSEG7E32_V
+        | RiscvInstr::VSSSEG8E32_V => vector_constant_stride_store::<2>,
+
+        RiscvInstr::VSSE64_V
         | RiscvInstr::VSSSEG2E64_V
         | RiscvInstr::VSSSEG3E64_V
         | RiscvInstr::VSSSEG4E64_V
         | RiscvInstr::VSSSEG5E64_V
         | RiscvInstr::VSSSEG6E64_V
         | RiscvInstr::VSSSEG7E64_V
-        | RiscvInstr::VSSSEG8E64_V
-        | RiscvInstr::VSUXEI64_V
+        | RiscvInstr::VSSSEG8E64_V => vector_constant_stride_store::<3>,
+
+        // Vector indexed-unordered stores: vsux[seg]ei{eew}.v
+        RiscvInstr::VSUXEI8_V
+        | RiscvInstr::VSUXSEG2EI8_V
+        | RiscvInstr::VSUXSEG3EI8_V
+        | RiscvInstr::VSUXSEG4EI8_V
+        | RiscvInstr::VSUXSEG5EI8_V
+        | RiscvInstr::VSUXSEG6EI8_V
+        | RiscvInstr::VSUXSEG7EI8_V
+        | RiscvInstr::VSUXSEG8EI8_V => vector_indexed_unordered_store::<0>,
+
+        RiscvInstr::VSUXEI16_V
+        | RiscvInstr::VSUXSEG2EI16_V
+        | RiscvInstr::VSUXSEG3EI16_V
+        | RiscvInstr::VSUXSEG4EI16_V
+        | RiscvInstr::VSUXSEG5EI16_V
+        | RiscvInstr::VSUXSEG6EI16_V
+        | RiscvInstr::VSUXSEG7EI16_V
+        | RiscvInstr::VSUXSEG8EI16_V => vector_indexed_unordered_store::<1>,
+
+        RiscvInstr::VSUXEI32_V
+        | RiscvInstr::VSUXSEG2EI32_V
+        | RiscvInstr::VSUXSEG3EI32_V
+        | RiscvInstr::VSUXSEG4EI32_V
+        | RiscvInstr::VSUXSEG5EI32_V
+        | RiscvInstr::VSUXSEG6EI32_V
+        | RiscvInstr::VSUXSEG7EI32_V
+        | RiscvInstr::VSUXSEG8EI32_V => vector_indexed_unordered_store::<2>,
+
+        RiscvInstr::VSUXEI64_V
         | RiscvInstr::VSUXSEG2EI64_V
         | RiscvInstr::VSUXSEG3EI64_V
         | RiscvInstr::VSUXSEG4EI64_V
         | RiscvInstr::VSUXSEG5EI64_V
         | RiscvInstr::VSUXSEG6EI64_V
         | RiscvInstr::VSUXSEG7EI64_V
-        | RiscvInstr::VSUXSEG8EI64_V => vector_store::<3>,
+        | RiscvInstr::VSUXSEG8EI64_V => vector_indexed_unordered_store::<3>,
+
+        // Vector indexed-ordered stores: vsox[seg]ei{eew}.v
+        RiscvInstr::VSOXEI8_V
+        | RiscvInstr::VSOXSEG2EI8_V
+        | RiscvInstr::VSOXSEG3EI8_V
+        | RiscvInstr::VSOXSEG4EI8_V
+        | RiscvInstr::VSOXSEG5EI8_V
+        | RiscvInstr::VSOXSEG6EI8_V
+        | RiscvInstr::VSOXSEG7EI8_V
+        | RiscvInstr::VSOXSEG8EI8_V => vector_indexed_ordered_store::<0>,
+
+        RiscvInstr::VSOXEI16_V
+        | RiscvInstr::VSOXSEG2EI16_V
+        | RiscvInstr::VSOXSEG3EI16_V
+        | RiscvInstr::VSOXSEG4EI16_V
+        | RiscvInstr::VSOXSEG5EI16_V
+        | RiscvInstr::VSOXSEG6EI16_V
+        | RiscvInstr::VSOXSEG7EI16_V
+        | RiscvInstr::VSOXSEG8EI16_V => vector_indexed_ordered_store::<1>,
+
+        RiscvInstr::VSOXEI32_V
+        | RiscvInstr::VSOXSEG2EI32_V
+        | RiscvInstr::VSOXSEG3EI32_V
+        | RiscvInstr::VSOXSEG4EI32_V
+        | RiscvInstr::VSOXSEG5EI32_V
+        | RiscvInstr::VSOXSEG6EI32_V
+        | RiscvInstr::VSOXSEG7EI32_V
+        | RiscvInstr::VSOXSEG8EI32_V => vector_indexed_ordered_store::<2>,
+
+        RiscvInstr::VSOXEI64_V
+        | RiscvInstr::VSOXSEG2EI64_V
+        | RiscvInstr::VSOXSEG3EI64_V
+        | RiscvInstr::VSOXSEG4EI64_V
+        | RiscvInstr::VSOXSEG5EI64_V
+        | RiscvInstr::VSOXSEG6EI64_V
+        | RiscvInstr::VSOXSEG7EI64_V
+        | RiscvInstr::VSOXSEG8EI64_V => vector_indexed_ordered_store::<3>,
 
         RiscvInstr::VSLIDE1DOWN_VX | RiscvInstr::VSLIDE1UP_VX => {
             todo!()

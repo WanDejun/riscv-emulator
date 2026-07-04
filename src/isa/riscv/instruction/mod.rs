@@ -19,6 +19,7 @@ use crate::{
         executor::RVCPU,
         instruction::exec_function::save_fflags_to_cpu,
         trap::Exception,
+        vector::VectorMemException,
     },
 };
 
@@ -107,17 +108,51 @@ where
 ///
 /// If the VS field is 0, it returns an illegal instruction exception.
 /// Otherwise, it calls [`normal_exec`].
+pub(super) trait VectorExecError {
+    fn finish_vector_exec_error(self, cpu: &mut RVCPU) -> Exception;
+}
+
+impl VectorExecError for Exception {
+    #[inline]
+    fn finish_vector_exec_error(self, _cpu: &mut RVCPU) -> Exception {
+        self
+    }
+}
+
+impl VectorExecError for VectorMemException {
+    #[inline]
+    fn finish_vector_exec_error(self, cpu: &mut RVCPU) -> Exception {
+        finish_vector_memory_access(cpu, self)
+    }
+}
+
+#[inline]
+fn finish_vector_memory_access(cpu: &mut RVCPU, err: VectorMemException) -> Exception {
+    // Only precise memory faults carry an element index. Other errors are
+    // raised as-is and do not pretend to be resumable traps.
+    if let Some(index) = err.fault_index() {
+        cpu.csr
+            .write_directly(Vstart::get_index(), index as WordType)
+            .then_some(())
+            .unwrap();
+    }
+    err.exception()
+}
+
 #[inline(always)]
-pub(super) fn normal_vector_exec<F>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
+pub(super) fn normal_vector_exec<F, E>(cpu: &mut RVCPU, f: F) -> Result<(), riscv::trap::Exception>
 where
-    F: FnOnce(&mut RVCPU, usize) -> Result<(), riscv::trap::Exception>,
+    F: FnOnce(&mut RVCPU, usize) -> Result<(), E>,
+    E: VectorExecError,
 {
     if cpu.csr.get_by_type_existing::<Mstatus>().get_vs() == 0 {
         return Err(riscv::trap::Exception::IllegalInstruction);
     }
 
     let vstart = cpu.csr.get_by_type_existing::<Vstart>().get_vstart() as usize;
-    normal_exec(cpu, |cpu| f(cpu, vstart))?;
+    normal_exec(cpu, |cpu| {
+        f(cpu, vstart).map_err(|err| err.finish_vector_exec_error(cpu))
+    })?;
 
     // Any successfully retired vector instruction completes all resumable work.
     // Precise memory traps return before this point and preserve their fault index.

@@ -5,13 +5,12 @@ use crate::{
         riscv::{
             csr_reg::{
                 NamedCsrReg,
-                csr_macro::{Vcsr, Vl, Vstart, Vtype},
+                csr_macro::{Vcsr, Vl, Vtype},
             },
             executor::RVCPU,
             instruction::{RVInstrInfo, exec_function::ExecMove, normal_vector_exec},
             trap::Exception::{self, IllegalInstruction},
             vector::{
-                VectorMemException,
                 arithmetic::{
                     VectorOpAdc, VectorOpBitVV, VectorOpCompressVm, VectorOpCpopM, VectorOpFirstM,
                     VectorOpFixedPointNarrowingVX, VectorOpFixedPointNarrowingWV,
@@ -122,26 +121,6 @@ impl VectorConfigFieldExtractor for VsetvlFieldExtractor {
 // ---------------------------------------
 //          Vector Load/Store
 // ---------------------------------------
-pub(super) fn vector_load<const EEW: u8>(
-    info: RVInstrInfo,
-    cpu: &mut RVCPU,
-) -> Result<(), Exception> {
-    normal_vector_exec(cpu, |cpu, vstart| {
-        if let RVInstrInfo::V { func6, .. } = info {
-            let mop = func6 & 0b11;
-            match mop {
-                0b00 => do_vector_unit_stride_load::<EEW>(info, cpu, vstart),
-                0b01 => do_vector_indexed_unordered_load::<EEW>(info, cpu, vstart),
-                0b10 => do_vector_constant_stride_load::<EEW>(info, cpu, vstart),
-                0b11 => do_vector_indexed_ordered_load::<EEW>(info, cpu, vstart),
-                _ => Err(Exception::IllegalInstruction),
-            }
-        } else {
-            unreachable!()
-        }
-    })
-}
-
 struct Func6Uop {
     nf: u8,
     mew: u8,
@@ -156,322 +135,352 @@ fn load_store_func6_decode(func6: u8) -> Func6Uop {
     Func6Uop { nf, mew, mop }
 }
 
-#[inline]
-fn finish_vector_memory_access(
-    cpu: &mut RVCPU,
-    res: Result<(), VectorMemException>,
-) -> Result<(), Exception> {
-    match res {
-        Ok(()) => {
-            // A completed vector memory instruction always leaves no pending
-            // partial progress to resume.
-            cpu.csr
-                .write_directly(Vstart::get_index(), 0)
-                .then_some(())
-                .unwrap();
-            Ok(())
-        }
-        Err(err) => {
-            // Only precise memory faults carry an element index. Other errors
-            // are raised as-is and do not pretend to be resumable traps.
-            if let Some(index) = err.fault_index() {
-                cpu.csr
-                    .write_directly(Vstart::get_index(), index as WordType)
-                    .then_some(())
-                    .unwrap();
-            }
-            Err(err.exception())
-        }
-    }
-}
-
-fn do_vector_unit_stride_load<const EEW: u8>(
-    info: RVInstrInfo,
-    cpu: &mut RVCPU,
-    vstart: usize,
-) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1,
-        rs2: lumop,
-        rd: vd,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b00);
-
-        let base_addr = cpu.reg_file.read(rs1, 0).0;
-        let vector = &mut cpu.vector;
-        let res;
-        match lumop {
-            // unit-stride load
-            0b000 => {
-                res = vector.stride_load(
-                    vd,
-                    EEW.into(),
-                    nf + 1,
-                    None,
-                    !vm,
-                    vstart,
-                    base_addr,
-                    &mut cpu.memory.mmio,
-                );
-            }
-            // unit-stride, whole register load
-            0b01000 => {
-                if (mop, vm) != (0b00, true) {
-                    return Err(Exception::IllegalInstruction);
-                }
-                res = vector.load_whole_register(vd, nf, vstart, base_addr, &mut cpu.memory.mmio);
-            }
-            // unit-stride, mask load, EEW=8
-            0b01011 => {
-                if EEW != 0 || (nf, mew, mop, vm) != (0, 0, 0b00, true) {
-                    return Err(Exception::IllegalInstruction);
-                }
-                res = vector.mask_load(vd, vstart, base_addr, &mut cpu.memory.mmio);
-            }
-            // unit-stride fault-only-first
-            0b10000 => unimplemented!(),
-            _ => return Err(Exception::IllegalInstruction),
-        }
-
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
-}
-
-fn do_vector_indexed_unordered_load<const EEW: u8>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
-    _vstart: usize,
-) -> Result<(), Exception> {
-    unimplemented!()
-}
-
-fn do_vector_constant_stride_load<const EEW: u8>(
-    info: RVInstrInfo,
-    cpu: &mut RVCPU,
-    vstart: usize,
-) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1,
-        rs2,
-        rd: vd,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b10);
-
-        let (base_addr, stride) = cpu.reg_file.read(rs1, rs2);
-        let vector = &mut cpu.vector;
-        let res = vector.stride_load(
-            vd,
-            EEW.into(),
-            nf + 1,
-            Some(stride),
-            !vm,
-            vstart,
-            base_addr,
-            &mut cpu.memory.mmio,
-        );
-
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
-}
-
-fn do_vector_indexed_ordered_load<const EEW: u8>(
-    info: RVInstrInfo,
-    cpu: &mut RVCPU,
-    vstart: usize,
-) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1: base_addr,
-        rs2: index_arr_base,
-        rd: vd,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b11);
-
-        let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
-        let vector = &mut cpu.vector;
-        let res = vector.indexed_ordered_load(
-            vd,
-            EEW.into(),
-            nf + 1,
-            index_arr_base,
-            !vm,
-            vstart,
-            base_addr,
-            &mut cpu.memory.mmio,
-        );
-
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
-}
-
-pub(super) fn vector_store<const EEW: u8>(
+pub(super) fn vector_unit_stride_load<const EEW: u8>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
 ) -> Result<(), Exception> {
     normal_vector_exec(cpu, |cpu, vstart| {
-        if let RVInstrInfo::V { func6, .. } = info {
-            let mop = func6 & 0b11;
-            match mop {
-                0b00 => do_vector_unit_stride_store::<EEW>(info, cpu, vstart),
-                0b01 => do_vector_indexed_unordered_store::<EEW>(info, cpu, vstart),
-                0b10 => do_vector_constant_stride_store::<EEW>(info, cpu, vstart),
-                0b11 => do_vector_indexed_ordered_store::<EEW>(info, cpu, vstart),
-                _ => Err(Exception::IllegalInstruction),
-            }
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: lumop,
+            rd: vd,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b00);
+            debug_assert_eq!(lumop, 0b00000);
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.stride_load(
+                vd,
+                EEW.into(),
+                nf + 1,
+                None,
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
         } else {
             unreachable!()
         }
     })
 }
 
-fn do_vector_unit_stride_store<const EEW: u8>(
+pub(super) fn vector_whole_register_load<const EEW: u8>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
-    vstart: usize,
 ) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1,
-        rs2: sumop,
-        rd: vs3,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b00);
-
-        let base_addr = cpu.reg_file.read(rs1, 0).0;
-        let vector = &mut cpu.vector;
-        let res;
-        match sumop {
-            0b00000 => {
-                res = vector.stride_store(
-                    vs3,
-                    EEW.into(),
-                    nf + 1,
-                    None,
-                    !vm,
-                    vstart,
-                    base_addr,
-                    &mut cpu.memory.mmio,
-                );
-            }
-            // unit-stride, whole register store
-            0b01000 => {
-                if (mew, mop, vm) != (0, 0b00, true) {
-                    return Err(Exception::IllegalInstruction);
-                }
-                res = vector.store_whole_register(vs3, nf, vstart, base_addr, &mut cpu.memory.mmio);
-            }
-            // unit-stride, mask store, EEW=8
-            0b01011 => {
-                if EEW != 0 || (nf, mew, mop, vm) != (0, 0, 0b00, true) {
-                    return Err(Exception::IllegalInstruction);
-                }
-                res = vector.mask_store(vs3, vstart, base_addr, &mut cpu.memory.mmio);
-            }
-            _ => return Err(Exception::IllegalInstruction),
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: lumop,
+            rd: vd,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b00);
+            debug_assert_eq!(lumop, 0b01000);
+            debug_assert!(vm);
+            let _ = EEW;
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .load_whole_register(vd, nf, vstart, base_addr, &mut cpu.memory.mmio)
+        } else {
+            unreachable!()
         }
-
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
+    })
 }
 
-fn do_vector_indexed_unordered_store<const EEW: u8>(
-    _info: RVInstrInfo,
-    _cpu: &mut RVCPU,
-    _vstart: usize,
-) -> Result<(), Exception> {
-    unimplemented!()
-}
-
-fn do_vector_constant_stride_store<const EEW: u8>(
+pub(super) fn vector_mask_load<const EEW: u8>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
-    vstart: usize,
 ) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1,
-        rs2,
-        rd: vs3,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b10);
-
-        let (base_addr, stride) = cpu.reg_file.read(rs1, rs2);
-        let vector = &mut cpu.vector;
-        let res = vector.stride_store(
-            vs3,
-            EEW.into(),
-            nf + 1,
-            Some(stride),
-            !vm,
-            vstart,
-            base_addr,
-            &mut cpu.memory.mmio,
-        );
-
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: lumop,
+            rd: vd,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
+            debug_assert_eq!(EEW, 0);
+            debug_assert_eq!((nf, mew, mop, lumop, vm), (0, 0, 0b00, 0b01011, true));
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .mask_load(vd, vstart, base_addr, &mut cpu.memory.mmio)
+        } else {
+            unreachable!()
+        }
+    })
 }
 
-fn do_vector_indexed_ordered_store<const EEW: u8>(
+pub(super) fn vector_unit_stride_fault_only_first_load<const EEW: u8>(
     info: RVInstrInfo,
     cpu: &mut RVCPU,
-    vstart: usize,
 ) -> Result<(), Exception> {
-    if let RVInstrInfo::V {
-        rs1: base_addr,
-        rs2: index_arr_base,
-        rd: vs3,
-        vm,
-        func6,
-    } = info
-    {
-        let Func6Uop { nf, mew: _mew, mop } = load_store_func6_decode(func6);
-        debug_assert_eq!(mop, 0b11);
+    normal_vector_exec(cpu, |_cpu, _vstart| -> Result<(), Exception> {
+        if let RVInstrInfo::V {
+            rs2: lumop, func6, ..
+        } = info
+        {
+            let Func6Uop { mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b00);
+            debug_assert_eq!(lumop, 0b10000);
+            let _ = EEW;
+            unimplemented!()
+        } else {
+            unreachable!()
+        }
+    })
+}
 
-        let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
-        let vector = &mut cpu.vector;
-        let res = vector.indexed_ordered_store(
-            vs3,
-            EEW.into(),
-            nf + 1,
-            index_arr_base,
-            !vm,
-            vstart,
-            base_addr,
-            &mut cpu.memory.mmio,
-        );
+pub(super) fn vector_indexed_unordered_load<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |_cpu, _vstart| -> Result<(), Exception> {
+        if let RVInstrInfo::V { func6, .. } = info {
+            let Func6Uop { mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b01);
+            let _ = EEW;
+            unimplemented!()
+        } else {
+            unreachable!()
+        }
+    })
+}
 
-        finish_vector_memory_access(cpu, res)
-    } else {
-        unreachable!()
-    }
+pub(super) fn vector_constant_stride_load<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2,
+            rd: vd,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b10);
+            let (base_addr, stride) = cpu.reg_file.read(rs1, rs2);
+            cpu.vector.stride_load(
+                vd,
+                EEW.into(),
+                nf + 1,
+                Some(stride),
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_indexed_ordered_load<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: base_addr,
+            rs2: index_arr_base,
+            rd: vd,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b11);
+            let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
+            cpu.vector.indexed_ordered_load(
+                vd,
+                EEW.into(),
+                nf + 1,
+                index_arr_base,
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_unit_stride_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: sumop,
+            rd: vs3,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b00);
+            debug_assert_eq!(sumop, 0b00000);
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector.stride_store(
+                vs3,
+                EEW.into(),
+                nf + 1,
+                None,
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_whole_register_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: sumop,
+            rd: vs3,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
+            debug_assert_eq!((mew, mop, sumop, vm), (0, 0b00, 0b01000, true));
+            let _ = EEW;
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .store_whole_register(vs3, nf, vstart, base_addr, &mut cpu.memory.mmio)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_mask_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2: sumop,
+            rd: vs3,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mew, mop } = load_store_func6_decode(func6);
+            debug_assert_eq!(EEW, 0);
+            debug_assert_eq!((nf, mew, mop, sumop, vm), (0, 0, 0b00, 0b01011, true));
+            let base_addr = cpu.reg_file.read(rs1, 0).0;
+            cpu.vector
+                .mask_store(vs3, vstart, base_addr, &mut cpu.memory.mmio)
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_indexed_unordered_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |_cpu, _vstart| -> Result<(), Exception> {
+        if let RVInstrInfo::V { func6, .. } = info {
+            let Func6Uop { mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b01);
+            let _ = EEW;
+            unimplemented!()
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_constant_stride_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1,
+            rs2,
+            rd: vs3,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b10);
+            let (base_addr, stride) = cpu.reg_file.read(rs1, rs2);
+            cpu.vector.stride_store(
+                vs3,
+                EEW.into(),
+                nf + 1,
+                Some(stride),
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
+        } else {
+            unreachable!()
+        }
+    })
+}
+
+pub(super) fn vector_indexed_ordered_store<const EEW: u8>(
+    info: RVInstrInfo,
+    cpu: &mut RVCPU,
+) -> Result<(), Exception> {
+    normal_vector_exec(cpu, |cpu, vstart| {
+        if let RVInstrInfo::V {
+            rs1: base_addr,
+            rs2: index_arr_base,
+            rd: vs3,
+            vm,
+            func6,
+        } = info
+        {
+            let Func6Uop { nf, mop, .. } = load_store_func6_decode(func6);
+            debug_assert_eq!(mop, 0b11);
+            let (base_addr, index_arr_base) = cpu.reg_file.read(base_addr, index_arr_base);
+            cpu.vector.indexed_ordered_store(
+                vs3,
+                EEW.into(),
+                nf + 1,
+                index_arr_base,
+                !vm,
+                vstart,
+                base_addr,
+                &mut cpu.memory.mmio,
+            )
+        } else {
+            unreachable!()
+        }
+    })
 }
 
 // ---------------------------------------
@@ -814,7 +823,7 @@ where
                 .vector
                 .exec_fixed_point_vv::<Op>(vs1, vs2, vd, !vm, round, vstart)?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -840,7 +849,7 @@ where
                 .vector
                 .exec_fixed_point_vx::<Op>(x1, vs2, vd, !vm, round, vstart)?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -873,7 +882,7 @@ where
                 .vector
                 .exec_fixed_point_vx::<Op>(imm, vs2, vd, !vm, round, vstart)?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -901,7 +910,7 @@ where
                 .vector
                 .exec_fixed_point_narrowing_wv::<Op>(vs1, vs2, vd, !vm, round, vstart)?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -930,7 +939,7 @@ where
                 .vector
                 .exec_fixed_point_narrowing_vx::<Op>(x1, vs2, vd, !vm, round, vstart)?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -963,7 +972,7 @@ where
                 vstart,
             )?;
             finish_fixed_point_op(cpu, saturated);
-            Ok(())
+            Ok::<(), Exception>(())
         } else {
             unreachable!()
         }
@@ -1706,7 +1715,7 @@ mod test {
             func6: 0b000000,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
-        do_vector_unit_stride_load::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_unit_stride_load::<2>(instr_info, &mut cpu).unwrap();
         let vreg = cpu.vector.read_as_type::<ElemType>(0).unwrap();
         assert_eq!(
             vreg.len(),
@@ -1791,7 +1800,7 @@ mod test {
         cpu.vector
             .write_as_type(1, 4, &[0xaaaa_aaaau32; VLEN_BYTE / 4]);
 
-        let result = do_vector_constant_stride_load::<2>(
+        let result = vector_constant_stride_load::<2>(
             RVInstrInfo::V {
                 rs1: 1,
                 rs2: 2,
@@ -1800,7 +1809,6 @@ mod test {
                 func6: 0b000010,
             },
             &mut cpu,
-            0,
         );
 
         assert_eq!(result, Err(Exception::LoadMisaligned));
@@ -1829,7 +1837,7 @@ mod test {
         cpu.vector
             .write_as_type(1, 4, &[0xaaaa_aaaau32; VLEN_BYTE / 4]);
 
-        do_vector_unit_stride_load::<2>(
+        vector_unit_stride_load::<2>(
             RVInstrInfo::V {
                 rs1: 1,
                 rs2: 0,
@@ -1838,7 +1846,6 @@ mod test {
                 func6: 0,
             },
             &mut cpu,
-            2,
         )
         .unwrap();
 
@@ -1848,7 +1855,7 @@ mod test {
         CPUChecker::new(&mut cpu)
             .csr(Vstart::get_index(), 0)
             .reg_vec(4, &expected)
-            .pc(0x2000);
+            .pc(0x2004);
     }
 
     #[test]
@@ -1889,7 +1896,7 @@ mod test {
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
         cpu.reg_file.write(2, STRIDE);
-        do_vector_constant_stride_load::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_constant_stride_load::<2>(instr_info, &mut cpu).unwrap();
         let vreg = cpu.vector.read_as_type::<ElemType>(0).unwrap();
         assert_eq!(
             vreg.len(),
@@ -1954,7 +1961,7 @@ mod test {
         };
         cpu.reg_file.write(1, data_base);
         cpu.reg_file.write(2, index_base);
-        do_vector_indexed_ordered_load::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_indexed_ordered_load::<2>(instr_info, &mut cpu).unwrap();
 
         let vreg = cpu
             .vector
@@ -2003,7 +2010,7 @@ mod test {
             func6: 0b000000,
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
-        do_vector_unit_stride_store::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_unit_stride_store::<2>(instr_info, &mut cpu).unwrap();
 
         for i in 0..vreg_len {
             let addr = TEST_DATA_BASE + (i * size_of::<ElemType>()) as WordType;
@@ -2159,7 +2166,7 @@ mod test {
         };
         cpu.reg_file.write(1, TEST_DATA_BASE);
         cpu.reg_file.write(2, STRIDE);
-        do_vector_constant_stride_store::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_constant_stride_store::<2>(instr_info, &mut cpu).unwrap();
 
         for i in 0..vreg_len {
             let addr = TEST_DATA_BASE + (i as WordType) * STRIDE;
@@ -2213,7 +2220,7 @@ mod test {
         };
         cpu.reg_file.write(1, data_base);
         cpu.reg_file.write(2, index_base);
-        do_vector_indexed_ordered_store::<2>(instr_info, &mut cpu, 0).unwrap();
+        vector_indexed_ordered_store::<2>(instr_info, &mut cpu).unwrap();
 
         for (i, expected) in data.iter().enumerate() {
             let addr = data_base + (i * size_of::<ElemType>()) as WordType;
