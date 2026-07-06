@@ -20,19 +20,20 @@ pub(super) const SECTOR_SIZE: usize = 512;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[rustfmt::skip]
 pub(crate) enum VirtIOBlockFeature {
-    SizeMax      = 1 << 1,   // Maximum segment size supported
-    SegMax       = 1 << 2,   // Maximum number of segments supported
-    Geometry     = 1 << 4,   // Disk geometry available
-    Ro           = 1 << 5,   // Device is read-only
-    BlockSize    = 1 << 6,   // Block size available
-    Flush        = 1 << 9,   // Cache flush command supported
-    Topology     = 1 << 10,  // Device exports topology information
-    ConfigWce    = 1 << 11,  // Writeback mode available in config
-    Multiqueue   = 1 << 12,  // Device supports multiqueue.
-    Discard      = 1 << 13,  // Discard command supported
-    WriteZeroes  = 1 << 14,  // Write zeroes command supported
-    Lifetime     = 1 << 15,  // Device supports providing storage lifetime information.
-    SecureErase  = 1 << 16,  // Secure erase supported
+    SizeMax     = 1 << 1,   // Maximum segment size supported
+    SegMax      = 1 << 2,   // Maximum number of segments supported
+    Geometry    = 1 << 4,   // Disk geometry available
+    Ro          = 1 << 5,   // Device is read-only
+    BlockSize   = 1 << 6,   // Block size available
+    Flush       = 1 << 9,   // Cache flush command supported
+    Topology    = 1 << 10,  // Device exports topology information
+    ConfigWce   = 1 << 11,  // Writeback mode available in config
+    Multiqueue  = 1 << 12,  // Device supports multiqueue.
+    Discard     = 1 << 13,  // Discard command supported
+    WriteZeroes = 1 << 14,  // Write zeroes command supported
+    Lifetime    = 1 << 15,  // Device supports providing storage lifetime information.
+    SecureErase = 1 << 16,  // Secure erase supported
+    ZONED       = 1 << 17,  // Zoned block device
 }
 
 #[repr(C, packed)]
@@ -54,6 +55,18 @@ pub(crate) struct VirtioBlkTopology {
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct VirtioBlkZonedCharacteristics {
+    pub(crate) zone_sectors: u32,
+    pub(crate) max_open_zones: u32,
+    pub(crate) max_active_zones: u32,
+    pub(crate) max_append_sectors: u32,
+    pub(crate) write_granularity: u32,
+    pub(crate) model: u8,
+    pub(crate) unused2: [u8; 3],
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, Default)]
 #[rustfmt::skip]
 pub(crate) struct VirtioBlkConfig {
     pub(crate) capacity: u64,                      // 0x00: Size of the block device (in 512-byte sectors)
@@ -62,20 +75,20 @@ pub(crate) struct VirtioBlkConfig {
     pub(crate) geometry: VirtioBlkGeometry,        // 0x10: Disk geometry               (if VIRTIO_BLK_F_GEOMETRY)
     pub(crate) blk_size: u32,                      // 0x14: Block size of device        (if VIRTIO_BLK_F_BLK_SIZE)
     pub(crate) topology: VirtioBlkTopology,        // 0x18: Topology information        (if VIRTIO_BLK_F_TOPOLOGY)
-    pub(crate) writeback: u8,                      // 0x1c: Writeback mode              (if VIRTIO_BLK_F_CONFIG_WCE)
-    pub(crate) unused0: [u8; 3],                   // 0x1d: Padding
-    pub(crate) num_queues: u16,                    // 0x20: Number of queues            (if VIRTIO_BLK_F_MQ)
-    pub(crate) unused1: [u8; 6],                   // 0x22: Padding
-    pub(crate) max_discard_sectors: u32,           // 0x28: Max discard sectors         (if VIRTIO_BLK_F_DISCARD)
-    pub(crate) max_discard_seg: u32,               // 0x2c: Max discard segments        (if VIRTIO_BLK_F_DISCARD)
-    pub(crate) discard_sector_alignment: u32,      // 0x30: Discard sector alignment    (if VIRTIO_BLK_F_DISCARD)
-    pub(crate) max_write_zeroes_sectors: u32,      // 0x34: Max write zeroes sectors    (if VIRTIO_BLK_F_WRITE_ZEROES)
-    pub(crate) max_write_zeroes_seg: u32,          // 0x38: Max write zeroes segments   (if VIRTIO_BLK_F_WRITE_ZEROES)
-    pub(crate) write_zeroes_may_unmap: u8,         // 0x3c: Write zeroes may unmap      (if VIRTIO_BLK_F_WRITE_ZEROES)
-    pub(crate) unused2: [u8; 3],                   // 0x3d: Padding
-    pub(crate) max_secure_erase_sectors: u32,      // 0x40: Max secure erase sectors        (if VIRTIO_BLK_F_SECURE_ERASE)
-    pub(crate) max_secure_erase_seg: u32,          // 0x44: Max secure erase segments       (if VIRTIO_BLK_F_SECURE_ERASE)
-    pub(crate) secure_erase_sector_alignment: u32, // 0x48: Secure erase sector alignment   (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) writeback: u8,                      // 0x20: Writeback mode              (if VIRTIO_BLK_F_CONFIG_WCE)
+    pub(crate) unused0: u8,                        // 0x21: Padding
+    pub(crate) num_queues: u16,                    // 0x22: Number of queues            (if VIRTIO_BLK_F_MQ)
+    pub(crate) max_discard_sectors: u32,           // 0x24: Max discard sectors         (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) max_discard_seg: u32,               // 0x28: Max discard segments        (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) discard_sector_alignment: u32,      // 0x2c: Discard sector alignment    (if VIRTIO_BLK_F_DISCARD)
+    pub(crate) max_write_zeroes_sectors: u32,      // 0x30: Max write zeroes sectors    (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) max_write_zeroes_seg: u32,          // 0x34: Max write zeroes segments   (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) write_zeroes_may_unmap: u8,         // 0x38: Write zeroes may unmap      (if VIRTIO_BLK_F_WRITE_ZEROES)
+    pub(crate) unused1: [u8; 3],                   // 0x39: Padding
+    pub(crate) max_secure_erase_sectors: u32,      // 0x3c: Max secure erase sectors        (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) max_secure_erase_seg: u32,          // 0x40: Max secure erase segments       (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) secure_erase_sector_alignment: u32, // 0x44: Secure erase sector alignment   (if VIRTIO_BLK_F_SECURE_ERASE)
+    pub(crate) zoned: VirtioBlkZonedCharacteristics, // 0x48: Zoned block characteristics    (if VIRTIO_BLK_F_ZONED)
 }
 
 impl VirtioBlkConfig {
@@ -271,6 +284,11 @@ impl VirtIOBlkDevice {
                 (req_type, req.sector)
             })
     }
+
+    fn config_word_index(byte_offset: u64) -> usize {
+        debug_assert_eq!(byte_offset % size_of::<u32>() as u64, 0);
+        (byte_offset / size_of::<u32>() as u64) as usize
+    }
 }
 
 impl VirtIODeviceTrait for VirtIOBlkDevice {
@@ -410,11 +428,11 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 
     fn read_config(&mut self, idx: u64) -> u32 {
-        self.config_region.into_slice()[idx as usize]
+        self.config_region.into_slice()[Self::config_word_index(idx)]
     }
 
     fn write_config(&mut self, idx: u64, data: u32) {
-        self.config_region.into_slice_mut()[idx as usize] = data
+        self.config_region.into_slice_mut()[Self::config_word_index(idx)] = data
     }
 
     fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
