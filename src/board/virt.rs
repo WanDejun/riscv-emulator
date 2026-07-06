@@ -349,8 +349,8 @@ impl Board for VirtBoard {
             self.background.poll_if_single_thread_mode();
             self.device_poller.trigger_external_interrupt();
 
-            self.plic.borrow_mut().try_get_interrupt(0);
-            self.plic.borrow_mut().try_get_interrupt(1);
+            self.plic.borrow_mut().update_context_irq_line(0);
+            self.plic.borrow_mut().update_context_irq_line(1);
         }
         self.cpu.step()?;
         self.clock.advance(1);

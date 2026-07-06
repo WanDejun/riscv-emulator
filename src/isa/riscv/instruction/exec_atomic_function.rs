@@ -107,7 +107,7 @@ impl AMOTrait<u64> for ExecAmoMax {
         rhs: u64,
         order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+        lhs.try_update(order, Ordering::Relaxed, |v| {
             Some(cmp::max(v as i64, rhs as i64) as u64)
         })
         .map_err(|_| Exception::StoreFault)
@@ -119,7 +119,7 @@ impl AMOTrait<u32> for ExecAmoMax {
         rhs: u32,
         order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+        lhs.try_update(order, Ordering::Relaxed, |v| {
             Some(cmp::max(v as i32, rhs as i32) as u32)
         })
         .map_err(|_| Exception::StoreFault)
@@ -133,7 +133,7 @@ impl AMOTrait<u64> for ExecAmoMin {
         rhs: u64,
         order: atomic::Ordering,
     ) -> Result<u64, Exception> {
-        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+        lhs.try_update(order, Ordering::Relaxed, |v| {
             Some(cmp::min(v as i64, rhs as i64) as u64)
         })
         .map_err(|_| Exception::StoreFault)
@@ -145,7 +145,7 @@ impl AMOTrait<u32> for ExecAmoMin {
         rhs: u32,
         order: atomic::Ordering,
     ) -> Result<u32, Exception> {
-        lhs.fetch_update(order, Ordering::Relaxed, |v| {
+        lhs.try_update(order, Ordering::Relaxed, |v| {
             Some(cmp::min(v as i32, rhs as i32) as u32)
         })
         .map_err(|_| Exception::StoreFault)
