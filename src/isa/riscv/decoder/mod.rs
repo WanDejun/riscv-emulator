@@ -10,7 +10,7 @@ use crate::{
             RawInstr,
             decoder::compress_decoder::CompressedDecoder,
             instruction::{InstrFormat, RVInstrInfo, instr_table::*},
-            isa_builder::{Extension, ISABuilder, IsaParseError},
+            isa_builder::{DEFAULT_ISA, ISABuilder, IsaParseError},
         },
     },
     utils::sign_extend,
@@ -47,15 +47,7 @@ pub struct Decoder {
 
 impl Decoder {
     pub fn new() -> Self {
-        Self::from_builder(
-            ISABuilder::new()
-                .add(Extension::M)
-                .add(Extension::A)
-                .add(Extension::D)
-                .add(Extension::C)
-                .add(Extension::V)
-                .add(Extension::Zifencei),
-        )
+        Self::from_isa_str(DEFAULT_ISA).expect("DEFAULT_ISA must be valid")
     }
 
     /// Builds a decoder for the ISA described by `isa`,

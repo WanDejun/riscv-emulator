@@ -12,9 +12,10 @@ use crate::{
             NamedCsrReg,
             csr_macro::{Mstatus, Vl, Vtype},
         },
-        decoder::DecodeInstr,
+        decoder::{DecodeInstr, Decoder},
         executor::RVCPU,
         instruction::{RVInstrInfo, instr_table::RiscvInstr},
+        isa_builder::TEST_ISA,
         mmu::VirtAddrManager,
         vector::types::{Vlmul, Vsew},
     },
@@ -32,7 +33,9 @@ impl TestCPUBuilder {
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
-        let mut cpu = Box::new(RVCPU::from_vaddr_manager(
+        let decoder = Decoder::from_isa_str(TEST_ISA).expect("TEST_ISA must be valid");
+        let mut cpu = Box::new(RVCPU::from_decoder(
+            decoder,
             VirtAddrManager::from_ram_and_mmio(ram_ref, mmio),
         ));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience

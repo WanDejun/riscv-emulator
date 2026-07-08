@@ -675,6 +675,14 @@ fn test_default_csr_value() {
 }
 
 #[test]
+fn test_cpu_test_builder_enables_vector_isa() {
+    let cpu = TestCPUBuilder::new().build();
+    let misa = cpu.csr.read_uncheck_privilege(csr_index::misa).unwrap();
+    let v_bit = 1 << (b'V' - b'A');
+    assert_ne!(misa & v_bit, 0);
+}
+
+#[test]
 fn test_amo() {
     use std::sync::atomic::{AtomicU64, Ordering};
 

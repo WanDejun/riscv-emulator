@@ -42,18 +42,13 @@ pub mod ram;
 pub mod wasm_api;
 
 pub use config::ram_config;
-use lazy_static::lazy_static;
 
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
     device::virtio::virtio_mmio::VirtIODeviceID,
     isa::riscv::trap::Exception,
 };
-use std::{
-    path::PathBuf,
-    str::FromStr,
-    sync::{Mutex, MutexGuard},
-};
+use std::{path::PathBuf, str::FromStr};
 
 #[derive(Debug, Clone)]
 pub struct DeviceConfig {
@@ -74,36 +69,6 @@ impl FromStr for DeviceConfig {
         };
         let path = PathBuf::from(parts.next().ok_or("Need input a device path.")?);
         Ok(DeviceConfig { dev_type, path })
-    }
-}
-
-pub struct EmulatorConfig {
-    pub(crate) devices: Vec<DeviceConfig>,
-}
-impl EmulatorConfig {
-    pub fn new() -> Self {
-        Self { devices: vec![] }
-    }
-}
-
-// TODO: Don't use a global variable as we should make everything configurable at board level,
-// there's no need to bypass many layers to set config.
-lazy_static! {
-    pub static ref EMULATOR_CONFIG: Mutex<EmulatorConfig> = Mutex::new(EmulatorConfig::new());
-}
-
-pub struct EmulatorConfigurator<'a> {
-    lock: MutexGuard<'a, EmulatorConfig>,
-}
-impl<'a> EmulatorConfigurator<'a> {
-    pub fn new() -> Self {
-        Self {
-            lock: EMULATOR_CONFIG.lock().unwrap(),
-        }
-    }
-    pub fn append_device(mut self, device: DeviceConfig) -> Self {
-        self.lock.devices.push(device);
-        self
     }
 }
 

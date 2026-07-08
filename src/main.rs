@@ -14,8 +14,13 @@ use riscv_emulator::board::Board;
 use riscv_emulator::gdb;
 use riscv_emulator::isa::DebugTarget;
 use riscv_emulator::isa::riscv::debugger::Address;
+use riscv_emulator::isa::riscv::decoder::Decoder;
+use riscv_emulator::isa::riscv::isa_builder::DEFAULT_ISA;
 use riscv_emulator::rvdb::NativeREPL;
-use riscv_emulator::{DeviceConfig, EmulatorConfigurator, board::virt::VirtBoard};
+use riscv_emulator::{
+    DeviceConfig,
+    board::virt::{VirtBoard, VirtBoardConfig},
+};
 
 use crate::{logging::LogLevel, welcome::display_welcome_message};
 
@@ -71,6 +76,10 @@ struct Args {
     /// Add devices to emulator. Example: --device=virtio-block:./tmp/img_blk
     #[arg(long = "device", action = clap::ArgAction::Append)]
     devices: Vec<DeviceConfig>,
+
+    /// RISC-V ISA string used to build the decoder. Example: RV64GC or RV64GCV.
+    #[arg(long = "isa", default_value = DEFAULT_ISA)]
+    isa: String,
 
     /// Dump RISC-V arch-test signature into this file on exit.
     #[arg(long = "signature")]
@@ -181,14 +190,15 @@ fn main() {
         panic!();
     }
 
-    // Init emulator configuration by cli_args.
-    let mut emu_cfg = EmulatorConfigurator::new();
-    for device in cli_args.devices.iter() {
-        emu_cfg = emu_cfg.append_device(device.clone())
-    }
-    drop(emu_cfg);
-
     let _logger_handle = logging::init(cli_args.log_level);
+
+    let decoder = Decoder::from_isa_str(&cli_args.isa).unwrap_or_else(|e| {
+        eprintln!("Invalid ISA string {:?}: {}", cli_args.isa, e);
+        std::process::exit(2);
+    });
+    let board_config = VirtBoardConfig::new()
+        .with_decoder(decoder)
+        .with_virtio_devices(cli_args.devices.clone());
 
     let ext = cli_args
         .path
@@ -202,7 +212,7 @@ fn main() {
                 println!("ELF file detected\r");
             }
             let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
-            VirtBoard::from_elf(bytes)
+            VirtBoard::try_from_elf_with_config(bytes, board_config).expect("ELF load failed")
         }
 
         (TargetFormat::Bin, _) | (TargetFormat::Auto, "bin") => {
@@ -210,7 +220,7 @@ fn main() {
                 println!("Binary file detected\r");
             }
             let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
-            VirtBoard::from_binary(&bytes)
+            VirtBoard::from_binary_with_config(&bytes, board_config)
         }
 
         _ => {

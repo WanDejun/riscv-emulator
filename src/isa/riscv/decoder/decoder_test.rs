@@ -2,6 +2,7 @@ use crate::{
     isa::riscv::{
         csr_reg::csr_index,
         instruction::{RVInstrInfo, instr_table::RiscvInstr},
+        isa_builder::TEST_ISA,
     },
     utils::negative_of,
 };
@@ -79,6 +80,12 @@ impl Checker {
         }
     }
 
+    fn from_isa_str(isa: &str) -> Self {
+        Checker {
+            decoder: Decoder::from_isa_str(isa).unwrap(),
+        }
+    }
+
     fn check(&mut self, instr: u32, expected: RiscvInstr, expected_info: RVInstrInfo) {
         let raw: RawInstr = instr.into();
         let result = self.decoder.decode(raw).unwrap();
@@ -96,6 +103,12 @@ impl Checker {
         let decoded = self.decoder.decode(instr.into());
         assert!(decoded.is_none(), "{instr:#010x} decoded as {decoded:?}");
     }
+}
+
+#[test]
+fn test_default_decoder_excludes_vector() {
+    let mut checker = Checker::new();
+    checker.check_illegal(get_instr_v(0x57, 0b000, 0b010001, true, 1, 2, 3));
 }
 
 #[test]
@@ -249,7 +262,7 @@ fn test_deocder_csr() {
 
 #[test]
 fn test_decoder_rvv_secondary_opcode_fields() {
-    let mut checker = Checker::new();
+    let mut checker = Checker::from_isa_str(TEST_ISA);
 
     checker.check(
         get_instr_v(0x57, 0b000, 0b010001, true, 1, 2, 3),

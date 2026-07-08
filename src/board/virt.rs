@@ -11,7 +11,7 @@ use std::{
 use crossbeam::channel;
 
 use crate::{
-    DeviceConfig, EMULATOR_CONFIG,
+    DeviceConfig,
     background::BackgroundExecutor,
     board::{Board, BoardStatus},
     byte_io::{ByteSinkExt, ByteSource},
@@ -35,6 +35,7 @@ use crate::{
     },
     device_poller::DevicePoller,
     isa::riscv::{
+        decoder::Decoder,
         executor::RVCPU,
         mmu::VirtAddrManager,
         trap::{Exception, Interrupt},
@@ -53,6 +54,28 @@ pub trait RiscvIRQHandler {
 
 pub trait RiscvIRQSource {
     fn set_irq_line(&mut self, line: IRQLine, id: usize);
+}
+
+#[derive(Default)]
+pub struct VirtBoardConfig {
+    decoder: Option<Decoder>,
+    virtio_devices: Vec<DeviceConfig>,
+}
+
+impl VirtBoardConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_decoder(mut self, decoder: Decoder) -> Self {
+        self.decoder = Some(decoder);
+        self
+    }
+
+    pub fn with_virtio_devices(mut self, devices: Vec<DeviceConfig>) -> Self {
+        self.virtio_devices = devices;
+        self
+    }
 }
 
 /// NOTE: Only used in single-threaded contexts.
@@ -83,6 +106,7 @@ pub struct RVBoardBuilder {
     id_allocators: HashMap<TypeId, IdAllocator>,
     device_poller: DevicePoller,
     background: BackgroundExecutor,
+    decoder: Option<Decoder>,
 }
 
 impl RVBoardBuilder {
@@ -96,7 +120,13 @@ impl RVBoardBuilder {
             id_allocators: HashMap::new(),
             device_poller: DevicePoller::new(plic_irq_tx, plic_irq_rx),
             background: BackgroundExecutor::new(),
+            decoder: None,
         }
+    }
+
+    pub fn with_decoder(mut self, decoder: Decoder) -> Self {
+        self.decoder = Some(decoder);
+        self
     }
 
     pub fn add_plic_device<D: device::MemMappedDeviceTrait + 'static>(
@@ -122,8 +152,8 @@ impl RVBoardBuilder {
         self
     }
 
-    pub fn add_virtio_devices(mut self, devices: &mut Vec<DeviceConfig>) -> Self {
-        self.virtio_devices.append(devices);
+    pub fn add_virtio_devices(mut self, devices: Vec<DeviceConfig>) -> Self {
+        self.virtio_devices.extend(devices);
         self
     }
 
@@ -220,7 +250,8 @@ impl RVBoardBuilder {
         let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), self.mmio_items);
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
-        let mut cpu = Box::pin(RVCPU::from_vaddr_manager(vaddr_manager));
+        let decoder = self.decoder.take().unwrap_or_else(Decoder::new);
+        let mut cpu = Box::pin(RVCPU::from_decoder(decoder, vaddr_manager));
 
         // register irq line for timer.
         clint.borrow_mut().set_irq_line(
@@ -302,28 +333,43 @@ pub struct VirtBoard {
 impl VirtBoard {
     // TODO: return error
     pub fn from_binary(bytes: &[u8]) -> Self {
-        let mut ram = Ram::new();
-        load_bin(&mut ram, bytes);
-        Self::from_ram(ram)
+        Self::from_binary_with_config(bytes, VirtBoardConfig::new())
     }
 
-    // TODO: Remove this
-    pub fn from_elf(bytes: Vec<u8>) -> Self {
-        Self::try_from_elf(bytes).expect("ELF load failed in VirtBoard::from_elf")
+    pub fn from_binary_with_config(bytes: &[u8], config: VirtBoardConfig) -> Self {
+        let mut ram = Ram::new();
+        load_bin(&mut ram, bytes);
+        Self::from_ram_with_config(ram, config)
     }
 
     pub fn try_from_elf(bytes: Vec<u8>) -> Result<Self, String> {
+        Self::try_from_elf_with_config(bytes, VirtBoardConfig::new())
+    }
+
+    pub fn try_from_elf_with_config(
+        bytes: Vec<u8>,
+        config: VirtBoardConfig,
+    ) -> Result<Self, String> {
         let mut ram = Ram::new();
         let loader = ELFLoader::try_new(bytes).ok_or_else(|| "Invalid ELF file".to_string())?;
         loader.load_to_ram(&mut ram);
-        let mut board = Self::from_ram(ram);
+        let mut board = Self::from_ram_with_config(ram, config);
         board.loader = Some(loader);
         Ok(board)
     }
 
     pub fn from_ram(ram: Ram) -> Self {
-        let builder =
-            RVBoardBuilder::new().add_virtio_devices(&mut EMULATOR_CONFIG.lock().unwrap().devices);
+        Self::from_ram_with_config(ram, VirtBoardConfig::new())
+    }
+
+    pub fn from_ram_with_config(ram: Ram, config: VirtBoardConfig) -> Self {
+        let mut builder = RVBoardBuilder::new();
+
+        if let Some(decoder) = config.decoder {
+            builder = builder.with_decoder(decoder);
+        }
+
+        builder = builder.add_virtio_devices(config.virtio_devices);
 
         #[cfg(feature = "test-device")]
         let builder = builder.add_plic_device(Rc::new(RefCell::new(TestDevice::new())));
@@ -358,6 +404,7 @@ impl Board for VirtBoard {
             self.plic.borrow_mut().update_context_irq_line(0);
             self.plic.borrow_mut().update_context_irq_line(1);
         }
+
         self.cpu.step()?;
         self.clock.advance(1);
 
@@ -406,6 +453,7 @@ impl Board for VirtBoard {
         vec
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

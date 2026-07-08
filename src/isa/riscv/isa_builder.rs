@@ -15,6 +15,24 @@ use crate::{
     isa::riscv::instruction::instr_table::*,
 };
 
+/// Stable default ISA exposed to users. Keep vector out until the V extension
+/// support is stable enough to enable by default.
+#[cfg(feature = "riscv64")]
+pub const DEFAULT_ISA: &str = "RV64GC";
+
+/// Stable default ISA exposed to users. RV32 is not fully maintained, but
+/// parser defaults still need to match the selected word size.
+#[cfg(feature = "riscv32")]
+pub const DEFAULT_ISA: &str = "RV32GC";
+
+/// ISA used by CPU tests that exercise unstable vector support.
+#[cfg(feature = "riscv64")]
+pub(crate) const TEST_ISA: &str = "RV64GCV";
+
+/// ISA used by CPU tests that exercise unstable vector support.
+#[cfg(feature = "riscv32")]
+pub(crate) const TEST_ISA: &str = "RV32GCV";
+
 /// A standard RISC-V extension this emulator knows how to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Extension {
@@ -260,6 +278,7 @@ fn base_extensions(letter: char) -> Result<&'static [Extension], IsaParseError> 
         'f' => &[F],
         'd' => &[D],
         'c' => &[C],
+        'v' => &[V],
         // The "general" shorthand.
         'g' => &[I, M, A, F, D, Zicsr, Zifencei],
         other => return Err(IsaParseError::UnknownBaseExtension(other)),
@@ -385,6 +404,13 @@ mod tests {
         ] {
             assert!(builder.has(ext), "missing {ext:?}");
         }
+    }
+
+    #[test]
+    fn parses_vector_extension() {
+        let builder: ISABuilder = isa("GCV").parse().unwrap();
+        assert!(builder.has(Extension::V));
+        assert_eq!(builder.extension_bits(), misa_of("ACDFIMSUV"));
     }
 
     #[test]

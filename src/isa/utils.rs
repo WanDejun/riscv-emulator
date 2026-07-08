@@ -17,38 +17,6 @@ macro_rules! define_instr_enum {
     }
 }
 
-// WARNING: these functions and macros are untested!
-
-#[macro_export]
-macro_rules! define_instr {
-    ( $tot_instr_name:ident,
-        $( $isa_name:ident, $isa_table_name:ident, {$(
-                $name:ident {
-                    pattern: $pattern:expr,
-                    decode: $decode:expr,
-                    execute: $execute:expr,
-                }),* $(,)?
-            }
-        ),* $(,)?
-    ) => {
-
-        define_instr_enum!($tot_instr_name, $($($name,)*)*);
-
-        $(
-            pub const $isa_table_name: &[(DecodeMask, $tot_instr_name, DecodeFn, ExecuteFn)] = &[
-                $(
-                    (
-                        create_decode_mask($pattern),
-                        $tot_instr_name::$name,
-                        $decode,
-                        $execute,
-                    )
-                ),*
-            ];
-        )*
-    };
-}
-
 pub struct DecodeMask {
     pub key: u32,
     pub mask: u32,
@@ -67,13 +35,15 @@ pub fn create_decode_mask(pattern: &'static str) -> DecodeMask {
 
     for ch in pattern.chars() {
         match ch {
-            '0' | '1' | '?' => {
+            '0' | '1' | '?' | '-' => {
                 len += 1;
 
                 key = (key << 1) | (ch == '1') as u32;
-                mask = (mask << 1) | (ch != '?') as u32;
+                mask = (mask << 1) | (ch == '0' || ch == '1') as u32;
             }
-            _ => {}
+            _ => {
+                panic!("unexpected char in pattern {}", ch);
+            }
         }
     }
 
