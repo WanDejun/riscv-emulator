@@ -82,11 +82,11 @@ At present, the emulator can boot the Linux 6.18.2 kernel with BusyBox v1.37.0 i
 
 | Device | Address Base | Address Length |
 | :-: | :-: | :-: |
-| `power-manager`   | 0x0010_0000   | 0x1000    |
-| `uart`            | 0x1000_0000   | 0x08      |
-| `clint`           | 0x0200_0000   | 0x10000   |
-| `virtio`          | 0x1000_1000   | 0x1000    |
-| `ram`             | 0x8000_0000   | 0x800_0000|
+| `power-manager`   | 0x0010_0000   | 0x1000      |
+| `uart`            | 0x1000_0000   | 0x08        |
+| `clint`           | 0x0200_0000   | 0x10000     |
+| `virtio`          | 0x1000_1000   | 0x1000      |
+| `ram`             | 0x8000_0000   | 0x2000_0000 |
 
 ## License
 

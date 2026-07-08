@@ -24,7 +24,7 @@
 		device_type = "memory";
 		// reg = <addr_high addr_low size_high size_low>;
 		// 因为前面定义了 #address-cells 和 #size-cells 为 2
-		reg = <0x0 0x80000000 0x0 0x80000000>;
+		reg = <0x0 0x80000000 0x0 0x20000000>;
 	};
 
 	cpus {
