@@ -3,7 +3,6 @@ use std::{cell::RefCell, panic, rc::Rc};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    Emulator,
     board::{Board, BoardStatus, virt::VirtBoard},
     byte_io::{ByteSinkExt, ByteSource},
     config::arch_config::REGFILE_CNT,
@@ -21,68 +20,76 @@ fn init_on_wasm() {
 
 #[wasm_bindgen]
 pub struct WasmEmulator {
-    inner: Emulator,
+    inner: VirtBoard,
 }
 
 #[wasm_bindgen]
 impl WasmEmulator {
     pub fn from_elf_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let inner = Emulator::try_from_elf_bytes(bytes.to_vec())
+        let inner = VirtBoard::try_from_elf(bytes.to_vec())
             .map_err(|e| JsValue::from_str(&format!("ELF load failed: {e}")))?;
         Ok(Self { inner })
     }
 
     pub fn from_bin_bytes(bytes: &[u8]) -> Self {
         Self {
-            inner: Emulator::from_binary_bytes(bytes),
+            inner: VirtBoard::from_binary(bytes),
         }
     }
 
     pub async fn into_rvdb(self) -> WasmRvdb {
-        WasmRvdb::from_board(self.inner.into_board()).await
+        WasmRvdb::from_board(self.inner).await
     }
 
     pub fn step(&mut self) -> Result<(), JsValue> {
-        self.inner
-            .step()
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        if self.inner.status() != BoardStatus::Halt {
+            self.inner
+                .step()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        }
+        Ok(())
     }
 
     pub fn continue_for_steps(&mut self, max_steps: u64) -> Result<u64, JsValue> {
-        self.inner
-            .run_steps(max_steps)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        let mut steps = 0;
+        while self.inner.status() != BoardStatus::Halt && steps < max_steps {
+            self.inner
+                .step()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            steps += 1;
+        }
+        Ok(steps)
     }
 
     pub fn is_halted(&self) -> bool {
-        self.inner.board().status() == BoardStatus::Halt
+        self.inner.status() == BoardStatus::Halt
     }
 
     pub fn clock_cycles(&self) -> u64 {
-        self.inner.board().clock.now()
+        self.inner.clock.now()
     }
 
     pub fn read_pc(&self) -> u64 {
-        self.inner.board().cpu().read_pc() as u64
+        self.inner.cpu().read_pc() as u64
     }
 
     pub fn read_reg(&self, idx: u8) -> u64 {
-        self.inner.board().cpu().read_reg(idx) as u64
+        self.inner.cpu().read_reg(idx) as u64
     }
 
     /// Reads all 32 integer registers.
     pub fn read_regs(&self) -> Vec<u64> {
         (0..REGFILE_CNT)
-            .map(|idx| self.inner.board().cpu().read_reg(idx as u8) as u64)
+            .map(|idx| self.inner.cpu().read_reg(idx as u8) as u64)
             .collect()
     }
 
     pub fn push_uart_input(&mut self, input: &[u8]) {
-        self.inner.push_uart_input_bytes(input);
+        self.inner.push_uart_input(input);
     }
 
     pub fn take_uart_output(&mut self) -> Vec<u8> {
-        self.inner.take_uart_output_bytes()
+        self.inner.take_uart_output()
     }
 }
 
@@ -212,7 +219,7 @@ impl WasmRvdb {
             .apply_pending(self.rvdb.session_mut());
 
         WasmEmulator {
-            inner: Emulator::from_board(self.rvdb.into_board()),
+            inner: self.rvdb.into_board(),
         }
     }
 }

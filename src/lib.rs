@@ -43,11 +43,7 @@ pub mod wasm_api;
 
 pub use config::ram_config;
 
-use crate::{
-    board::{Board, BoardStatus, virt::VirtBoard},
-    device::virtio::virtio_mmio::VirtIODeviceID,
-    isa::riscv::trap::Exception,
-};
+use crate::device::virtio::virtio_mmio::VirtIODeviceID;
 use std::{path::PathBuf, str::FromStr};
 
 #[derive(Debug, Clone)]
@@ -69,71 +65,5 @@ impl FromStr for DeviceConfig {
         };
         let path = PathBuf::from(parts.next().ok_or("Need input a device path.")?);
         Ok(DeviceConfig { dev_type, path })
-    }
-}
-
-pub struct Emulator {
-    board: VirtBoard,
-}
-
-impl Emulator {
-    pub fn from_binary_bytes(bytes: &[u8]) -> Self {
-        Self {
-            board: VirtBoard::from_binary(bytes),
-        }
-    }
-
-    pub fn try_from_elf_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        Ok(Self {
-            board: VirtBoard::try_from_elf(bytes)?,
-        })
-    }
-
-    pub fn from_board(board: VirtBoard) -> Self {
-        Self { board }
-    }
-
-    pub fn into_board(self) -> VirtBoard {
-        self.board
-    }
-
-    pub fn run(&mut self) -> Result<(), Exception> {
-        while self.board.status() != BoardStatus::Halt {
-            self.board.step()?;
-        }
-
-        Ok(())
-    }
-
-    pub fn step(&mut self) -> Result<(), Exception> {
-        if self.board.status() != BoardStatus::Halt {
-            self.board.step()?;
-        }
-        Ok(())
-    }
-
-    pub fn run_steps(&mut self, max_steps: u64) -> Result<u64, Exception> {
-        let mut steps = 0;
-        while self.board.status() != BoardStatus::Halt && steps < max_steps {
-            self.board.step()?;
-            steps += 1;
-        }
-        Ok(steps)
-    }
-
-    pub fn board(&self) -> &VirtBoard {
-        &self.board
-    }
-
-    pub fn board_mut(&mut self) -> &mut VirtBoard {
-        &mut self.board
-    }
-
-    pub fn push_uart_input_bytes(&mut self, bytes: &[u8]) {
-        self.board.push_uart_input(bytes);
-    }
-
-    pub fn take_uart_output_bytes(&mut self) -> Vec<u8> {
-        self.board.take_uart_output()
     }
 }

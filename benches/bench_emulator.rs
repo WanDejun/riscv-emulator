@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-use riscv_emulator::Emulator;
+use riscv_emulator::board::{Board, BoardStatus, virt::VirtBoard};
 
 fn bench_emulator_run(c: &mut Criterion) {
     let mut group = c.benchmark_group("emulator_run");
@@ -29,9 +29,12 @@ fn bench_emulator_run(c: &mut Criterion) {
                 let bench_name = format!("load_and_run_{}", name);
                 group.bench_function(&bench_name, move |b| {
                     b.iter(|| {
-                        let mut emu =
-                            Emulator::try_from_elf_bytes(std::fs::read(&path).unwrap()).unwrap();
-                        black_box(emu.run().unwrap());
+                        let mut board =
+                            VirtBoard::try_from_elf(std::fs::read(&path).unwrap()).unwrap();
+                        while board.status() != BoardStatus::Halt {
+                            board.step().unwrap();
+                        }
+                        black_box(board.clock.now());
                     })
                 });
             }
