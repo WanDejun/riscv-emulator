@@ -47,6 +47,7 @@ pub(crate) use id_allocator::*;
 pub(crate) mod mmio;
 pub(crate) mod plic;
 pub(crate) mod power_manager;
+pub(crate) mod spi;
 pub(crate) mod test_device;
 pub(crate) mod virtio;
 
