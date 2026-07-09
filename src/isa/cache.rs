@@ -82,7 +82,7 @@ pub(super) trait CachePolicy {
 }
 
 pub(super) struct DirectCache<T, const N: usize> {
-    cache: [(WordType, Option<T>); N],
+    cache: Box<[(WordType, Option<T>); N]>,
 }
 
 impl<T: Cacheable, const N: usize> DirectCache<T, N> {
@@ -98,7 +98,7 @@ impl<T: Cacheable, const N: usize> CachePolicy for DirectCache<T, N> {
     fn new() -> Self {
         debug_assert!(N > 0 && (N & (N - 1)) == 0, "N must be a power of two");
         Self {
-            cache: [(0, None); N],
+            cache: unsafe { Box::new_zeroed().assume_init() },
         }
     }
 
@@ -125,37 +125,36 @@ impl<T: Cacheable, const N: usize> CachePolicy for DirectCache<T, N> {
 }
 
 /// Helper struct for set-associative cache, representing one set with W ways.
+#[derive(Clone)]
 struct CacheSet<T: Cacheable, const W: usize> {
-    replace_idx: usize,
-    source_addr: [WordType; W],
-    data: [Option<T>; W],
+    idx: usize,
+    slots: [(WordType, Option<T>); W],
 }
 
 impl<T: Cacheable, const W: usize> CacheSet<T, W> {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
-            replace_idx: 0,
-            source_addr: [0; W],
-            data: [None; W],
+            idx: 0,
+            slots: [(0, None); W],
         }
     }
 
     #[inline]
     fn insert(&mut self, addr: WordType, data: T) {
-        self.source_addr[self.replace_idx] = addr;
-        self.data[self.replace_idx] = Some(data);
+        let (src, value) = &mut self.slots[self.idx];
+        *src = addr;
+        *value = Some(data);
 
-        self.replace_idx += 1;
-        if self.replace_idx == W {
-            self.replace_idx = 0;
+        self.idx += 1;
+        if self.idx == W {
+            self.idx = 0;
         }
     }
 
     #[inline]
-    fn invalidate(&mut self, addr: WordType) {
-        if let Some(index) = self.source_addr.iter().position(|&item| item == addr) {
-            self.source_addr[index] = 0;
-            self.data[index] = None;
+    fn invalidate(&mut self, target: WordType) {
+        if let Some(index) = self.slots.iter().position(|&(addr, _v)| addr == target) {
+            self.slots[index] = (0, None);
         }
     }
 }
@@ -169,7 +168,7 @@ impl<T: Cacheable, const W: usize> CacheSet<T, W> {
 /// SetCache<DecodeInstr, 4, 2> // 4 sets, 2 ways per set
 /// ```
 pub(super) struct SetCache<T: Cacheable, const S: usize, const W: usize> {
-    cache: [CacheSet<T, W>; S],
+    cache: Box<[CacheSet<T, W>]>,
 }
 
 impl<T: Cacheable, const S: usize, const W: usize> SetCache<T, S, W> {
@@ -187,7 +186,7 @@ impl<T: Cacheable, const S: usize, const W: usize> CachePolicy for SetCache<T, S
         debug_assert!(W > 0 && (W & (W - 1)) == 0, "W must be a power of two.");
 
         Self {
-            cache: std::array::from_fn(|_| CacheSet::new()),
+            cache: vec![CacheSet::new(); S].into_boxed_slice(),
         }
     }
 
@@ -195,10 +194,10 @@ impl<T: Cacheable, const S: usize, const W: usize> CachePolicy for SetCache<T, S
     fn get(&self, addr: WordType) -> Option<T> {
         let set = &self.cache[Self::set_index_of(addr)];
 
-        set.source_addr
+        set.slots
             .iter()
-            .position(|&item| item == addr)
-            .and_then(|index| set.data[index].clone())
+            .position(|&(a, _val)| a == addr)
+            .and_then(|index| set.slots[index].1.clone())
     }
 
     #[inline]
@@ -213,7 +212,7 @@ impl<T: Cacheable, const S: usize, const W: usize> CachePolicy for SetCache<T, S
 
     #[inline]
     fn clear(&mut self) {
-        self.cache = std::array::from_fn(|_| CacheSet::new());
+        *self = Self::new()
     }
 }
 
