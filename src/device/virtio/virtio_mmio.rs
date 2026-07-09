@@ -10,8 +10,13 @@ use crate::{
         config::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE},
         virtio::{config::*, virtio_device::VirtIODeviceTrait},
     },
-    utils::{BIT_ONES_ARRAY, check_align},
+    utils::check_align,
 };
+
+pub const VIRTIO_DEVICE_ID_BLOCK: u16 = 2;
+const VIRTIO_MMIO_CONFIG_OFFSET: u64 = VirtIO_MMIO_Offset::Config as u64;
+const VIRTIO_MMIO_MAX_QUEUES: usize = 8;
+const FEATURE_SELECT_BITS: u32 = 32;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -94,6 +99,7 @@ bitflags! {
 
 #[derive(Clone, Copy)]
 struct VirtIOMMIOQueueStatus {
+    num: u32,
     desc: u64,
     avail: u64,
     used: u64,
@@ -102,6 +108,7 @@ struct VirtIOMMIOQueueStatus {
 impl Default for VirtIOMMIOQueueStatus {
     fn default() -> Self {
         Self {
+            num: 0,
             desc: 0,
             avail: 0,
             used: 0,
@@ -110,15 +117,24 @@ impl Default for VirtIOMMIOQueueStatus {
     }
 }
 
+impl VirtIOMMIOQueueStatus {
+    fn set_low(value: &mut u64, low: u32) {
+        *value = (*value & !u32::MAX as u64) | low as u64;
+    }
+
+    fn set_high(value: &mut u64, high: u32) {
+        *value = (*value & u32::MAX as u64) | ((high as u64) << FEATURE_SELECT_BITS);
+    }
+}
+
 pub(crate) struct VirtIOMMIO {
     device: Box<UnsafeCell<dyn VirtIODeviceTrait>>,
     host_features_sel: u32,
-    host_features: u64,
     guest_features_sel: u32,
     guest_features: u64,
 
-    queues: [VirtIOMMIOQueueStatus; 8],
-    queue_select: u64,
+    queues: [VirtIOMMIOQueueStatus; VIRTIO_MMIO_MAX_QUEUES],
+    queue_select: usize,
 }
 
 impl VirtIOMMIO {
@@ -126,13 +142,70 @@ impl VirtIOMMIO {
         Self {
             device,
             host_features_sel: 0,
-            host_features: 0,
             guest_features_sel: 0,
             guest_features: 0,
 
-            queues: [VirtIOMMIOQueueStatus::default(); 8],
+            queues: [VirtIOMMIOQueueStatus::default(); VIRTIO_MMIO_MAX_QUEUES],
             queue_select: 0,
         }
+    }
+
+    fn selected_queue(&self) -> Option<&VirtIOMMIOQueueStatus> {
+        self.queues.get(self.queue_select)
+    }
+
+    fn selected_queue_mut(&mut self) -> Option<&mut VirtIOMMIOQueueStatus> {
+        self.queues.get_mut(self.queue_select)
+    }
+
+    fn feature_word(features: u64, select: u32) -> u32 {
+        if select >= 2 {
+            0
+        } else {
+            (features >> (select * FEATURE_SELECT_BITS)) as u32
+        }
+    }
+
+    fn set_feature_word(features: &mut u64, select: u32, value: u32) {
+        if select >= 2 {
+            return;
+        }
+
+        let shift = select * FEATURE_SELECT_BITS;
+        let mask = (u32::MAX as u64) << shift;
+        *features = (*features & !mask) | ((value as u64) << shift);
+    }
+
+    fn read_config<T>(&mut self, offset: u64) -> Result<T, MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        if !check_align::<T>(offset) {
+            return Err(MemError::LoadMisaligned);
+        }
+
+        let vdev = unsafe { self.device.as_mut_unchecked() };
+        Ok(T::truncate_from(vdev.read_config(
+            offset - VIRTIO_MMIO_CONFIG_OFFSET,
+            size_of::<T>() as u32,
+        )))
+    }
+
+    fn write_config<T>(&mut self, offset: u64, data: T) -> Result<(), MemError>
+    where
+        T: crate::utils::UnsignedInteger,
+    {
+        if !check_align::<T>(offset) {
+            return Err(MemError::StoreMisaligned);
+        }
+
+        let vdev = unsafe { self.device.as_mut_unchecked() };
+        vdev.write_config(
+            offset - VIRTIO_MMIO_CONFIG_OFFSET,
+            size_of::<T>() as u32,
+            data.into(),
+        );
+        Ok(())
     }
 
     fn read_u32_impl(&self, offset: u64) -> u32 {
@@ -141,6 +214,11 @@ impl VirtIOMMIO {
         if !check_align::<u32>(offset) {
             // will be checked in mmio.
             unreachable!()
+        }
+
+        if offset >= VIRTIO_MMIO_CONFIG_OFFSET {
+            return vdev.read_config(offset - VIRTIO_MMIO_CONFIG_OFFSET, size_of::<u32>() as u32)
+                as u32;
         }
 
         let offset_type = VirtIO_MMIO_Offset::try_from(offset);
@@ -159,12 +237,18 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::DeviceId => vdev.get_device_id() as u32,
                     VirtIO_MMIO_Offset::VendorId => VIRT_VENDOR,
                     VirtIO_MMIO_Offset::DeviceFeatures => {
-                        (vdev.get_host_feature() >> (self.host_features_sel * 32)) as u32
+                        Self::feature_word(vdev.get_host_feature(), self.host_features_sel)
                     }
-                    VirtIO_MMIO_Offset::QueueNumMax => VIRTQUEUE_MAX_SIZE,
+                    VirtIO_MMIO_Offset::QueueNumMax => {
+                        if self.queue_select < vdev.get_num_of_queue() as usize {
+                            VIRTQUEUE_MAX_SIZE
+                        } else {
+                            0
+                        }
+                    }
                     // VirtIO_MMIO_Offset::QueuePFN => 0 as u32, // legacy
                     VirtIO_MMIO_Offset::QueueReady => {
-                        vdev.queue_ready() as u32
+                        self.selected_queue().is_some_and(|q| q.enable) as u32
                     }
                     VirtIO_MMIO_Offset::InterruptStatus => {
                         vdev.isr().load(std::sync::atomic::Ordering::Relaxed) as u32
@@ -172,9 +256,7 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::Status => *vdev.status() as u32,
                     VirtIO_MMIO_Offset::ConfigGeneration => vdev.get_generation(),
                     VirtIO_MMIO_Offset::SharedMemLenLow | VirtIO_MMIO_Offset::SharedMemLenHigh => u32::MAX,
-                    VirtIO_MMIO_Offset::Config => {
-                        vdev.read_config(offset - VirtIO_MMIO_Offset::Config as u64)
-                    }
+                    VirtIO_MMIO_Offset::Config => unreachable!(),
                     VirtIO_MMIO_Offset::DeviceFeaturesSelect
                     | VirtIO_MMIO_Offset::DriverFeatures
                     | VirtIO_MMIO_Offset::DriverFeaturesSelect
@@ -206,11 +288,20 @@ impl VirtIOMMIO {
     }
 
     fn write_u32_impl(&mut self, offset: u64, value: u32) {
-        let vdev = unsafe { self.device.as_mut_unchecked() };
+        let vdev = self.device.get();
 
         if !check_align::<u32>(offset) {
             // will be checked in mmio.
             unreachable!()
+        }
+
+        if offset >= VIRTIO_MMIO_CONFIG_OFFSET {
+            unsafe { &mut *vdev }.write_config(
+                offset - VIRTIO_MMIO_CONFIG_OFFSET,
+                size_of::<u32>() as u32,
+                value as u64,
+            );
+            return;
         }
 
         let offset_type = VirtIO_MMIO_Offset::try_from(offset);
@@ -222,43 +313,72 @@ impl VirtIOMMIO {
                 );
             }
             Ok(offset_type) => match offset_type {
-                VirtIO_MMIO_Offset::DeviceFeaturesSelect => self.host_features_sel = value & 0x1,
+                VirtIO_MMIO_Offset::DeviceFeaturesSelect => self.host_features_sel = value,
                 VirtIO_MMIO_Offset::DriverFeatures => {
-                    let feature = (value as u64) << (self.host_features_sel * 32);
-                    self.guest_features |= feature;
+                    Self::set_feature_word(
+                        &mut self.guest_features,
+                        self.guest_features_sel,
+                        value,
+                    );
                 }
                 VirtIO_MMIO_Offset::DriverFeaturesSelect => {
-                    self.guest_features_sel = value & 0x1;
+                    self.guest_features_sel = value;
                 }
                 // VirtIO_MMIO_Offset::GUEST_PAGE_SIZE => {}, // legacy
                 VirtIO_MMIO_Offset::QueueSelect => {
-                    vdev.set_queue_num(value);
+                    self.queue_select = value as usize;
+                    unsafe { &mut *vdev }.queue_select(value);
                 }
                 VirtIO_MMIO_Offset::QueueNum => {
-                    vdev.set_queue_num(value);
+                    let queue_select = self.queue_select;
+                    if let Some(q) = self.selected_queue_mut() {
+                        q.num = value;
+                    }
+                    let vdev = unsafe { &mut *vdev };
+                    if queue_select < vdev.get_num_of_queue() as usize {
+                        vdev.set_queue_num(value);
+                    }
                 }
                 // VirtIO_MMIO_Offset::QueueAlign => {}, // legacy
                 // VirtIO_MMIO_Offset::QueuePFN => {}, // legacy
                 VirtIO_MMIO_Offset::QueueReady => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    vdev.set_desc(q.desc);
-                    vdev.set_avail(q.avail);
-                    vdev.set_used(q.used);
-                    q.enable = true;
+                    let queue_select = self.queue_select;
+                    let queue_config = if let Some(q) = self.selected_queue_mut() {
+                        q.enable = value != 0;
+                        q.enable.then_some((q.num, q.desc, q.avail, q.used))
+                    } else {
+                        error!(
+                            "VirtIO: QueueReady write for invalid queue {}",
+                            queue_select
+                        );
+                        None
+                    };
+                    if let Some((num, desc, avail, used)) = queue_config {
+                        let vdev = unsafe { &mut *vdev };
+                        if queue_select < vdev.get_num_of_queue() as usize {
+                            vdev.set_queue_num(num);
+                            vdev.set_desc(desc);
+                            vdev.set_avail(avail);
+                            vdev.set_used(used);
+                        }
+                    };
                 }
                 VirtIO_MMIO_Offset::QueueNotify => {
                     let queue_idx = value;
+                    let vdev = unsafe { &mut *vdev };
                     if queue_idx < vdev.get_num_of_queue() {
                         vdev.notify(queue_idx);
                     }
                 }
                 VirtIO_MMIO_Offset::InterruptAck => {
+                    let vdev = unsafe { &mut *vdev };
                     vdev.isr()
                         .fetch_and(!(value as u8), std::sync::atomic::Ordering::AcqRel);
                     vdev.update_irq();
                 }
                 VirtIO_MMIO_Offset::Status => {
                     if let Some(new_status) = VirtIODeviceStatus::from_bits(value as u8) {
+                        let vdev = unsafe { &mut *vdev };
                         // if (new_status & VirtIODeviceStatus::DRIVER_OK).is_empty() {
                         //     // virtio_mmio_stop_ioeventfd(proxy);
                         // }
@@ -269,31 +389,34 @@ impl VirtIOMMIO {
                     }
                 }
                 VirtIO_MMIO_Offset::QueueDescLow => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.desc |= value as u64;
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_low(&mut q.desc, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::QueueDescHigh => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.desc |= (value as u64) << 32;
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_high(&mut q.desc, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::QueueAvailLow => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.avail |= value as u64;
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_low(&mut q.avail, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::QueueAvailHigh => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.avail |= (value as u64) << 32;
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_high(&mut q.avail, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::QueueUsedLow => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.used |= value as u64;
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_low(&mut q.used, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::QueueUsedHigh => {
-                    let q = &mut self.queues[self.queue_select as usize];
-                    q.used |= (value as u64) << 32;
-                }
-                VirtIO_MMIO_Offset::Config => {
-                    vdev.write_config(offset - VirtIO_MMIO_Offset::Config as u64, value);
+                    if let Some(q) = self.selected_queue_mut() {
+                        VirtIOMMIOQueueStatus::set_high(&mut q.used, value);
+                    }
                 }
                 VirtIO_MMIO_Offset::MagicValue
                 | VirtIO_MMIO_Offset::Version
@@ -312,6 +435,7 @@ impl VirtIOMMIO {
                 | VirtIO_MMIO_Offset::SharedMemSelect => {
                     error!("VirtIO: DO NOT allow shared memory.");
                 }
+                VirtIO_MMIO_Offset::Config => unreachable!(),
             },
         };
     }
@@ -323,11 +447,15 @@ impl VirtIOMMIO {
     where
         T: crate::utils::UnsignedInteger,
     {
-        if size_of::<T>() != size_of::<u32>() {
+        if addr >= VIRTIO_MMIO_CONFIG_OFFSET {
+            return self.read_config(addr);
+        }
+
+        if size_of::<T>() != size_of::<u32>() || !check_align::<u32>(addr) {
             return Err(MemError::LoadMisaligned);
         }
 
-        let offset: u64 = addr & !BIT_ONES_ARRAY[2]; // align to u32
+        let offset: u64 = addr;
         let val = self.read_u32_impl(offset);
         let val = unsafe { (&val as *const u32 as *const T).read() };
         Ok(val)
@@ -341,12 +469,16 @@ impl VirtIOMMIO {
     where
         T: crate::utils::UnsignedInteger,
     {
-        if size_of::<T>() != size_of::<u32>() {
+        if addr >= VIRTIO_MMIO_CONFIG_OFFSET {
+            return self.write_config(addr, data);
+        }
+
+        if size_of::<T>() != size_of::<u32>() || !check_align::<u32>(addr) {
             return Err(MemError::StoreMisaligned);
         }
 
         let data = unsafe { (&data as *const T as *const u32).read() };
-        let offset = addr & !BIT_ONES_ARRAY[2]; // align to u32
+        let offset = addr;
         self.write_u32_impl(offset, data);
         Ok(())
     }
@@ -449,14 +581,18 @@ mod test {
 
     use super::*;
     use crate::{
-        device::virtio::{
-            virtio_blk::{
-                VirtIOBlkDeviceBuilder, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
-                VirtioBlkReqType, VirtioBlkStatus, init_block_file,
-            },
-            virtio_queue::{
-                VirtQueueAvail, VirtQueueAvailFlag, VirtQueueDesc, VirtQueueDescFlag,
-                VirtQueueUsed, VirtQueueUsedFlag,
+        device::{
+            DeviceTrait,
+            virtio::{
+                config::VIRTIO_F_VERSION_1,
+                virtio_blk::{
+                    VirtIOBlkDeviceBuilder, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
+                    VirtioBlkReqType, VirtioBlkStatus, init_block_file,
+                },
+                virtio_queue::{
+                    VirtQueueAvail, VirtQueueAvailFlag, VirtQueueDesc, VirtQueueDescFlag,
+                    VirtQueueUsed, VirtQueueUsedFlag,
+                },
             },
         },
         ram::Ram,
@@ -483,12 +619,18 @@ mod test {
             .get();
 
         let mut virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virt_device)));
+        assert_eq!(
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::DeviceId as u64),
+            VIRTIO_DEVICE_ID_BLOCK as u32
+        );
         virtio_mmio_device.write_status(VirtIODeviceStatus::ACKNOWLEDGE);
         virtio_mmio_device.write_status(VirtIODeviceStatus::DRIVER);
 
         // set feature.
-        let _device_feature = virtio_mmio_device.get_host_feature();
+        let device_feature = virtio_mmio_device.get_host_feature();
+        assert_ne!(device_feature & VIRTIO_F_VERSION_1, 0);
         let driver_feature = GuestFeatureBuilder::new()
+            .add_guest_feature(VIRTIO_F_VERSION_1)
             .add_guest_feature(VirtIOBlockFeature::BlockSize as u64)
             .add_guest_feature(VirtIOBlockFeature::Flush as u64)
             .take();
@@ -602,5 +744,16 @@ mod test {
         // Check file size (device config region).
         let capacity = virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Config as u64);
         assert_eq!(capacity, 1);
+        let capacity_high =
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Config as u64 + 0x04);
+        assert_eq!(capacity_high, 0);
+        let blk_size = virtio_mmio_device
+            .read_u32(VirtIO_MMIO_Offset::Config as u64 + 0x14)
+            .unwrap();
+        assert_eq!(blk_size, 512);
+        let writeback = virtio_mmio_device
+            .read_u8(VirtIO_MMIO_Offset::Config as u64 + 0x20)
+            .unwrap();
+        assert_eq!(writeback, 0);
     }
 }

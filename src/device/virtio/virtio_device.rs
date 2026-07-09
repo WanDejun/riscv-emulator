@@ -28,8 +28,8 @@ pub(crate) trait VirtIODeviceTrait {
     fn manage_one_request(&mut self) -> bool;
     fn notify(&mut self, queue_idx: u32);
 
-    fn read_config(&mut self, idx: u64) -> u32;
-    fn write_config(&mut self, idx: u64, data: u32);
+    fn read_config(&mut self, offset: u64, len: u32) -> u64;
+    fn write_config(&mut self, offset: u64, len: u32, data: u64);
 
     fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
         None

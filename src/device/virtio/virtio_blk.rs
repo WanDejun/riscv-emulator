@@ -9,8 +9,9 @@ use log::error;
 use num_enum::TryFromPrimitive;
 
 use crate::device::virtio::{
-    virtio_device::{DEVICE_ID_ALLOCTOR, VirtIODeviceTrait},
-    virtio_mmio::VirtIODeviceStatus,
+    config::VIRTIO_F_VERSION_1,
+    virtio_device::VirtIODeviceTrait,
+    virtio_mmio::{VIRTIO_DEVICE_ID_BLOCK, VirtIODeviceStatus},
     virtio_queue::{VirtQueue, VirtQueueDesc},
 };
 
@@ -99,22 +100,12 @@ impl VirtioBlkConfig {
         config
     }
 
-    pub(crate) fn into_slice(&self) -> &[u32] {
-        unsafe {
-            slice::from_raw_parts(
-                self as *const Self as *const u32,
-                size_of::<VirtioBlkConfig>() / 4,
-            )
-        }
+    fn as_bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self as *const Self as *const u8, size_of::<Self>()) }
     }
 
-    pub(crate) fn into_slice_mut(&mut self) -> &mut [u32] {
-        unsafe {
-            slice::from_raw_parts_mut(
-                self as *mut Self as *mut u32,
-                size_of::<VirtioBlkConfig>() / 4,
-            )
-        }
+    fn as_bytes_mut(&mut self) -> &mut [u8] {
+        unsafe { slice::from_raw_parts_mut(self as *mut Self as *mut u8, size_of::<Self>()) }
     }
 }
 
@@ -232,7 +223,7 @@ impl VirtIOBlkDevice {
 
             isr: AtomicU8::new(0),
 
-            host_feature: 0,
+            host_feature: VIRTIO_F_VERSION_1,
             guest_feature: 0,
 
             generation: 0,
@@ -283,11 +274,6 @@ impl VirtIOBlkDevice {
             .map_or((VirtioBlkReqType::Unsupported, 0u64), |req_type| {
                 (req_type, req.sector)
             })
-    }
-
-    fn config_word_index(byte_offset: u64) -> usize {
-        debug_assert_eq!(byte_offset % size_of::<u32>() as u64, 0);
-        (byte_offset / size_of::<u32>() as u64) as usize
     }
 }
 
@@ -427,12 +413,34 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
         1
     }
 
-    fn read_config(&mut self, idx: u64) -> u32 {
-        self.config_region.into_slice()[Self::config_word_index(idx)]
+    fn read_config(&mut self, offset: u64, len: u32) -> u64 {
+        let offset = offset as usize;
+        let len = len as usize;
+        let bytes = self.config_region.as_bytes();
+        if offset.checked_add(len).is_none_or(|end| end > bytes.len()) {
+            error!("virtio-blk config read out of range: offset={offset:#x}, len={len}");
+            return 0;
+        }
+
+        let mut value = 0u64;
+        for (idx, byte) in bytes[offset..offset + len].iter().enumerate() {
+            value |= (*byte as u64) << (idx * u8::BITS as usize);
+        }
+        value
     }
 
-    fn write_config(&mut self, idx: u64, data: u32) {
-        self.config_region.into_slice_mut()[Self::config_word_index(idx)] = data
+    fn write_config(&mut self, offset: u64, len: u32, data: u64) {
+        let offset = offset as usize;
+        let len = len as usize;
+        let bytes = self.config_region.as_bytes_mut();
+        if offset.checked_add(len).is_none_or(|end| end > bytes.len()) {
+            error!("virtio-blk config write out of range: offset={offset:#x}, len={len}");
+            return;
+        }
+
+        for (idx, byte) in bytes[offset..offset + len].iter_mut().enumerate() {
+            *byte = (data >> (idx * u8::BITS as usize)) as u8;
+        }
     }
 
     fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
@@ -457,12 +465,11 @@ pub struct VirtIOBlkDeviceBuilder {
 
 impl VirtIOBlkDeviceBuilder {
     pub fn new(ram_base_raw: *mut u8, file: String) -> Self {
-        let device_id = DEVICE_ID_ALLOCTOR.lock().unwrap().alloc();
         Self {
             device: VirtIOBlkDevice::new(
                 "Unnamed VirtIO Block Device",
                 ram_base_raw,
-                device_id,
+                VIRTIO_DEVICE_ID_BLOCK,
                 file,
             ),
         }

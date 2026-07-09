@@ -156,13 +156,9 @@ impl VirtQueueAvail {
             return None;
         }
 
-        *last_avail_idx = (old_idx + 1) % queue_num as u16;
-
-        if (old_idx as u32) < queue_num {
-            Some(self.ring(queue_num)[old_idx as usize])
-        } else {
-            None
-        }
+        let ring_idx = old_idx as usize % queue_num as usize;
+        *last_avail_idx = old_idx.wrapping_add(1);
+        Some(self.ring(queue_num)[ring_idx])
     }
 }
 
@@ -233,13 +229,13 @@ impl VirtQueueUsed {
     }
 
     fn insert_used(&mut self, queue_num: u32, elem: VirtQueueUsedElem) {
-        let mut idx = self.idx.load(std::sync::atomic::Ordering::Relaxed);
-        let old_idx = idx;
-        idx += 1;
-        idx %= queue_num as u16;
-        self.idx.store(idx, std::sync::atomic::Ordering::Relaxed);
-
-        self.ring(queue_num)[old_idx as usize] = elem;
+        let old_idx = self.idx.load(std::sync::atomic::Ordering::Relaxed);
+        let ring_idx = old_idx as usize % queue_num as usize;
+        self.ring(queue_num)[ring_idx] = elem;
+        self.idx.store(
+            old_idx.wrapping_add(1),
+            std::sync::atomic::Ordering::Release,
+        );
     }
 
     fn index_add(&self, val: u16) {
@@ -661,5 +657,58 @@ mod tests {
                 .unwrap(),
             0xcdef
         );
+    }
+
+    #[test]
+    fn test_virt_queue_indices_are_free_running() {
+        const QUEUE_NUM: usize = 2;
+        let mut ram = ram::Ram::new();
+        let ram_base = &mut ram[0] as *mut u8;
+        let mut virt_queue = VirtQueue::new(ram_base, QUEUE_NUM as u32);
+
+        let virtq_desc_base = 0x8000_2000 as u64;
+        let virtq_avail_base = 0x8000_2100 as u64;
+        let virtq_used_base = 0x8000_2200 as u64;
+        virt_queue.set_avail(virtq_avail_base);
+        virt_queue.set_desc(virtq_desc_base);
+        virt_queue.set_used(virtq_used_base);
+
+        let virt_queue_desc = unsafe {
+            slice::from_raw_parts_mut(
+                &mut ram[(virtq_desc_base - ram_config::BASE_ADDR) as usize] as *mut u8
+                    as *mut VirtQueueDesc,
+                QUEUE_NUM,
+            )
+        };
+        for (idx, desc) in virt_queue_desc.iter_mut().enumerate() {
+            desc.paddr = 0x8000_2300 + (idx as u64 * 0x10);
+            desc.len = 0x10;
+            desc.flags = VirtQueueDescFlag::empty();
+            desc.next = 0;
+        }
+
+        let virtq_avail = &mut ram[(virtq_avail_base - ram_config::BASE_ADDR) as usize] as *mut u8
+            as *mut VirtQueueAvail;
+        let virtq_avail = unsafe { virtq_avail.as_mut().unwrap() };
+        virtq_avail.init(VirtQueueAvailFlag::Default);
+        let avail_ring = VirtQueueAvail::mut_ring(virtq_avail as *mut _ as u64, QUEUE_NUM as u32);
+        avail_ring[0] = 0;
+        avail_ring[1] = 1;
+        virtq_avail.idx_store(3);
+
+        let virtq_used = &mut ram[(virtq_used_base - ram_config::BASE_ADDR) as usize] as *mut u8
+            as *mut VirtQueueUsed;
+        let virtq_used = unsafe { virtq_used.as_mut().unwrap() };
+        virtq_used.init(VirtQueueUsedFlag::Default);
+
+        for _ in 0..3 {
+            assert!(virt_queue.manage_one_request(|_, _| 0));
+        }
+        assert!(!virt_queue.manage_one_request(|_, _| 0));
+
+        assert_eq!(virt_queue.last_avail_idx, 3);
+        assert_eq!(virtq_used.get_index(), 3);
+        assert_eq!(virtq_used.ring(QUEUE_NUM as u32)[0].get_id(), 0);
+        assert_eq!(virtq_used.ring(QUEUE_NUM as u32)[1].get_id(), 1);
     }
 }
