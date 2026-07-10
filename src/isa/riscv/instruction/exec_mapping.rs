@@ -152,8 +152,10 @@ pub(in crate::isa::riscv) fn get_exec_func(
             PrivilegeLevel::V => unreachable!(),
         },
 
-        // We are executing in order, so don't need to do anything.
-        RiscvInstr::FENCE => exec_nop,
+        RiscvInstr::FENCE => |info, cpu| {
+            std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+            exec_nop(info, cpu)
+        },
 
         RiscvInstr::FENCE_I => |_info, cpu| {
             cpu.flush_icache();
