@@ -1,6 +1,6 @@
 use super::{CommandOutput, DbgInstrLine};
 use crate::{
-    config::arch_config::{REG_NAME, WordType},
+    config::arch_config::{REG_NAME, SignedWordType, WordType},
     isa::riscv::{
         RawInstr,
         csr_reg::{PrivilegeLevel, csr_macro::CSR_NAME},
@@ -108,8 +108,8 @@ impl OutputPalette {
         self.paint(csr, self.csr)
     }
 
-    fn instr(&self, instr: &str) -> String {
-        self.paint(instr, self.instruction)
+    fn instr(&self, instr: impl AsRef<str>) -> String {
+        self.paint(instr.as_ref(), self.instruction)
     }
 
     fn arrow(&self, ch: &str) -> String {
@@ -523,59 +523,194 @@ impl OutputPalette {
     fn format_raw(&self, raw: Option<RawInstr>) -> impl std::fmt::Display {
         use crate::isa::InstrLen;
         match raw {
-            Some(raw) if raw.len() == 2 => self.data(&format!("0x{:04x}", raw.val)).to_string(),
+            Some(raw) if raw.len() == 2 => self.data(&format!("0x{:04x}    ", raw.val)).to_string(),
             Some(raw) => self.data(&format!("0x{:08x}", raw.val)).to_string(),
             None => self.invalid("<invalid>").to_string(),
         }
     }
 
-    fn format_asm(&self, decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
-        if decode_instr.is_none() {
-            return format!("{}", self.invalid("<invalid instruction>"));
+    fn format_imm(&self, imm: WordType) -> String {
+        self.data(&(imm as SignedWordType).to_string())
+    }
+
+    fn format_csr_name(&self, addr: WordType) -> String {
+        match CSR_NAME.get(&addr) {
+            Some(name) => self.csr(name),
+            None => self.csr(&format!("csr[0x{addr:03x}]")),
         }
-        let DecodeInstr { instr, info, .. } = unsafe { decode_instr.unwrap_unchecked() };
+    }
+
+    fn format_pseudo_asm(&self, instr: RiscvInstr, info: RVInstrInfo) -> Option<String> {
+        use RVInstrInfo as Info;
+        use RiscvInstr::*;
+
+        let reg = |index: u8| self.reg(REG_NAME[index as usize], 0);
+        let mnemonic = |name: &str| self.instr(name);
+
+        match (instr, info) {
+            (
+                ADDI,
+                Info::I {
+                    rd: 0,
+                    rs1: 0,
+                    imm: 0,
+                },
+            ) => Some(mnemonic("nop")),
+            (ADDI, Info::I { rd, rs1, imm: 0 }) if rd != 0 && rs1 != 0 => {
+                Some(format!("{} {}, {}", mnemonic("mv"), reg(rd), reg(rs1),))
+            }
+            (ADDI, Info::I { rd, rs1: 0, imm }) if rd != 0 => Some(format!(
+                "{} {}, {}",
+                mnemonic("li"),
+                reg(rd),
+                self.format_imm(imm),
+            )),
+            (XORI, Info::I { rd, rs1, imm }) if rd != 0 && imm == WordType::MAX => {
+                Some(format!("{} {}, {}", mnemonic("not"), reg(rd), reg(rs1),))
+            }
+            (ADDIW, Info::I { rd, rs1, imm: 0 }) if rd != 0 => {
+                Some(format!("{} {}, {}", mnemonic("sext.w"), reg(rd), reg(rs1),))
+            }
+            (SLTIU, Info::I { rd, rs1, imm: 1 }) if rd != 0 => {
+                Some(format!("{} {}, {}", mnemonic("seqz"), reg(rd), reg(rs1),))
+            }
+            (SLTU, Info::R { rd, rs1: 0, rs2 }) if rd != 0 => {
+                Some(format!("{} {}, {}", mnemonic("snez"), reg(rd), reg(rs2),))
+            }
+            (SLT, Info::R { rd, rs1, rs2: 0 }) if rd != 0 => {
+                Some(format!("{} {}, {}", mnemonic("sltz"), reg(rd), reg(rs1),))
+            }
+            (SLT, Info::R { rd, rs1: 0, rs2 }) if rd != 0 => {
+                Some(format!("{} {}, {}", mnemonic("sgtz"), reg(rd), reg(rs2),))
+            }
+            (JAL, Info::J { rd: 0, imm }) => {
+                Some(format!("{} {}", mnemonic("j"), self.format_imm(imm)))
+            }
+            (
+                JALR,
+                Info::I {
+                    rd: 0,
+                    rs1: 1,
+                    imm: 0,
+                },
+            ) => Some(mnemonic("ret")),
+            (JALR, Info::I { rd: 0, rs1, imm: 0 }) => {
+                Some(format!("{} {}", mnemonic("jr"), reg(rs1)))
+            }
+            (CSRRWI | CSRRSI | CSRRCI, Info::I { rd: 0, rs1, imm }) => {
+                let name = match instr {
+                    CSRRWI => "csrwi",
+                    CSRRSI => "csrsi",
+                    CSRRCI => "csrci",
+                    _ => unreachable!(),
+                };
+                Some(format!(
+                    "{} {}, {}",
+                    mnemonic(name),
+                    self.format_csr_name(imm),
+                    self.data(&rs1.to_string()),
+                ))
+            }
+            (CSRRS, Info::I { rd, rs1: 0, imm }) => Some(format!(
+                "{} {}, {}",
+                mnemonic("csrr"),
+                reg(rd),
+                self.format_csr_name(imm),
+            )),
+            (CSRRW | CSRRS | CSRRC, Info::I { rd: 0, rs1, imm }) => {
+                let name = match instr {
+                    CSRRW => "csrw",
+                    CSRRS => "csrs",
+                    CSRRC => "csrc",
+                    _ => unreachable!(),
+                };
+                Some(format!(
+                    "{} {}, {}",
+                    mnemonic(name),
+                    self.format_csr_name(imm),
+                    reg(rs1),
+                ))
+            }
+            (SUB | SUBW, Info::R { rs1: 0, rs2, rd }) => Some(format!(
+                "{} {}, {}",
+                mnemonic(if instr == SUB { "neg" } else { "negw" }),
+                reg(rd),
+                reg(rs2),
+            )),
+            (BEQ | BNE | BLT | BGE, Info::B { rs1, rs2: 0, imm }) => {
+                let name = match instr {
+                    BEQ => "beqz",
+                    BNE => "bnez",
+                    BLT => "bltz",
+                    BGE => "bgez",
+                    _ => unreachable!(),
+                };
+                Some(format!(
+                    "{} {}, {}",
+                    mnemonic(name),
+                    reg(rs1),
+                    self.format_imm(imm),
+                ))
+            }
+            (BLT | BGE, Info::B { rs1: 0, rs2, imm }) => Some(format!(
+                "{} {}, {}",
+                mnemonic(if instr == BLT { "bgtz" } else { "blez" }),
+                reg(rs2),
+                self.format_imm(imm),
+            )),
+            _ => None,
+        }
+    }
+
+    fn format_asm(&self, decode_instr: Option<DecodeInstr>) -> impl std::fmt::Display {
+        let Some(DecodeInstr { instr, info, .. }) = decode_instr else {
+            return self.invalid("<invalid instruction>");
+        };
+        if let Some(pseudo) = self.format_pseudo_asm(instr, info) {
+            return pseudo;
+        }
+
+        use RiscvInstr::*;
+
         match info {
             RVInstrInfo::I { rd, rs1, imm } => match instr {
-                RiscvInstr::CSRRC | RiscvInstr::CSRRS | RiscvInstr::CSRRW => {
+                CSRRC | CSRRS | CSRRW => {
                     format!(
-                        "{} {},{},{}",
+                        "{} {}, {}, {}",
                         self.instr(instr.name()),
                         self.reg(REG_NAME[rd as usize], 0),
-                        self.csr(
-                            CSR_NAME
-                                .get(&imm)
-                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                        ),
+                        self.format_csr_name(imm),
                         self.reg(REG_NAME[rs1 as usize], 0),
                     )
                 }
-                RiscvInstr::CSRRCI | RiscvInstr::CSRRSI | RiscvInstr::CSRRWI => {
+                CSRRCI | CSRRSI | CSRRWI => {
                     format!(
-                        "{} {},{},{}",
+                        "{} {}, {}, {}",
                         self.instr(instr.name()),
                         self.reg(REG_NAME[rd as usize], 0),
-                        self.csr(
-                            CSR_NAME
-                                .get(&imm)
-                                .unwrap_or(&format!("csr[0x{:03x}]", imm).as_str())
-                        ),
+                        self.format_csr_name(imm),
                         self.data(rs1.to_string().as_str()),
                     )
                 }
-                _ => {
-                    format!(
-                        "{} {},{},{}",
-                        self.instr(instr.name()),
-                        self.reg(REG_NAME[rd as usize], 0),
-                        self.reg(REG_NAME[rs1 as usize], 0),
-                        self.data(imm.to_string().as_str()),
-                    )
-                }
+                LB | LBU | LH | LHU | LW | LWU | LD | FLW | FLD | JALR => format!(
+                    "{} {}, {}({})",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.format_imm(imm),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                ),
+                _ => format!(
+                    "{} {}, {}, {}",
+                    self.instr(instr.name()),
+                    self.reg(REG_NAME[rd as usize], 0),
+                    self.reg(REG_NAME[rs1 as usize], 0),
+                    self.format_imm(imm),
+                ),
             },
 
             RVInstrInfo::R { rs1, rs2, rd } => {
                 format!(
-                    "{} {},{},{}",
+                    "{} {}, {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
                     self.reg(REG_NAME[rs1 as usize], 0),
@@ -585,7 +720,7 @@ impl OutputPalette {
 
             RVInstrInfo::R_rm { rs1, rs2, rd, rm } => {
                 format!(
-                    "{} {},{},{} rm={}",
+                    "{} {}, {}, {}, rm={}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
                     self.reg(REG_NAME[rs1 as usize], 0),
@@ -602,7 +737,7 @@ impl OutputPalette {
                 rm,
             } => {
                 format!(
-                    "{} {},{},{},{} rm={}",
+                    "{} {}, {}, {}, {}, rm={}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
                     self.reg(REG_NAME[rs1 as usize], 0),
@@ -621,7 +756,7 @@ impl OutputPalette {
             } => {
                 if instr.name().starts_with("amo") {
                     format!(
-                        "{} {},{},({}) rl={}, aq={}",
+                        "{} {}, {}, ({}) rl={}, aq={}",
                         self.instr(instr.name()),
                         self.reg(REG_NAME[rd as usize], 0),
                         self.reg(REG_NAME[rs2 as usize], 0),
@@ -629,12 +764,21 @@ impl OutputPalette {
                         rl,
                         aq,
                     )
-                } else {
-                    // lr or sc
+                } else if instr.name().starts_with("lr") {
                     format!(
-                        "{} {},({}) rl={}, aq={}",
+                        "{} {}, ({}) rl={}, aq={}",
                         self.instr(instr.name()),
                         self.reg(REG_NAME[rd as usize], 0),
+                        self.reg(REG_NAME[rs1 as usize], 0),
+                        rl,
+                        aq,
+                    )
+                } else {
+                    format!(
+                        "{} {}, {}, ({}) rl={}, aq={}",
+                        self.instr(instr.name()),
+                        self.reg(REG_NAME[rd as usize], 0),
+                        self.reg(REG_NAME[rs2 as usize], 0),
                         self.reg(REG_NAME[rs1 as usize], 0),
                         rl,
                         aq,
@@ -644,35 +788,35 @@ impl OutputPalette {
 
             RVInstrInfo::B { rs1, rs2, imm } => {
                 format!(
-                    "{} {},{},{}",
+                    "{} {}, {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rs1 as usize], 0),
                     self.reg(REG_NAME[rs2 as usize], 0),
-                    self.data((imm >> 1).to_string().as_str())
+                    self.format_imm(imm)
                 )
             }
 
             RVInstrInfo::J { rd, imm } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
-                    self.data((imm >> 12).to_string().as_str())
+                    self.format_imm(imm)
                 )
             }
 
             RVInstrInfo::S { rs1, rs2, imm } => {
                 format!(
-                    "{} {},{},{}",
+                    "{} {}, {}({})",
                     self.instr(instr.name()),
-                    self.reg(REG_NAME[rs1 as usize], 0),
                     self.reg(REG_NAME[rs2 as usize], 0),
-                    self.data((imm).to_string().as_str())
+                    self.format_imm(imm),
+                    self.reg(REG_NAME[rs1 as usize], 0),
                 )
             }
             RVInstrInfo::U { rd, imm } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
                     self.data((imm >> 12).to_string().as_str())
@@ -694,7 +838,7 @@ impl OutputPalette {
 
             RVInstrInfo::CR { rd_rs1, rs2 } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd_rs1 as usize], 0),
                     self.reg(REG_NAME[rs2 as usize], 0),
@@ -703,54 +847,54 @@ impl OutputPalette {
 
             RVInstrInfo::CI { rd_rs1, imm } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd_rs1 as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                 )
             }
 
             RVInstrInfo::CSS { rs2, imm } => {
                 format!(
-                    "{} {},{}(sp)",
+                    "{} {}, {}(sp)",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rs2 as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                 )
             }
 
             RVInstrInfo::CIW { rd, imm } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                 )
             }
 
             RVInstrInfo::CL { rd, rs1, imm } => {
                 format!(
-                    "{} {},{}({})",
+                    "{} {}, {}({})",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                     self.reg(REG_NAME[rs1 as usize], 0),
                 )
             }
 
             RVInstrInfo::CS { rs1, rs2, imm } => {
                 format!(
-                    "{} {},{}({})",
+                    "{} {}, {}({})",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rs2 as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                     self.reg(REG_NAME[rs1 as usize], 0),
                 )
             }
 
             RVInstrInfo::CA { rd_rs1, rs2 } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd_rs1 as usize], 0),
                     self.reg(REG_NAME[rs2 as usize], 0),
@@ -759,24 +903,333 @@ impl OutputPalette {
 
             RVInstrInfo::CB { rd_rs1, imm } => {
                 format!(
-                    "{} {},{}",
+                    "{} {}, {}",
                     self.instr(instr.name()),
                     self.reg(REG_NAME[rd_rs1 as usize], 0),
-                    self.data(imm.to_string().as_str()),
+                    self.format_imm(imm),
                 )
             }
 
             RVInstrInfo::CJ { target } => {
-                format!(
-                    "{} {}",
-                    self.instr(instr.name()),
-                    self.data(target.to_string().as_str()),
-                )
+                format!("{} {}", self.instr(instr.name()), self.format_imm(target),)
             }
 
             RVInstrInfo::None => {
                 format!("{}", self.instr(instr.name()))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use RVInstrInfo as Info;
+    use RiscvInstr::*;
+
+    fn asm(instr: RiscvInstr, info: Info) -> String {
+        Printer::plain()
+            .output_palette
+            .format_asm(Some(DecodeInstr {
+                instr,
+                info,
+                len: 4,
+            }))
+            .to_string()
+    }
+
+    #[test]
+    fn format_asm_uses_conventional_memory_operands() {
+        let negative_offset = (-16 as SignedWordType) as WordType;
+
+        assert_eq!(
+            asm(
+                LW,
+                Info::I {
+                    rd: 10,
+                    rs1: 2,
+                    imm: negative_offset,
+                },
+            ),
+            "lw a0, -16(sp)"
+        );
+        assert_eq!(
+            asm(
+                SW,
+                Info::S {
+                    rs1: 2,
+                    rs2: 10,
+                    imm: 12,
+                },
+            ),
+            "sw a0, 12(sp)"
+        );
+    }
+
+    #[test]
+    fn format_asm_keeps_decoded_branch_and_jump_offsets() {
+        assert_eq!(
+            asm(
+                BEQ,
+                Info::B {
+                    rs1: 10,
+                    rs2: 11,
+                    imm: 24,
+                },
+            ),
+            "beq a0, a1, 24"
+        );
+        assert_eq!(asm(JAL, Info::J { rd: 1, imm: 4096 }), "jal ra, 4096");
+    }
+
+    #[test]
+    fn format_raw_aligns_compressed_and_regular_instructions() {
+        let palette = OutputPalette::new(false);
+
+        assert_eq!(
+            palette.format_raw(Some(0x0001.into())).to_string(),
+            "0x0001    "
+        );
+        assert_eq!(
+            palette.format_raw(Some(0x0000_0013.into())).to_string(),
+            "0x00000013"
+        );
+    }
+
+    #[test]
+    fn instruction_names_use_assembly_spelling() {
+        assert_eq!(C_ADDI.name(), "c.addi");
+    }
+
+    #[test]
+    fn format_asm_recognizes_common_pseudo_instructions() {
+        assert_eq!(
+            asm(
+                ADDI,
+                Info::I {
+                    rd: 0,
+                    rs1: 0,
+                    imm: 0,
+                },
+            ),
+            "nop"
+        );
+        assert_eq!(asm(JAL, Info::J { rd: 0, imm: 16 }), "j 16");
+        assert_eq!(
+            asm(
+                JALR,
+                Info::I {
+                    rd: 0,
+                    rs1: 1,
+                    imm: 0,
+                },
+            ),
+            "ret"
+        );
+        assert_eq!(
+            asm(
+                JALR,
+                Info::I {
+                    rd: 0,
+                    rs1: 5,
+                    imm: 0,
+                },
+            ),
+            "jr t0"
+        );
+        assert_eq!(
+            asm(
+                SUB,
+                Info::R {
+                    rd: 10,
+                    rs1: 0,
+                    rs2: 11,
+                },
+            ),
+            "neg a0, a1"
+        );
+        assert_eq!(
+            asm(
+                SUBW,
+                Info::R {
+                    rd: 10,
+                    rs1: 0,
+                    rs2: 11,
+                },
+            ),
+            "negw a0, a1"
+        );
+        for (instr, info, expected) in [
+            (
+                ADDI,
+                Info::I {
+                    rd: 10,
+                    rs1: 11,
+                    imm: 0,
+                },
+                "mv a0, a1",
+            ),
+            (
+                ADDI,
+                Info::I {
+                    rd: 10,
+                    rs1: 0,
+                    imm: 42,
+                },
+                "li a0, 42",
+            ),
+            (
+                XORI,
+                Info::I {
+                    rd: 10,
+                    rs1: 11,
+                    imm: WordType::MAX,
+                },
+                "not a0, a1",
+            ),
+            (
+                ADDIW,
+                Info::I {
+                    rd: 10,
+                    rs1: 11,
+                    imm: 0,
+                },
+                "sext.w a0, a1",
+            ),
+            (
+                SLTIU,
+                Info::I {
+                    rd: 10,
+                    rs1: 11,
+                    imm: 1,
+                },
+                "seqz a0, a1",
+            ),
+            (
+                SLTU,
+                Info::R {
+                    rd: 10,
+                    rs1: 0,
+                    rs2: 11,
+                },
+                "snez a0, a1",
+            ),
+            (
+                SLT,
+                Info::R {
+                    rd: 10,
+                    rs1: 11,
+                    rs2: 0,
+                },
+                "sltz a0, a1",
+            ),
+            (
+                SLT,
+                Info::R {
+                    rd: 10,
+                    rs1: 0,
+                    rs2: 11,
+                },
+                "sgtz a0, a1",
+            ),
+        ] {
+            assert_eq!(asm(instr, info), expected);
+        }
+    }
+
+    #[test]
+    fn format_asm_recognizes_csr_pseudo_instructions() {
+        let csr = 0xabc;
+
+        for (instr, expected) in [
+            (CSRRWI, "csrwi csr[0xabc], 3"),
+            (CSRRSI, "csrsi csr[0xabc], 3"),
+            (CSRRCI, "csrci csr[0xabc], 3"),
+        ] {
+            assert_eq!(
+                asm(
+                    instr,
+                    Info::I {
+                        rd: 0,
+                        rs1: 3,
+                        imm: csr,
+                    },
+                ),
+                expected
+            );
+        }
+
+        assert_eq!(
+            asm(
+                CSRRS,
+                Info::I {
+                    rd: 10,
+                    rs1: 0,
+                    imm: csr,
+                },
+            ),
+            "csrr a0, csr[0xabc]"
+        );
+        for (instr, expected) in [
+            (CSRRW, "csrw csr[0xabc], a0"),
+            (CSRRS, "csrs csr[0xabc], a0"),
+            (CSRRC, "csrc csr[0xabc], a0"),
+        ] {
+            assert_eq!(
+                asm(
+                    instr,
+                    Info::I {
+                        rd: 0,
+                        rs1: 10,
+                        imm: csr,
+                    },
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn format_asm_recognizes_zero_branch_pseudo_instructions() {
+        for (instr, expected) in [
+            (BEQ, "beqz a0, 12"),
+            (BNE, "bnez a0, 12"),
+            (BLT, "bltz a0, 12"),
+            (BGE, "bgez a0, 12"),
+        ] {
+            assert_eq!(
+                asm(
+                    instr,
+                    Info::B {
+                        rs1: 10,
+                        rs2: 0,
+                        imm: 12,
+                    },
+                ),
+                expected
+            );
+        }
+        assert_eq!(
+            asm(
+                BLT,
+                Info::B {
+                    rs1: 0,
+                    rs2: 10,
+                    imm: 12,
+                },
+            ),
+            "bgtz a0, 12"
+        );
+        assert_eq!(
+            asm(
+                BGE,
+                Info::B {
+                    rs1: 0,
+                    rs2: 10,
+                    imm: 12,
+                },
+            ),
+            "blez a0, 12"
+        );
     }
 }

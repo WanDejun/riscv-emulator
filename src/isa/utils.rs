@@ -8,10 +8,11 @@ macro_rules! define_instr_enum {
         }
 
         impl $isa_name {
-            pub fn name(&self) -> &'static str {
-                match self {
+            pub fn name(&self) -> String {
+                let name = match self {
                     $($isa_name::$name => stringify!($name)),*
-                }
+                };
+                name.to_ascii_lowercase().replace('_', ".")
             }
         }
     }
