@@ -106,6 +106,7 @@ struct RvdbSharedState {
     cycles: u64,
     regs: [u64; REGFILE_CNT],
     halted: bool,
+    continue_running: bool,
     pending_symbol_table: Option<SymTab>,
 }
 
@@ -116,6 +117,7 @@ impl RvdbSharedState {
             cycles: 0,
             regs: [0; REGFILE_CNT],
             halted: false,
+            continue_running: false,
             pending_symbol_table: None,
         }
     }
@@ -201,6 +203,8 @@ impl WasmRvdb {
         self.sync_shared_state();
 
         let shared = self.shared.clone();
+        let continue_command = self.rvdb.line_is_continue_command(&line);
+        shared.borrow_mut().continue_running = continue_command;
         let response = self
             .rvdb
             .execute_line_with_hook(&line, |session| {
@@ -208,6 +212,7 @@ impl WasmRvdb {
             })
             .await;
 
+        self.shared.borrow_mut().continue_running = false;
         self.sync_shared_state();
 
         response
@@ -228,6 +233,10 @@ impl WasmRvdb {
 impl WasmRvdbHandle {
     pub fn push_repl_input(&mut self, input: &[u8]) {
         self.channel.push_input(input);
+    }
+
+    pub fn cancel_continue(&mut self) {
+        self.channel.cancel_continue();
     }
 
     pub fn take_repl_output(&mut self) -> Vec<u8> {
@@ -252,6 +261,10 @@ impl WasmRvdbHandle {
 
     pub fn is_halted(&self) -> bool {
         self.shared.borrow().halted
+    }
+
+    pub fn is_continue_running(&self) -> bool {
+        self.shared.borrow().continue_running
     }
 
     pub fn clock_cycles(&self) -> u64 {

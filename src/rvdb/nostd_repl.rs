@@ -76,6 +76,10 @@ impl RvdbChannelTx {
     pub fn take_output(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.state.borrow_mut().output)
     }
+
+    pub fn cancel_continue(&mut self) {
+        self.state.borrow_mut().cancel = true;
+    }
 }
 
 pub struct RvdbChannelRx {
@@ -166,6 +170,20 @@ impl<B: Board> NostdREPL<B> {
     pub async fn readline(&mut self) -> Result<String, NolineError> {
         let line = self.editor.readline(PROMPT, &mut self.channel).await?;
         Ok(line.to_owned())
+    }
+
+    pub fn line_is_continue_command(&self, line: &str) -> bool {
+        let mut line = line.trim();
+        if line.is_empty() {
+            if let Some(last) = &self.last_line {
+                line = last.as_str();
+            }
+        }
+
+        matches!(
+            self.session.parse_line(line),
+            Ok(RvdbCommand::Continue { .. })
+        )
     }
 
     pub async fn execute_line(&mut self, line: &str) -> Result<REPLResponse, String> {
