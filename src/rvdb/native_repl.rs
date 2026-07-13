@@ -131,7 +131,8 @@ mod test {
     #[test]
     fn drop_should_not_hang() {
         should_success_within(Duration::from_millis(100), || {
-            let _repl = NativeREPL::new(VirtBoard::from_binary(&[]));
+            let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+            let _repl = NativeREPL::new(board);
         });
     }
 }

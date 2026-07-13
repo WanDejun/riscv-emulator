@@ -15,6 +15,7 @@ use crate::{
     background::BackgroundExecutor,
     board::{Board, BoardStatus},
     byte_io::{ByteSinkExt, ByteSource},
+    config::arch_config::WordType,
     device::{
         self, DeviceTrait, IdAllocator,
         aclint::Clint,
@@ -34,14 +35,18 @@ use crate::{
         },
     },
     device_poller::DevicePoller,
-    isa::riscv::{
-        decoder::Decoder,
-        executor::RVCPU,
-        mmu::VirtAddrManager,
-        trap::{Exception, Interrupt},
+    isa::{
+        DebugTarget,
+        riscv::{
+            decoder::Decoder,
+            executor::RVCPU,
+            mmu::VirtAddrManager,
+            trap::{Exception, Interrupt},
+        },
     },
     load::{ELFLoader, load_bin},
     ram::Ram,
+    ram_config,
     vclock::{Timer, VirtualClockRef},
 };
 
@@ -56,10 +61,24 @@ pub trait RiscvIRQSource {
     fn set_irq_line(&mut self, line: IRQLine, id: usize);
 }
 
+#[derive(Debug)]
+pub struct MemoryImage {
+    pub address: WordType,
+    pub data: Vec<u8>,
+}
+
+impl MemoryImage {
+    pub fn new(address: WordType, data: Vec<u8>) -> Self {
+        Self { address, data }
+    }
+}
+
 #[derive(Default)]
 pub struct VirtBoardConfig {
     decoder: Option<Decoder>,
     virtio_devices: Vec<DeviceConfig>,
+    memory_images: Vec<MemoryImage>,
+    initial_registers: Vec<(u8, WordType)>,
 }
 
 impl VirtBoardConfig {
@@ -74,6 +93,17 @@ impl VirtBoardConfig {
 
     pub fn with_virtio_devices(mut self, devices: Vec<DeviceConfig>) -> Self {
         self.virtio_devices = devices;
+        self
+    }
+
+    /// Load an additional image into guest physical RAM **after** the primary ELF/binary is loaded.
+    pub fn with_memory_image(mut self, image: MemoryImage) -> Self {
+        self.memory_images.push(image);
+        self
+    }
+
+    pub fn with_reg(mut self, register: u8, value: WordType) -> Self {
+        self.initial_registers.push((register, value));
         self
     }
 }
@@ -107,6 +137,7 @@ pub struct RVBoardBuilder {
     device_poller: DevicePoller,
     background: BackgroundExecutor,
     decoder: Option<Decoder>,
+    initial_registers: Vec<(u8, WordType)>,
 }
 
 impl RVBoardBuilder {
@@ -121,6 +152,7 @@ impl RVBoardBuilder {
             device_poller: DevicePoller::new(plic_irq_tx, plic_irq_rx),
             background: BackgroundExecutor::new(),
             decoder: None,
+            initial_registers: Vec::new(),
         }
     }
 
@@ -154,6 +186,11 @@ impl RVBoardBuilder {
 
     pub fn add_virtio_devices(mut self, devices: Vec<DeviceConfig>) -> Self {
         self.virtio_devices.extend(devices);
+        self
+    }
+
+    pub fn with_initial_registers(mut self, registers: Vec<(u8, WordType)>) -> Self {
+        self.initial_registers = registers;
         self
     }
 
@@ -253,6 +290,10 @@ impl RVBoardBuilder {
         let decoder = self.decoder.take().unwrap_or_else(Decoder::new);
         let mut cpu = Box::pin(RVCPU::from_decoder(decoder, vaddr_manager));
 
+        for (register, value) in self.initial_registers {
+            cpu.write_reg(register, value);
+        }
+
         // register irq line for timer.
         clint.borrow_mut().set_irq_line(
             IRQLine::new(
@@ -331,50 +372,67 @@ pub struct VirtBoard {
 }
 
 impl VirtBoard {
-    // TODO: return error
-    pub fn from_binary(bytes: &[u8]) -> Self {
-        Self::from_binary_with_config(bytes, VirtBoardConfig::new())
-    }
-
-    pub fn from_binary_with_config(bytes: &[u8], config: VirtBoardConfig) -> Self {
+    pub fn from_binary_with(bytes: &[u8], config: VirtBoardConfig) -> Result<Self, String> {
         let mut ram = Ram::new();
         load_bin(&mut ram, bytes);
-        Self::from_ram_with_config(ram, config)
+        Self::from_ram_with(ram, config)
     }
 
-    pub fn try_from_elf(bytes: Vec<u8>) -> Result<Self, String> {
-        Self::try_from_elf_with_config(bytes, VirtBoardConfig::new())
+    pub fn from_elf(bytes: Vec<u8>) -> Result<Self, String> {
+        Self::from_elf_with(bytes, VirtBoardConfig::new())
     }
 
-    pub fn try_from_elf_with_config(
-        bytes: Vec<u8>,
-        config: VirtBoardConfig,
-    ) -> Result<Self, String> {
+    pub fn from_elf_with(bytes: Vec<u8>, config: VirtBoardConfig) -> Result<Self, String> {
         let mut ram = Ram::new();
         let loader = ELFLoader::try_new(bytes).ok_or_else(|| "Invalid ELF file".to_string())?;
         loader.load_to_ram(&mut ram);
-        let mut board = Self::from_ram_with_config(ram, config);
+        let mut board = Self::from_ram_with(ram, config)?;
         board.loader = Some(loader);
         Ok(board)
     }
 
-    pub fn from_ram(ram: Ram) -> Self {
-        Self::from_ram_with_config(ram, VirtBoardConfig::new())
-    }
+    pub fn from_ram_with(mut ram: Ram, config: VirtBoardConfig) -> Result<Self, String> {
+        let VirtBoardConfig {
+            decoder,
+            virtio_devices,
+            memory_images,
+            initial_registers,
+        } = config;
 
-    pub fn from_ram_with_config(ram: Ram, config: VirtBoardConfig) -> Self {
+        for image in memory_images {
+            let offset = image
+                .address
+                .checked_sub(ram_config::BASE_ADDR)
+                .ok_or_else(|| {
+                    format!(
+                        "memory image address 0x{:x} is below RAM base 0x{:x}",
+                        image.address,
+                        ram_config::BASE_ADDR
+                    )
+                })?;
+            ram.try_insert_section(&image.data, offset)
+                .map_err(|error| {
+                    format!(
+                        "failed to load memory image at 0x{:x}: {error}",
+                        image.address
+                    )
+                })?;
+        }
+
         let mut builder = RVBoardBuilder::new();
 
-        if let Some(decoder) = config.decoder {
+        if let Some(decoder) = decoder {
             builder = builder.with_decoder(decoder);
         }
 
-        builder = builder.add_virtio_devices(config.virtio_devices);
+        builder = builder
+            .add_virtio_devices(virtio_devices)
+            .with_initial_registers(initial_registers);
 
         #[cfg(feature = "test-device")]
         let builder = builder.add_plic_device(Rc::new(RefCell::new(TestDevice::new())));
 
-        builder.build(ram)
+        Ok(builder.build(ram))
     }
 
     pub fn push_uart_input(&mut self, bytes: &[u8]) {
@@ -469,9 +527,38 @@ mod tests {
             ram.write::<u32>(4 * i, 0x13).unwrap(); // NOP
         }
 
-        let mut board = VirtBoard::from_ram(ram);
+        let mut board = VirtBoard::from_ram_with(ram, VirtBoardConfig::new()).unwrap();
         board.cpu.debug_csr(csr_index::mtvec, Some(0x8000_2000));
         board
+    }
+
+    #[test]
+    fn test_memory_image_and_initial_register_config() {
+        use crate::isa::riscv::debugger::Address;
+
+        let image_address = ram_config::BASE_ADDR + 0x2000;
+        let image_offset = image_address - ram_config::BASE_ADDR;
+        let image = vec![0xd0, 0x0d, 0xfe, 0xed];
+        let original = vec![0xaa; image.len()];
+        let mut ram = Ram::new();
+        ram.try_insert_section(&original, image_offset).unwrap();
+
+        let config = VirtBoardConfig::new()
+            .with_memory_image(MemoryImage::new(image_address, image.clone()))
+            .with_reg(11, image_address);
+
+        let mut board = VirtBoard::from_ram_with(ram, config).unwrap();
+
+        assert_eq!(board.cpu.read_reg(11), image_address);
+        for (offset, expected) in image.into_iter().enumerate() {
+            assert_eq!(
+                board
+                    .cpu
+                    .read_memory::<u8>(Address::Phys(image_address as u64 + offset as u64))
+                    .unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

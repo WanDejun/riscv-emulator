@@ -36,7 +36,6 @@ build-opensbi: build-dtb build-linux
 		CROSS_COMPILE="$(CROSS_COMPILE)" \
 		PLATFORM_RISCV_ISA="$(PLATFORM_RISCV_ISA)" \
 		FW_PAYLOAD_PATH="$(LINUX_IMAGE)" \
-		FW_FDT_PATH="$(DTB_FILE)" \
 		FW_PAYLOAD_FDT_ADDR="$(FW_PAYLOAD_FDT_ADDR)"
 	@test -f "$(FW_BIN)" || (echo "error: missing $(FW_BIN)"; exit 1)
 
@@ -47,10 +46,10 @@ linux-qemu-gdb: build-opensbi
 	qemu-system-riscv64 -M virt -m 8G -nographic -bios "$(FW_BIN)" -s -S
 
 linux: build-opensbi
-	cargo run --release -- "$(FW_BIN)" $(RVEMU_ARGS)
+	cargo run --release -- "$(FW_BIN)" --dtb "$(DTB_FILE)" --dtb-address "$(FW_PAYLOAD_FDT_ADDR)" $(RVEMU_ARGS)
 
 linux-debug: build-opensbi
-	cargo run --release -- "$(FW_BIN)" -g $(RVEMU_ARGS)
+	cargo run --release -- "$(FW_BIN)" --dtb "$(DTB_FILE)" --dtb-address "$(FW_PAYLOAD_FDT_ADDR)" -g $(RVEMU_ARGS)
 
 linux-gdb: build-opensbi
-	cargo run --release -- "$(FW_BIN)" -G $(RVEMU_ARGS)
+	cargo run --release -- "$(FW_BIN)" --dtb "$(DTB_FILE)" --dtb-address "$(FW_PAYLOAD_FDT_ADDR)" -G $(RVEMU_ARGS)

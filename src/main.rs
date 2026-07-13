@@ -19,7 +19,8 @@ use riscv_emulator::isa::riscv::isa_builder::DEFAULT_ISA;
 use riscv_emulator::rvdb::NativeREPL;
 use riscv_emulator::{
     DeviceConfig,
-    board::virt::{VirtBoard, VirtBoardConfig},
+    board::virt::{MemoryImage, VirtBoard, VirtBoardConfig},
+    config::arch_config::WordType,
 };
 
 use crate::{logging::LogLevel, welcome::display_welcome_message};
@@ -33,6 +34,24 @@ enum TargetFormat {
     Auto,
     Elf,
     Bin,
+}
+
+const DEFAULT_DTB_ADDRESS: WordType = 0x9f00_0000;
+
+fn parse_address(value: &str) -> Result<WordType, String> {
+    let value = value.trim();
+    let normalized = value.replace('_', "");
+    let parsed = if let Some(hex) = normalized
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16)
+    } else {
+        normalized.parse::<u64>()
+    }
+    .map_err(|error| format!("invalid address {value:?}: {error}"))?;
+
+    WordType::try_from(parsed).map_err(|_| format!("address {value:?} does not fit WordType"))
 }
 
 fn display_device_list(devices: &Vec<DeviceConfig>) {
@@ -92,6 +111,14 @@ struct Args {
     /// Maximum cycles to execute before aborting (0 means no limit).
     #[arg(long = "max-cycles", default_value_t = 0)]
     max_cycles: u64,
+
+    /// Load a device tree blob and pass its guest physical address to OpenSBI in a1.
+    #[arg(long = "dtb")]
+    dtb: Option<std::path::PathBuf>,
+
+    /// Guest physical address at which to load --dtb (default: 0x9f000000).
+    #[arg(long = "dtb-address", requires = "dtb", value_parser = parse_address)]
+    dtb_address: Option<WordType>,
 }
 
 /// Used for riscv-arch-test.
@@ -196,9 +223,29 @@ fn main() {
         eprintln!("Invalid ISA string {:?}: {}", cli_args.isa, e);
         std::process::exit(2);
     });
-    let board_config = VirtBoardConfig::new()
+    let mut board_config = VirtBoardConfig::new()
         .with_decoder(decoder)
         .with_virtio_devices(cli_args.devices.clone());
+
+    if let Some(dtb_path) = &cli_args.dtb {
+        let dtb_address = cli_args.dtb_address.unwrap_or(DEFAULT_DTB_ADDRESS);
+        assert!(
+            dtb_address.is_multiple_of(8),
+            "DTB address 0x{dtb_address:x} must be 8-byte aligned"
+        );
+        let dtb = std::fs::read(dtb_path)
+            .unwrap_or_else(|error| panic!("Failed to read DTB {}: {error}", dtb_path.display()));
+        board_config = board_config
+            .with_memory_image(MemoryImage::new(dtb_address, dtb))
+            .with_reg(11, dtb_address);
+
+        if cli_args.verbose {
+            println!(
+                "DTB {} will be loaded at 0x{dtb_address:x} and passed in a1\r",
+                dtb_path.display()
+            );
+        }
+    }
 
     let ext = cli_args
         .path
@@ -212,7 +259,7 @@ fn main() {
                 println!("ELF file detected\r");
             }
             let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
-            VirtBoard::try_from_elf_with_config(bytes, board_config).expect("ELF load failed")
+            VirtBoard::from_elf_with(bytes, board_config).expect("ELF load failed")
         }
 
         (TargetFormat::Bin, _) | (TargetFormat::Auto, "bin") => {
@@ -220,7 +267,7 @@ fn main() {
                 println!("Binary file detected\r");
             }
             let bytes = std::fs::read(cli_args.path.clone()).expect("Failed to read target file");
-            VirtBoard::from_binary_with_config(&bytes, board_config)
+            VirtBoard::from_binary_with(&bytes, board_config).expect("Binary load failed")
         }
 
         _ => {

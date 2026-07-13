@@ -529,7 +529,8 @@ mod tests {
     #[test]
     #[cfg(feature = "riscv64")]
     fn test_regs_range_does_not_overflow() {
-        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+        let mut session = RvdbSession::new(board);
         assert!(matches!(
             session.handle_command(RvdbCommand::Print(PrintCmd::Regs {
                 start: u8::MAX,
@@ -544,7 +545,7 @@ mod tests {
         for half in instrs {
             bytes.extend_from_slice(&half.to_le_bytes());
         }
-        VirtBoard::from_binary(&bytes)
+        VirtBoard::from_binary_with(&bytes, Default::default()).unwrap()
     }
 
     #[test]
@@ -602,7 +603,8 @@ mod tests {
 
     #[test]
     fn test_breakpoint_ops() {
-        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+        let mut session = RvdbSession::new(board);
 
         const ADDR: WordType = 0x80001000;
 
@@ -660,7 +662,8 @@ mod tests {
 
     #[test]
     fn test_info_breakpoints_preserves_address_space() {
-        let mut session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+        let mut session = RvdbSession::new(board);
 
         const ADDR: WordType = 0x80001000;
 
@@ -700,7 +703,8 @@ mod tests {
 
     #[test]
     fn parse_commands() {
-        let session = RvdbSession::new(VirtBoard::from_binary(&[]));
+        let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+        let session = RvdbSession::new(board);
         assert_eq!(
             session.parse_line("p pc").unwrap(),
             RvdbCommand::Print(PrintCmd::Pc)

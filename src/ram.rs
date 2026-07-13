@@ -8,6 +8,21 @@ use crate::{
     utils::{read_raw_ptr, write_raw_ptr},
 };
 
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum RamImageError {
+    #[error("RAM image address overflow: start=0x{start:x}, size=0x{size:x}")]
+    AddressOverflow { start: WordType, size: usize },
+
+    #[error(
+        "RAM image is out of range: start=0x{start:x}, size=0x{size:x}, RAM size=0x{ram_size:x}"
+    )]
+    OutOfRange {
+        start: WordType,
+        size: usize,
+        ram_size: usize,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Reservation {
     addr: WordType,
@@ -73,28 +88,44 @@ impl Ram {
         }
     }
 
-    pub fn insert_section(&mut self, elf_section_data: &[u8], start_addr: WordType) {
-        let Some(end_addr) = (start_addr as usize).checked_add(elf_section_data.len()) else {
-            log::error!(
-                "ram::insert_section address overflow! start_addr = {}, len = {}",
-                start_addr,
-                elf_section_data.len()
-            );
-            panic!();
+    // TODO: physical address should be `u64` instead of `WordType`.
+    pub fn try_insert_section(
+        &mut self,
+        section_data: &[u8],
+        start_addr: WordType,
+    ) -> Result<(), RamImageError> {
+        let Ok(start_addr_usize) = usize::try_from(start_addr) else {
+            return Err(RamImageError::AddressOverflow {
+                start: start_addr,
+                size: section_data.len(),
+            });
+        };
+        let Some(end_addr) = start_addr_usize.checked_add(section_data.len()) else {
+            return Err(RamImageError::AddressOverflow {
+                start: start_addr,
+                size: section_data.len(),
+            });
         };
         if end_addr > ram_config::SIZE {
-            log::error!(
-                "ram::insert_section out of range! start_addr = {}, len = {}",
-                start_addr,
-                elf_section_data.len()
-            );
-            panic!();
+            return Err(RamImageError::OutOfRange {
+                start: start_addr,
+                size: section_data.len(),
+                ram_size: ram_config::SIZE,
+            });
         }
 
-        let start_addr = start_addr as usize;
-        elf_section_data.iter().enumerate().for_each(|(index, v)| {
-            self.data[start_addr + index] = *v;
+        section_data.iter().enumerate().for_each(|(index, v)| {
+            self.data[start_addr_usize + index] = *v;
         });
+
+        Ok(())
+    }
+
+    pub fn insert_section(&mut self, section_data: &[u8], start_addr: WordType) {
+        if let Err(error) = self.try_insert_section(section_data, start_addr) {
+            log::error!("ram::insert_section failed: {error}");
+            panic!("{error}");
+        }
     }
 
     pub fn read<T>(&self, addr: WordType) -> Result<T, MemError> {

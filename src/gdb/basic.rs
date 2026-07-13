@@ -230,7 +230,8 @@ mod tests {
 
     #[test]
     fn read_addrs_fails_when_any_byte_is_unreadable() {
-        let mut debugger = GdbDebugger::new(VirtBoard::from_binary(&[]));
+        let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
+        let mut debugger = GdbDebugger::new(board);
         let mut data = [0xaa; 4];
 
         assert!(SingleThreadBase::read_addrs(&mut debugger, 0, &mut data).is_err());

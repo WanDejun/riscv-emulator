@@ -29,8 +29,7 @@ fn bench_emulator_run(c: &mut Criterion) {
                 let bench_name = format!("load_and_run_{}", name);
                 group.bench_function(&bench_name, move |b| {
                     b.iter(|| {
-                        let mut board =
-                            VirtBoard::try_from_elf(std::fs::read(&path).unwrap()).unwrap();
+                        let mut board = VirtBoard::from_elf(std::fs::read(&path).unwrap()).unwrap();
                         while board.status() != BoardStatus::Halt {
                             board.step().unwrap();
                         }

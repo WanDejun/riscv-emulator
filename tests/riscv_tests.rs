@@ -46,7 +46,7 @@ fn run_test(elf_path: &Path) -> bool {
     let result = std::panic::catch_unwind(|| {
         let mut timeout = false;
         let mut run_result = false;
-        let mut board = VirtBoard::try_from_elf(std::fs::read(elf_path).unwrap()).unwrap();
+        let mut board = VirtBoard::from_elf(std::fs::read(elf_path).unwrap()).unwrap();
         let tohost: WordType = board.loader().unwrap().get_section_addr(".tohost").unwrap();
 
         while board.status() != BoardStatus::Halt {

@@ -26,15 +26,15 @@ pub struct WasmEmulator {
 #[wasm_bindgen]
 impl WasmEmulator {
     pub fn from_elf_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let inner = VirtBoard::try_from_elf(bytes.to_vec())
+        let inner = VirtBoard::from_elf(bytes.to_vec())
             .map_err(|e| JsValue::from_str(&format!("ELF load failed: {e}")))?;
         Ok(Self { inner })
     }
 
-    pub fn from_bin_bytes(bytes: &[u8]) -> Self {
-        Self {
-            inner: VirtBoard::from_binary(bytes),
-        }
+    pub fn from_bin_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
+        let inner = VirtBoard::from_binary_with(bytes, Default::default())
+            .map_err(|e| JsValue::from_str(&format!("binary load failed: {e}")))?;
+        Ok(Self { inner })
     }
 
     pub async fn into_rvdb(self) -> WasmRvdb {
@@ -173,14 +173,15 @@ impl WasmRvdb {
 #[wasm_bindgen]
 impl WasmRvdb {
     pub async fn from_elf_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let board = VirtBoard::try_from_elf(bytes.to_vec())
+        let board = VirtBoard::from_elf(bytes.to_vec())
             .map_err(|e| JsValue::from_str(&format!("ELF load failed: {e}")))?;
         Ok(Self::from_board(board).await)
     }
 
-    pub async fn from_bin_bytes(bytes: &[u8]) -> Self {
-        // TODO: return error once `VirtBoard::from_binary` do
-        Self::from_board(VirtBoard::from_binary(bytes)).await
+    pub async fn from_bin_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
+        let board = VirtBoard::from_binary_with(bytes, Default::default())
+            .map_err(|e| JsValue::from_str(&format!("binary load failed: {e}")))?;
+        Ok(Self::from_board(board).await)
     }
 
     pub fn handle(&self) -> WasmRvdbHandle {
