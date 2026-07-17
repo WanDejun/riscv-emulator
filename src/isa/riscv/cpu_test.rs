@@ -2,10 +2,119 @@ use std::{f32, thread};
 
 use super::*;
 use crate::{
-    isa::riscv::{cpu_tester::*, csr_reg::csr_index, vector::VLEN},
+    isa::riscv::{
+        cpu_tester::*,
+        csr_reg::{
+            NamedCsrReg, csr_index,
+            csr_macro::{Mcause, Mcycle, Mepc, Minstret, Mtvec},
+        },
+        vector::VLEN,
+    },
     ram_config,
     utils::{UnsignedInteger, negative_of, sign_extend},
 };
+
+#[test]
+fn test_step_batch_executes_requested_cycles() {
+    let mut cpu = TestCPUBuilder::new()
+        .mem_base(0, 0x0000_0013_u32)
+        .mem_base(4, 0x0000_0013_u32)
+        .mem_base(8, 0x0000_0013_u32)
+        .build();
+
+    cpu.step_batch(3);
+
+    assert_eq!(cpu.pc, ram_config::BASE_ADDR + 12);
+    assert_eq!(cpu.csr.get_by_type_existing::<Mcycle>().data(), 3);
+    assert_eq!(cpu.csr.get_by_type_existing::<Minstret>().data(), 3);
+}
+
+#[test]
+fn test_step_batch_debug_stops_without_affecting_normal_execution() {
+    struct StopAfterTwo(Vec<(WordType, Option<RawInstr>, Option<DecodeInstr>)>);
+
+    impl ExecutionHook for StopAfterTwo {
+        type CycleContext = (WordType, Option<RawInstr>, Option<DecodeInstr>);
+
+        fn before_step(&mut self, cpu: &mut RVCPU) -> Self::CycleContext {
+            let pc = cpu.pc;
+            let raw = cpu
+                .memory
+                .debug_ifetch::<u32>(pc, &mut cpu.csr)
+                .ok()
+                .map(RawInstr::from);
+            (pc, raw, raw.and_then(|raw| cpu.decoder.decode(raw)))
+        }
+
+        fn on_interrupt_taken(&mut self, pc: WordType) -> Self::CycleContext {
+            (pc, None, None)
+        }
+
+        fn after_step(&mut self, context: Self::CycleContext, _cpu: &mut RVCPU) -> bool {
+            self.0.push(context);
+            self.0.len() == 2
+        }
+    }
+
+    let build_cpu = || {
+        TestCPUBuilder::new()
+            .mem_base(0, 0x0010_8093_u32) // addi x1, x1, 1
+            .mem_base(4, 0x0010_8093_u32)
+            .mem_base(8, 0x0010_8093_u32)
+            .build()
+    };
+    let mut normal = build_cpu();
+    let mut debug = build_cpu();
+
+    normal.step_batch(2);
+    let mut hook = StopAfterTwo(Vec::new());
+    let result = debug.step_batch_with_hook(3, &mut hook);
+
+    assert_eq!(result.cycles, 2);
+    assert!(result.hook_stopped);
+    assert_eq!(debug.pc, normal.pc);
+    assert_eq!(debug.reg_file[1], normal.reg_file[1]);
+    assert_eq!(debug.csr.get_by_type_existing::<Mcycle>().data(), 2);
+    assert_eq!(hook.0[0].0, ram_config::BASE_ADDR);
+    assert_eq!(hook.0[1].0, ram_config::BASE_ADDR + 4);
+    assert!(hook.0.iter().all(|step| step.1.is_some()));
+    assert!(hook.0.iter().all(|step| step.2.is_some()));
+}
+
+#[test]
+fn test_step_batch_zero_is_noop() {
+    let mut cpu = TestCPUBuilder::new().build();
+    let pc = cpu.pc;
+
+    cpu.step_batch(0);
+
+    assert_eq!(cpu.pc, pc);
+    assert_eq!(cpu.csr.get_by_type_existing::<Mcycle>().data(), 0);
+}
+
+#[test]
+fn test_step_batch_continues_after_exception() {
+    let handler = ram_config::BASE_ADDR + 0x100;
+    let mut cpu = TestCPUBuilder::new()
+        .mem_base(0, 0xffff_ffff_u32)
+        .mem_base(0x100, 0x0010_8093_u32) // addi x1, x1, 1
+        .mem_base(0x104, 0x0010_8093_u32)
+        .csr(Mtvec::get_index(), handler)
+        .build();
+
+    cpu.step_batch(3);
+
+    assert_eq!(cpu.reg_file[1], 2);
+    assert_eq!(cpu.pc, handler + 8);
+    assert_eq!(
+        cpu.csr.get_by_type_existing::<Mcause>().data(),
+        Exception::IllegalInstruction.into()
+    );
+    assert_eq!(
+        cpu.csr.get_by_type_existing::<Mepc>().data(),
+        ram_config::BASE_ADDR
+    );
+}
 
 #[test]
 fn test_exec_arith() {
@@ -712,8 +821,8 @@ fn test_amo() {
 
         // The target address increases every 2 steps.
         for _ in 0..CNT {
-            cpu.step().unwrap();
-            cpu.step().unwrap();
+            cpu.step();
+            cpu.step();
             print!("B");
         }
     });

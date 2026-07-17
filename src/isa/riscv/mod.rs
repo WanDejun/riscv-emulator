@@ -24,7 +24,6 @@ impl ISATypes for RiscvTypes {
     type RawInstr = RawInstr;
     type ISADesc = RVInstrDesc;
     type DecodeRst = DecodeInstr;
-    type StepException = trap::Exception;
     type CPU = RVCPU;
 }
 

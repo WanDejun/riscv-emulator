@@ -39,9 +39,9 @@ use crate::{
         DebugTarget,
         riscv::{
             decoder::Decoder,
-            executor::RVCPU,
+            executor::{BatchResult, ExecutionHook, RVCPU},
             mmu::VirtAddrManager,
-            trap::{Exception, Interrupt},
+            trap::Interrupt,
         },
     },
     load::{ELFLoader, load_bin},
@@ -126,8 +126,6 @@ impl IRQLine {
         unsafe { &mut *self.target }.handle_irq(self.interrupt_nr, level);
     }
 }
-
-const PLIC_FREQUENCY_DIVISION: usize = 128;
 
 pub struct RVBoardBuilder {
     extra_plic_devices: Vec<Rc<RefCell<dyn DeviceTrait>>>,
@@ -340,7 +338,6 @@ impl RVBoardBuilder {
             device_poller: self.device_poller,
             clint,
             plic,
-            plic_freq_counter: 0,
             uart_port: uart_port1,
 
             status: BoardStatus::Running,
@@ -364,12 +361,12 @@ pub struct VirtBoard {
     // interrupt manager.
     pub clint: Rc<RefCell<Clint>>,
     pub plic: Rc<RefCell<PLIC>>,
-    pub plic_freq_counter: usize,
-
     pub uart_port: UartBytePort,
 
     status: BoardStatus,
 }
+
+const STEP_BATCH_CYCLES: u64 = 1024;
 
 impl VirtBoard {
     pub fn from_binary_with(bytes: &[u8], config: VirtBoardConfig) -> Result<Self, String> {
@@ -448,37 +445,67 @@ impl VirtBoard {
     pub fn uart_port(&self) -> UartBytePort {
         self.uart_port.clone()
     }
+
+    fn prepare_cpu_batch(&mut self) {
+        unsafe { self.timer.as_mut_unchecked() }.tick();
+        self.background.poll_if_single_thread_mode();
+        self.device_poller.trigger_external_interrupt();
+        self.plic.borrow_mut().update_context_irq_line(0);
+        self.plic.borrow_mut().update_context_irq_line(1);
+    }
+
+    fn finish_cpu_batch(&mut self, cycles: u64) {
+        self.clock.advance(cycles);
+        // TODO: We can simply read from `PowerManager` if VirtBoard owns `PowerManager`.
+        if POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
+            cold_path();
+            self.cpu.power_off();
+            self.status = BoardStatus::Halt;
+            log::info!("Total cycles: {}", self.clock.now());
+        }
+    }
+
+    #[inline]
+    fn step_batch_with_hook<H: ExecutionHook>(&mut self, cycles: u64, hook: &mut H) -> BatchResult {
+        if self.status != BoardStatus::Running {
+            return BatchResult {
+                cycles: 0,
+                hook_stopped: false,
+            };
+        }
+
+        self.prepare_cpu_batch();
+        let result = self.cpu.step_batch_with_hook(cycles, hook);
+        self.finish_cpu_batch(result.cycles);
+        result
+    }
 }
 
 impl Board for VirtBoard {
-    fn step(&mut self) -> Result<(), Exception> {
-        self.plic_freq_counter += 1;
-        if self.plic_freq_counter >= PLIC_FREQUENCY_DIVISION {
-            self.plic_freq_counter = 0;
+    fn step_cycles_with_hook<H: ExecutionHook>(
+        &mut self,
+        cycles: u64,
+        hook: &mut H,
+    ) -> BatchResult {
+        let mut executed = 0;
 
-            self.background.poll_if_single_thread_mode();
-            self.device_poller.trigger_external_interrupt();
+        while executed < cycles && self.status == BoardStatus::Running {
+            let batch_cycles = (cycles - executed).min(STEP_BATCH_CYCLES);
+            let result = self.step_batch_with_hook(batch_cycles, hook);
+            executed += result.cycles;
 
-            self.plic.borrow_mut().update_context_irq_line(0);
-            self.plic.borrow_mut().update_context_irq_line(1);
+            if result.hook_stopped {
+                return BatchResult {
+                    cycles: executed,
+                    hook_stopped: true,
+                };
+            }
         }
 
-        self.cpu.step()?;
-        self.clock.advance(1);
-
-        // TODO: We can simply read from `PowerManager` if VirtBoard owns `PowerManager`.
-        if self.clock.now() % 32 == 0 && POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
-            cold_path();
-            self.cpu.power_off()?;
-
-            self.status = BoardStatus::Halt;
-
-            log::info!("Total cycles: {}", self.clock.now());
+        BatchResult {
+            cycles: executed,
+            hook_stopped: false,
         }
-
-        unsafe { self.timer.as_mut_unchecked() }.tick();
-
-        Ok(())
     }
 
     fn status(&self) -> BoardStatus {
@@ -530,6 +557,18 @@ mod tests {
         let mut board = VirtBoard::from_ram_with(ram, VirtBoardConfig::new()).unwrap();
         board.cpu.debug_csr(csr_index::mtvec, Some(0x8000_2000));
         board
+    }
+
+    #[test]
+    fn test_step_cycles_advances_board_clock() {
+        let mut board = create_test_board();
+        let requested = STEP_BATCH_CYCLES + 3;
+
+        let executed = board.step_cycles(requested);
+
+        assert_eq!(executed, requested);
+        assert_eq!(board.clock.now(), requested);
+        assert_eq!(board.cpu.read_pc(), ram_config::BASE_ADDR + requested * 4);
     }
 
     #[test]
@@ -621,7 +660,7 @@ mod tests {
 
         let mut reach_mtvec = false;
         for i in 0..128 {
-            board.step().unwrap();
+            board.step();
 
             let pc = board.cpu_mut().read_pc();
 
@@ -653,7 +692,7 @@ mod tests {
             clint.write_u64(0x0, 1).unwrap();
         }
 
-        board.step().unwrap();
+        board.step();
         assert!(board.cpu_mut().read_pc() == interrupt_handler_addr);
 
         let mcause = board
@@ -725,7 +764,7 @@ mod tests {
         sleep(Duration::from_millis(20));
 
         for _ in 0..200 {
-            assert!(board.step().is_ok());
+            board.step();
         }
 
         let meip = 1 << 11;

@@ -14,8 +14,6 @@ use std::net::TcpStream;
 use crate::isa::riscv::csr_reg::NamedCsrReg;
 use crate::isa::riscv::csr_reg::csr_macro::CSR_NAME;
 use crate::isa::riscv::csr_reg::csr_macro::Misa;
-use crate::isa::riscv::debugger::Debugger;
-
 #[cfg(unix)]
 use std::os::unix::net::UnixListener;
 #[cfg(unix)]
@@ -48,15 +46,9 @@ impl<B: Board> run_blocking::BlockingEventLoop for EmuGdbEventLoop<B> {
             <Self::Connection as Connection>::Error,
         >,
     > {
-        let has_input = |dbg: &mut Debugger<B>| {
-            if dbg.cycle() % 1024 == 0 {
-                conn.peek().map(|b| b.is_some()).unwrap_or(true)
-            } else {
-                false
-            }
-        };
+        let has_input = || conn.peek().map(|b| b.is_some()).unwrap_or(true);
 
-        let dbg_event = target.run_by_mode_until(has_input);
+        let dbg_event = target.run_by_mode_with_batch_check(has_input);
 
         let event = match dbg_event {
             RunEvent::IncomingData => {

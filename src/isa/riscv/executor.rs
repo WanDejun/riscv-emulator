@@ -4,7 +4,6 @@ use crate::{
     board::virt::RiscvIRQHandler,
     config::arch_config::WordType,
     cpu::RegFile,
-    device::MemError,
     fpu::soft_float::SoftFPU,
     isa::{
         InstrLen,
@@ -15,45 +14,48 @@ use crate::{
             decoder::{DecodeInstr, Decoder},
             instruction::{RVInstrInfo, exec_mapping::get_exec_func, instr_table::RiscvInstr},
             mmu::VirtAddrManager,
-            trap::{Exception, Interrupt, Trap, trap_controller::TrapController},
+            trap::{Exception, Interrupt, trap_controller::TrapController},
             vector::Vector,
         },
     },
     ram_config::DEFAULT_PC_VALUE,
-    utils::make_mask,
 };
 
-#[derive(Clone)]
-pub struct ExcuteInstrInfo {
-    pub instr: Option<DecodeInstr>,
-    pub trap: bool,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatchResult {
+    pub cycles: u64,
+    pub hook_stopped: bool,
 }
 
-impl ExcuteInstrInfo {
-    pub fn new() -> Self {
-        Self {
-            instr: None,
-            trap: false,
-        }
-    }
+pub trait ExecutionHook {
+    /// Per-cycle data carried from before execution to [`ExecutionHook::after_step`].
+    type CycleContext;
+
+    fn before_step(&mut self, cpu: &mut RVCPU) -> Self::CycleContext;
+    fn on_interrupt_taken(&mut self, interrupted_pc: WordType) -> Self::CycleContext;
+
+    /// Return `true` to stop the current batch after this cycle.
+    fn after_step(&mut self, context: Self::CycleContext, cpu: &mut RVCPU) -> bool;
 }
 
-pub(crate) struct DebugInfo {
-    pub(crate) last_instr: ExcuteInstrInfo,
-}
+pub(crate) struct NoopExecutionHook;
 
-impl DebugInfo {
-    pub fn new() -> Self {
-        Self {
-            last_instr: ExcuteInstrInfo::new(),
-        }
+impl ExecutionHook for NoopExecutionHook {
+    type CycleContext = ();
+
+    #[inline(always)]
+    fn before_step(&mut self, _cpu: &mut RVCPU) {}
+
+    #[inline(always)]
+    fn on_interrupt_taken(&mut self, _interrupted_pc: WordType) {}
+
+    #[inline(always)]
+    fn after_step(&mut self, _context: (), _cpu: &mut RVCPU) -> bool {
+        false
     }
 }
 
 pub struct RVCPU {
-    pub(crate) debug: bool,
-    pub(crate) debug_info: DebugInfo,
-
     pub(super) reg_file: RegFile,
     pub(super) memory: VirtAddrManager,
     pub(super) pc: WordType,
@@ -68,6 +70,12 @@ pub struct RVCPU {
 
     /// The trap value pending to be written to `mtval`/`stval`.
     pub(super) pending_tval: Option<WordType>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExceptionInfo {
+    cause: Exception,
+    tval: WordType,
 }
 
 impl Drop for RVCPU {
@@ -109,8 +117,6 @@ impl RVCPU {
         let fpu = SoftFPU::from(true);
 
         Self {
-            debug: false,
-            debug_info: DebugInfo::new(),
             reg_file: RegFile::new(),
             memory: v_memory,
             pc: DEFAULT_PC_VALUE,
@@ -129,9 +135,6 @@ impl RVCPU {
         instr: RiscvInstr,
         info: RVInstrInfo,
     ) -> Result<(), Exception> {
-        // Replacing function-pointer dispatch in `get_exec_func` with immediate call to the execution function,
-        // makes the program 10%-20% slower on my machine.
-        // This is likely because it hurts jump-table dispatch and pulls some cold paths into the hot path.
         let rst = get_exec_func(instr)(info, self);
         self.reg_file[0] = 0;
 
@@ -190,24 +193,87 @@ impl RVCPU {
         Ok(())
     }
 
-    pub fn step(&mut self) -> Result<(), Exception> {
-        if self.debug {
-            self.debug_info.last_instr.trap = false;
-        }
-
-        let rst = self.step_impl();
-
-        let mcycle = self.csr.get_by_type_existing::<Mcycle>();
-        mcycle.set_mcycle_directly(mcycle.data().wrapping_add(1));
-
-        debug_assert!(self.pending_tval.is_none());
-
-        rst
+    /// Execute one cycle. This may be slower than batching; prefer
+    /// [`RVCPU::step_batch`] or [`RVCPU::step_batch_with_hook`] when possible.
+    pub fn step(&mut self) {
+        self.step_batch(1);
     }
 
-    fn ifetch(&mut self) -> Result<RawInstr, MemError> {
+    pub fn step_batch(&mut self, cycles: u64) {
+        let mut hook = NoopExecutionHook;
+        self.step_batch_with_hook(cycles, &mut hook);
+    }
+
+    pub fn step_batch_with_hook<H: ExecutionHook>(
+        &mut self,
+        cycles: u64,
+        hook: &mut H,
+    ) -> BatchResult {
+        if cycles == 0 {
+            return BatchResult {
+                cycles: 0,
+                hook_stopped: false,
+            };
+        }
+
+        let mut executed = 0;
+        while executed < cycles {
+            // TODO: By design, interrupts should be checked once per batch, but doing so currently
+            // causes issues when linux poweroff for reasons that have not yet been identified.
+            let interrupt_pc = self.pc;
+            if TrapController::try_take_interrupt(self).is_some() {
+                let context = hook.on_interrupt_taken(interrupt_pc);
+                self.increment_mcycle();
+                executed += 1;
+
+                if hook.after_step(context, self) {
+                    return BatchResult {
+                        cycles: executed,
+                        hook_stopped: true,
+                    };
+                }
+
+                if executed >= cycles {
+                    break;
+                }
+            }
+
+            let context = hook.before_step(self);
+            self.step_impl();
+            self.increment_mcycle();
+            executed += 1;
+
+            debug_assert!(self.pending_tval.is_none());
+
+            if hook.after_step(context, self) {
+                return BatchResult {
+                    cycles: executed,
+                    hook_stopped: true,
+                };
+            }
+        }
+
+        BatchResult {
+            cycles: executed,
+            hook_stopped: false,
+        }
+    }
+
+    fn increment_mcycle(&mut self) {
+        let mcycle = self.csr.get_by_type_existing::<Mcycle>();
+        mcycle.set_mcycle_directly(mcycle.data().wrapping_add(1));
+    }
+
+    fn ifetch(&mut self) -> Result<RawInstr, ExceptionInfo> {
         let mut bytes: RawInstr =
-            (self.memory.ifetch::<u16>(self.pc, &mut self.csr)? as u32).into();
+            (self
+                .memory
+                .ifetch::<u16>(self.pc, &mut self.csr)
+                .map_err(|err| ExceptionInfo {
+                    cause: Exception::from_instr_fetch_err(err),
+                    tval: self.pc,
+                })? as u32)
+                .into();
 
         if bytes.len() == 4 {
             // 32-bit instr.
@@ -219,8 +285,10 @@ impl RVCPU {
             let next_half = match self.memory.ifetch::<u16>(self.pc + 2, &mut self.csr) {
                 Ok(half) => half as u32,
                 Err(err) => {
-                    self.pending_tval = Some(self.pc + 2);
-                    return Err(err);
+                    return Err(ExceptionInfo {
+                        cause: Exception::from_instr_fetch_err(err),
+                        tval: self.pc.wrapping_add(2),
+                    });
                 }
             };
             bytes.val |= next_half << 16;
@@ -229,68 +297,43 @@ impl RVCPU {
         Ok(bytes)
     }
 
-    fn step_impl(&mut self) -> Result<(), Exception> {
-        if let Some(interrupt) = TrapController::has_interrupt(self) {
-            if TrapController::try_send_trap_signal(self, Trap::Interrupt(interrupt), 0) {
-                return Ok(());
-            }
-        }
-
-        let DecodeInstr { instr, info, len } = if let Some(decode_instr) = self.icache.get(self.pc)
-        {
+    fn step_impl(&mut self) {
+        let DecodeInstr {
+            instr,
+            info,
+            len: _,
+        } = if let Some(decode_instr) = self.icache.get(self.pc) {
             decode_instr
         } else {
             let raw_instr = match self.ifetch() {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    TrapController::try_send_trap_signal(
-                        self,
-                        Trap::Exception(Exception::from_instr_fetch_err(err)),
-                        self.pc,
-                    );
-                    return Ok(());
+                    TrapController::take_exception(self, err.cause, err.tval);
+                    return;
                 }
             };
 
             // ID
 
-            // TODO: We have to support C.nop for riscv-arch-test,
-            // while currently we don't support the C extension.
-            // So a temparary workaround is added here.
-            if (raw_instr.val & (make_mask(13, 15) | make_mask(7, 11) | 0b11) as u32) == 0x0001 {
-                self.pc = self.pc.wrapping_add(2);
-                return Ok(());
-            }
-
             let decoder_result = self.decoder.decode(raw_instr);
             let Some(decode_instr) = decoder_result else {
+                cold_path();
                 log::warn!(
                     "Illegal instruction: {:#x} at {:#x}",
                     raw_instr.val,
                     self.pc
                 );
-                TrapController::try_send_trap_signal(
+                TrapController::take_exception(
                     self,
-                    Trap::Exception(Exception::IllegalInstruction),
+                    Exception::IllegalInstruction,
                     raw_instr.val as WordType,
                 );
-                return Ok(());
+                return;
             };
 
             self.icache.put(self.pc, decode_instr.clone());
             decode_instr
         };
-
-        if self.debug {
-            self.debug_info.last_instr = ExcuteInstrInfo {
-                instr: Some(DecodeInstr {
-                    instr,
-                    info: info.clone(),
-                    len,
-                }),
-                trap: false,
-            };
-        }
 
         // EX && MEM && WB
         let excute_result = self.execute(instr, info);
@@ -305,19 +348,18 @@ impl RVCPU {
                 // because the raw instruction bytes are not stored in the i-cache.
                 // This is acceptable because `illegal instruction` is a cold path.
                 let raw_instr = self.ifetch().expect("ifetch should not fail here");
-                TrapController::try_send_trap_signal(
+                TrapController::take_exception(
                     self,
-                    Trap::Exception(Exception::IllegalInstruction),
+                    Exception::IllegalInstruction,
                     raw_instr.val as WordType,
                 );
             }
             Err(nr) => {
-                TrapController::try_send_trap_signal(self, Trap::Exception(nr), 0);
+                let tval = self.pending_tval.take().unwrap_or(0);
+                TrapController::take_exception(self, nr, tval);
             }
-            Ok(()) => {} // there is nothing to do.
+            Ok(()) => {}
         }
-
-        return Ok(());
     }
 
     pub fn flush_icache(&mut self) {
@@ -328,9 +370,8 @@ impl RVCPU {
         self.memory.flush_tlb();
     }
 
-    pub fn power_off(&mut self) -> Result<(), Exception> {
+    pub fn power_off(&mut self) {
         self.memory.sync();
-        Ok(())
     }
 }
 

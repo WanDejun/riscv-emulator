@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use crate::{
     config::arch_config::WordType,
     device::MemError,
@@ -38,8 +36,6 @@ pub trait DebugTarget<I: ISATypes> {
 
     fn debug_csr(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType>;
 
-    fn step(&mut self) -> Result<(), I::StepException>;
-
     fn decoded_instr(&self, instr: I::RawInstr) -> Option<I::DecodeRst>;
 }
 
@@ -56,6 +52,5 @@ pub trait ISATypes: Sized {
     type RawInstr: Copy + InstrLen;
     type ISADesc;
     type DecodeRst: Clone + Copy;
-    type StepException: Debug;
     type CPU: DebugTarget<Self>;
 }

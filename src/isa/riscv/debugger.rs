@@ -15,10 +15,9 @@ use crate::{
             RawInstr, RiscvTypes,
             csr_reg::{NamedCsrReg, PrivilegeLevel, csr_macro::Mcycle},
             decoder::DecodeInstr,
-            executor::{ExcuteInstrInfo, RVCPU},
+            executor::{ExecutionHook, RVCPU},
             instruction::{RVInstrInfo, instr_table::RiscvInstr},
             mmu::{AccessType, PageTableError},
-            trap::Exception,
         },
     },
     load::SymTab,
@@ -34,9 +33,6 @@ pub enum DebugEvent {
 
 #[derive(thiserror::Error, Debug)]
 pub enum DebugError {
-    #[error("target exception: {0}")]
-    TargetException(<RiscvTypes as ISATypes>::StepException),
-
     #[error("memory error: {0}")]
     MemoryError(MemError),
 
@@ -131,10 +127,6 @@ impl DebugTarget<RiscvTypes> for RVCPU {
     /// }
     fn debug_csr(&mut self, addr: WordType, new_value: Option<WordType>) -> Option<WordType> {
         self.csr.debug(addr, new_value)
-    }
-
-    fn step(&mut self) -> Result<(), Exception> {
-        RVCPU::step(self)
     }
 
     fn decoded_instr(&self, instr: RawInstr) -> Option<DecodeInstr> {
@@ -317,6 +309,123 @@ impl FtraceState {
 
 const MAX_HISTORY: usize = 1024;
 
+struct DebugCycle {
+    pc: WordType,
+    raw_instr: Option<RawInstr>,
+    decoded_instr: Option<DecodeInstr>,
+}
+
+struct DebuggerExecutionHook<'a> {
+    breakpoints: &'a [Breakpoint],
+    history: &'a mut VecDeque<(WordType, Option<RawInstr>)>,
+    ftrace: &'a mut FtraceState,
+    symtab: Option<&'a SymTab>,
+}
+
+fn ftrace_for_step(
+    symtab: Option<&SymTab>,
+    decoded_instr: Option<DecodeInstr>,
+    pc: WordType,
+) -> Option<FuncTrace> {
+    let Some(DecodeInstr {
+        instr: instr_kind,
+        info,
+        ..
+    }) = decoded_instr
+    else {
+        return None;
+    };
+
+    let in_symbol = symtab.and_then(|table| table.func_name_in_addr_range(pc as u64).cloned());
+    let exact_symbol = symtab.and_then(|table| table.func_name_by_addr(pc as u64).cloned());
+
+    if instr_kind == RiscvInstr::JALR
+        && let RVInstrInfo::I { rs1, rd, imm } = info
+    {
+        if rd == 0 && rs1 == 1 && imm == 0 {
+            return Some(FuncTrace::Return {
+                name: in_symbol,
+                addr: pc,
+            });
+        } else if rd == 1 && rs1 == 1 {
+            return Some(FuncTrace::Call {
+                name: exact_symbol,
+                addr: pc,
+            });
+        } else if rd == 0 && rs1 == 6 {
+            return Some(FuncTrace::Call {
+                name: in_symbol,
+                addr: pc,
+            });
+        }
+    } else if instr_kind == RiscvInstr::JAL
+        && let RVInstrInfo::J { imm: _, rd } = info
+        && rd == 1
+    {
+        return Some(FuncTrace::Call {
+            name: exact_symbol,
+            addr: pc,
+        });
+    }
+
+    None
+}
+
+fn cpu_on_breakpoint(breakpoints: &[Breakpoint], cpu: &mut RVCPU) -> bool {
+    let pc = cpu.read_pc();
+    if breakpoints
+        .iter()
+        .any(|bp| matches!(bp.addr, Address::Virt(addr) if addr == pc))
+    {
+        return true;
+    }
+
+    let Ok(pc_paddr) = cpu.debug_vaddr_to_paddr(pc) else {
+        return false;
+    };
+    breakpoints
+        .iter()
+        .any(|bp| matches!(bp.addr, Address::Phys(addr) if addr == pc_paddr))
+}
+
+impl ExecutionHook for DebuggerExecutionHook<'_> {
+    type CycleContext = DebugCycle;
+
+    fn before_step(&mut self, cpu: &mut RVCPU) -> DebugCycle {
+        let pc = cpu.read_pc();
+        let raw_instr = cpu.read_instr(pc).ok();
+        let decoded_instr = raw_instr.and_then(|raw| cpu.decoded_instr(raw));
+        DebugCycle {
+            pc,
+            raw_instr,
+            decoded_instr,
+        }
+    }
+
+    fn on_interrupt_taken(&mut self, pc: WordType) -> DebugCycle {
+        DebugCycle {
+            pc,
+            raw_instr: None,
+            decoded_instr: None,
+        }
+    }
+
+    fn after_step(&mut self, cycle: DebugCycle, cpu: &mut RVCPU) -> bool {
+        if self.history.len() == MAX_HISTORY {
+            self.history.pop_front();
+        }
+        self.history.push_back((cycle.pc, cycle.raw_instr));
+
+        if self.ftrace.enabled()
+            && let Some(trace) = ftrace_for_step(self.symtab, cycle.decoded_instr, cpu.read_pc())
+        {
+            self.ftrace.record(trace);
+        }
+
+        cpu_on_breakpoint(self.breakpoints, cpu)
+    }
+}
+
 pub struct Debugger<B: Board> {
     breakpoints: Vec<Breakpoint>,
     board: B,
@@ -334,13 +443,11 @@ impl<B: Board> Debugger<B> {
         &mut self.board
     }
 
-    pub fn into_board(mut self) -> B {
-        self.board.cpu_mut().debug = false;
+    pub fn into_board(self) -> B {
         self.board
     }
 
-    pub fn new(mut board: B) -> Self {
-        board.cpu_mut().debug = true;
+    pub fn new(board: B) -> Self {
         let symtab = board.loader().and_then(|loader| loader.get_symbol_table());
 
         Self {
@@ -356,71 +463,9 @@ impl<B: Board> Debugger<B> {
         self.symtab = Some(symtab);
     }
 
-    /// TODO: Use `last_instr_info` for performance.
-    /// FIXME: History may be incorrect if we have interrupts, use `last_instr_info`.
-    fn push_history(&mut self) {
-        if self.history.len() == MAX_HISTORY {
-            self.history.pop_front();
-        }
-        let pc = self.read_pc();
-        let instr = self.read_instr(pc);
-        self.history.push_back((pc, instr));
-    }
-
     /// Get the latest k history.
     pub fn pc_history(&self, k: usize) -> impl Iterator<Item = (WordType, Option<RawInstr>)> {
         self.history.iter().copied().rev().take(k).rev()
-    }
-
-    pub fn curr_ftrace(&self) -> Option<FuncTrace> {
-        let Some(DecodeInstr {
-            instr: instr_kind,
-            info,
-            ..
-        }) = self.last_instr_info().instr
-        else {
-            return None;
-        };
-
-        let pc = self.read_pc();
-        let in_symbol = self.symbol_in_addr_range(pc).ok().cloned();
-        let exact_symbol = self.symbol_by_addr(pc).ok().cloned();
-
-        if instr_kind == RiscvInstr::JALR
-            && let RVInstrInfo::I { rs1, rd, imm } = info
-        {
-            if rd == 0 && rs1 == 1 && imm == 0 {
-                // `jalr zero, 0(ra)` -> `ret`
-                return Some(FuncTrace::Return {
-                    name: in_symbol,
-                    addr: pc,
-                });
-            } else if rd == 1 && rs1 == 1 {
-                // jalr ra, imm(ra) -> `call`
-                return Some(FuncTrace::Call {
-                    name: exact_symbol,
-                    addr: pc,
-                });
-            } else if rd == 0 && rs1 == 6 {
-                // jalr zero, imm(x6) -> `tail`
-                return Some(FuncTrace::Call {
-                    name: in_symbol,
-                    addr: pc,
-                });
-            }
-        } else if instr_kind == RiscvInstr::JAL
-            && let RVInstrInfo::J { imm: _, rd } = info
-        {
-            if rd == 1 {
-                // jal ra, imm -> `call`
-                return Some(FuncTrace::Call {
-                    name: exact_symbol,
-                    addr: pc,
-                });
-            }
-        }
-
-        None
     }
 
     pub fn ftrace_start(&mut self) {
@@ -506,58 +551,33 @@ impl<B: Board> Debugger<B> {
     }
 
     pub fn on_breakpoint(&mut self) -> bool {
-        let pc = self.read_pc();
-        if let Ok(pc_paddr) = self.board.cpu_mut().debug_vaddr_to_paddr(pc) {
-            // TOOD: Totally useless clone to bypass the borrow checker, because `unify_to_phys_addr` needs a mutable reference now
-            self.breakpoints
-                .clone()
-                .iter()
-                .find(|bp| self.unify_to_phys_addr(bp.addr) == Some(pc_paddr))
-                .is_some()
-        } else {
-            false
-        }
+        cpu_on_breakpoint(&self.breakpoints, self.board.cpu_mut())
     }
 
     pub fn step(&mut self) -> Result<DebugEvent, DebugError> {
         self.continue_until_step(1).map(|(event, _steps)| event)
     }
 
-    fn cpu_step_internal(&mut self) -> Result<(), DebugError> {
-        self.push_history();
-
-        let rst = self
-            .board
-            .step()
-            .map_err(|e| DebugError::TargetException(e));
-
-        if self.ftrace_enabled() {
-            if let Some(ftrace) = self.curr_ftrace() {
-                self.ftrace.record(ftrace);
-            }
-        }
-
-        rst
-    }
-
-    /// Return `Ok(None)` if the condition is met, otherwise return `Ok(Some(DebugEvent))` for the event that causes the stop.
-    pub fn continue_until(
+    /// Continue execution in batches, checking `should_pause` between batches.
+    ///
+    /// Return `Ok(None)` when `should_pause` requests a pause, otherwise return
+    /// the debug event that stopped execution.
+    pub(crate) fn continue_with_batch_check(
         &mut self,
-        mut cond: impl FnMut(&mut Self) -> bool,
+        mut should_pause: impl FnMut() -> bool,
     ) -> Result<Option<DebugEvent>, DebugError> {
         loop {
             if self.board.status() == crate::board::BoardStatus::Halt {
                 return Ok(Some(DebugEvent::BoardHalted));
             }
 
-            if cond(self) {
+            if should_pause() {
                 return Ok(None);
             }
 
-            self.cpu_step_internal()?;
-
-            if self.on_breakpoint() {
-                return Ok(Some(DebugEvent::BreakpointHit));
+            let (event, _) = self.continue_until_step(1024)?;
+            if event != DebugEvent::StepCompleted {
+                return Ok(Some(event));
             }
         }
     }
@@ -565,34 +585,33 @@ impl<B: Board> Debugger<B> {
     /// Continue running until a breakpoint is hit, `max_steps` steps are executed or the board is halted.
     /// Returns the event that caused the stop and the actual steps executed.
     pub fn continue_until_step(&mut self, max_steps: u64) -> Result<(DebugEvent, u64), DebugError> {
-        let mut remain = max_steps;
-
-        loop {
-            if remain == 0 {
-                return Ok((DebugEvent::StepCompleted, max_steps));
-            }
-
-            if self.board.status() == crate::board::BoardStatus::Halt {
-                return Ok((DebugEvent::BoardHalted, max_steps - remain));
-            }
-
-            self.cpu_step_internal()?;
-
-            remain -= 1;
-
-            if self.on_breakpoint() {
-                return Ok((DebugEvent::BreakpointHit, max_steps - remain));
-            }
+        if max_steps == 0 {
+            return Ok((DebugEvent::StepCompleted, 0));
         }
+        if self.board.status() == crate::board::BoardStatus::Halt {
+            return Ok((DebugEvent::BoardHalted, 0));
+        }
+
+        let mut hook = DebuggerExecutionHook {
+            breakpoints: &self.breakpoints,
+            history: &mut self.history,
+            ftrace: &mut self.ftrace,
+            symtab: self.symtab.as_ref(),
+        };
+        let result = self.board.step_cycles_with_hook(max_steps, &mut hook);
+        let event = if result.hook_stopped {
+            DebugEvent::BreakpointHit
+        } else if self.board.status() == crate::board::BoardStatus::Halt {
+            DebugEvent::BoardHalted
+        } else {
+            DebugEvent::StepCompleted
+        };
+        Ok((event, result.cycles))
     }
 
     /// See [`Self::continue_until_step`].
     pub fn continue_run(&mut self) -> Result<(DebugEvent, u64), DebugError> {
         self.continue_until_step(u64::MAX)
-    }
-
-    pub fn last_instr_info(&self) -> ExcuteInstrInfo {
-        self.board.cpu().debug_info.last_instr.clone()
     }
 
     pub fn next_instr(&mut self) -> Option<RawInstr> {
@@ -712,8 +731,12 @@ mod test {
     }
 
     impl Board for TestEmptyBoard {
-        fn step(&mut self) -> Result<(), Exception> {
-            self.cpu.step()
+        fn step_cycles_with_hook<H: ExecutionHook>(
+            &mut self,
+            steps: u64,
+            hook: &mut H,
+        ) -> crate::isa::riscv::executor::BatchResult {
+            self.cpu.step_batch_with_hook(steps, hook)
         }
 
         fn status(&self) -> crate::board::BoardStatus {

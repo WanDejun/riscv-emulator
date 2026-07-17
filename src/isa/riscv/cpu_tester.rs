@@ -279,7 +279,7 @@ where
     }
     let mut cpu = builder.build();
     for _ in 0..raw_instrs.len() {
-        cpu.step().unwrap()
+        cpu.step();
     }
     check(CPUChecker::new(&mut cpu));
 }

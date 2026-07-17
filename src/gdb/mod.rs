@@ -35,10 +35,10 @@ impl<B: Board> GdbDebugger<B> {
         }
     }
 
-    fn run_by_mode_until<F: FnMut(&mut Debugger<B>) -> bool>(&mut self, condition: F) -> RunEvent {
+    fn run_by_mode_with_batch_check<F: FnMut() -> bool>(&mut self, should_pause: F) -> RunEvent {
         match self.exec_mode {
             ExecMode::Step => RunEvent::StopReason(self.dbg.step().unwrap()),
-            ExecMode::Continue => match self.dbg.continue_until(condition).unwrap() {
+            ExecMode::Continue => match self.dbg.continue_with_batch_check(should_pause).unwrap() {
                 Some(event) => RunEvent::StopReason(event),
                 None => RunEvent::IncomingData,
             },

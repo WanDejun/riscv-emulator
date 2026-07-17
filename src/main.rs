@@ -302,19 +302,16 @@ fn main() {
         crossterm::terminal::enable_raw_mode().unwrap();
 
         let now = Instant::now();
-        loop {
-            if board.status() == riscv_emulator::board::BoardStatus::Halt {
-                break;
-            }
-
-            if let Err(e) = board.step() {
-                log::error!("Error occurred while running emulator: {:?}\r", e);
-                break;
-            }
-
-            if cli_args.max_cycles != 0 && board.clock.now() >= cli_args.max_cycles {
-                log::error!("Max cycles reached: {}", cli_args.max_cycles);
-                break;
+        if cli_args.max_cycles == 0 {
+            board.run();
+        } else {
+            board.step_cycles(cli_args.max_cycles);
+            if board.status() != riscv_emulator::board::BoardStatus::Halt {
+                log::error!(
+                    "Max cycles reached: {} at pc {}",
+                    cli_args.max_cycles,
+                    board.cpu().read_pc()
+                );
             }
         }
         crossterm::terminal::disable_raw_mode().unwrap();

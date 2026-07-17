@@ -47,10 +47,6 @@ impl TrapController {
     }
 
     fn send_trap_signal_m_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
-        if cpu.debug {
-            cpu.debug_info.last_instr.trap = true;
-        }
-
         cpu.csr
             .get_by_type_existing::<Mstatus>()
             .set_mpp(cpu.csr.privelege_level() as u8 as WordType);
@@ -59,8 +55,8 @@ impl TrapController {
             .write_uncheck_privilege(Mcause::get_index(), cause.into());
         cpu.csr.write_uncheck_privilege(Mepc::get_index(), cpu.pc);
 
-        let tval = cpu.pending_tval.take().unwrap_or(trap_value);
-        cpu.csr.write_uncheck_privilege(csr_index::mtval, tval);
+        cpu.csr
+            .write_uncheck_privilege(csr_index::mtval, trap_value);
 
         let mstatus = cpu.csr.get_by_type_existing::<Mstatus>();
         mstatus.set_mpie(mstatus.get_mie());
@@ -97,10 +93,6 @@ impl TrapController {
     //                S-Mode
     // ======================================
     fn send_trap_signal_s_mode(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) {
-        if cpu.debug {
-            cpu.debug_info.last_instr.trap = true;
-        }
-
         cpu.csr
             .get_by_type_existing::<Sstatus>()
             .set_spp(cpu.csr.privelege_level() as u8 as WordType);
@@ -109,8 +101,7 @@ impl TrapController {
         assert!(cpu.csr.write_directly(Scause::get_index(), cause.into()));
         assert!(cpu.csr.write_directly(Sepc::get_index(), cpu.pc));
 
-        let tval = cpu.pending_tval.take().unwrap_or(trap_value);
-        assert!(cpu.csr.write_directly(Stval::get_index(), tval));
+        assert!(cpu.csr.write_directly(Stval::get_index(), trap_value));
 
         let sstatus = cpu.csr.get_by_type_existing::<Sstatus>();
         sstatus.set_spie(sstatus.get_sie());
@@ -146,8 +137,7 @@ impl TrapController {
     // ======================================
     //                 Common
     // ======================================
-    // TODO: Remove the `trap_value` argument to reduce confusion.
-    pub fn try_send_trap_signal(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) -> bool {
+    fn try_send_trap_signal(cpu: &mut RVCPU, cause: Trap, trap_value: WordType) -> bool {
         let level = cpu.csr.privelege_level();
 
         if level == PrivilegeLevel::M || Self::is_delegated_m_mode(cpu, cause) == false {
@@ -190,8 +180,18 @@ impl TrapController {
         }
     }
 
+    pub fn take_exception(cpu: &mut RVCPU, exception: Exception, trap_value: WordType) {
+        let taken = Self::try_send_trap_signal(cpu, Trap::Exception(exception), trap_value);
+        debug_assert!(taken, "synchronous exceptions must always be taken");
+    }
+
+    pub fn try_take_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
+        let interrupt = Self::has_interrupt(cpu)?;
+        Self::try_send_trap_signal(cpu, Trap::Interrupt(interrupt), 0).then_some(interrupt)
+    }
+
     /// Check if there is any pending interrupt that can be handled now, considering `mip` and `mie`.
-    pub fn has_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
+    fn has_interrupt(cpu: &mut RVCPU) -> Option<Interrupt> {
         let mip = cpu.csr.get_by_type_existing::<Mip>();
         let mie = cpu.csr.get_by_type_existing::<Mie>();
 

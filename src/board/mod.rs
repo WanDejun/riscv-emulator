@@ -1,4 +1,4 @@
-use crate::isa::riscv::{executor::RVCPU, trap::Exception};
+use crate::isa::riscv::executor::{BatchResult, ExecutionHook, NoopExecutionHook, RVCPU};
 
 pub mod virt;
 
@@ -9,7 +9,21 @@ pub enum BoardStatus {
 }
 
 pub trait Board {
-    fn step(&mut self) -> Result<(), Exception>;
+    /// Execute one cycle. This may be slower than batching; prefer [`Board::step_cycles`]
+    /// or [`Board::step_cycles_with_hook`] when possible.
+    fn step(&mut self) {
+        self.step_cycles(1);
+    }
+
+    /// Execute exactly `cycles` CPU cycles unless the board halts first.
+    fn step_cycles(&mut self, cycles: u64) -> u64 {
+        let mut hook = NoopExecutionHook;
+        self.step_cycles_with_hook(cycles, &mut hook).cycles
+    }
+
+    fn step_cycles_with_hook<H: ExecutionHook>(&mut self, cycles: u64, hook: &mut H)
+    -> BatchResult;
+
     fn status(&self) -> BoardStatus;
 
     fn cpu(&self) -> &RVCPU;
@@ -18,12 +32,7 @@ pub trait Board {
     fn loader(&self) -> Option<&crate::load::ELFLoader>;
 
     fn run(&mut self) {
-        while self.status() == BoardStatus::Running {
-            if let Err(e) = self.step() {
-                eprintln!("Board encountered an exception: {:?}", e);
-                break;
-            }
-        }
+        self.step_cycles(u64::MAX);
     }
 
     fn pause_background_work(&mut self);
