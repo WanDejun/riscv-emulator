@@ -5,7 +5,7 @@ pub trait PlicIRQHandler {
 }
 
 pub trait PlicIRQSource {
-    fn set_irq_line(&mut self, line: PlicIRQLine, id: usize);
+    fn set_irq_line(&mut self, line: PlicIRQLine, id: ExternalInterrupt);
 }
 
 /// NOTE: Only used in single-threaded contexts.

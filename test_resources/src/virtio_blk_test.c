@@ -53,8 +53,8 @@ struct VirtIOMMIOLayout {
 #define VIRTIO_MMIO_BASE 0x10001000
 volatile struct VirtIOMMIOLayout *virtio_blk1 = (volatile struct VirtIOMMIOLayout *)VIRTIO_MMIO_BASE;
 
-uint8_t buf[BLOCK_SIZE][8] __attribute__((aligned(4096)));
-VirtQueueDesc desc[DESC_SIZE * BLOCK_SIZE];
+uint8_t buf[8][BLOCK_SIZE] __attribute__((aligned(4096)));
+VirtQueueDesc desc[DESC_SIZE];
 uint8_t avail_base[AVAIL_RING_SIZE];
 VirtQueueAvail* avail = (VirtQueueAvail*)avail_base;
 uint8_t used_base[USED_RING_SIZE];
@@ -72,10 +72,10 @@ int main() {
     virtio_blk1->device_features_sel = 1;
     host_features |= ((uint64_t)virtio_blk1->device_features) << 32;
 
-    virtio_blk1->driver_features_sel = 0;
     uint64_t guest_features = host_features;
-    virtio_blk1->driver_features = (uint32_t)(guest_features & 0xffffffff);
     virtio_blk1->driver_features_sel = 0;
+    virtio_blk1->driver_features = (uint32_t)(guest_features & 0xffffffff);
+    virtio_blk1->driver_features_sel = 1;
     virtio_blk1->driver_features = (uint32_t)(guest_features >> 32);
 
     virtio_blk1->status = ACKNOWLEDGE | DRIVER | FEATURES_OK;
@@ -112,7 +112,7 @@ int main() {
     // head
     VirtQueueDesc* desc0 = (&desc[0]);
     VirtioBlkReq req = {
-        .request_type = VirtioBlkReqOut, // VIRTIO_BLK_T_IN
+        .request_type = VirtioBlkReqOut,
         .reserved = 0,
         .sector = 0,
     };
@@ -143,8 +143,11 @@ int main() {
     avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
-    // TODO!
-    // if enable interrupt, should wait interrupt here.
+    if (!(virtio_blk1->interrupt_status & VIRTIO_MMIO_INT_VRING)) {
+        Log(ERROR, "Missing used-ring interrupt\n");
+        fail();
+    }
+    virtio_blk1->interrupt_ack = VIRTIO_MMIO_INT_VRING;
 
     if (status != 0 /*OK*/) {
         Log(ERROR, "First read failed: %d\n", status);
@@ -155,7 +158,7 @@ int main() {
 
     // head
     desc0 = (&desc[0]);
-    req.request_type = VirtioBlkReqIn; // VIRTIO_BLK_T_IN
+    req.request_type = VirtioBlkReqIn;
     desc0->paddr = (uint64_t)(&req);
     desc0->len = sizeof(VirtioBlkReq);
     desc0->flags = VIRTQ_DESC_F_NEXT;
@@ -183,11 +186,16 @@ int main() {
     avail->idx = ++avail_idx;
 
     virtio_blk1->queue_notify = 0;
+    if (!(virtio_blk1->interrupt_status & VIRTIO_MMIO_INT_VRING)) {
+        Log(ERROR, "Missing used-ring interrupt\n");
+        fail();
+    }
+    virtio_blk1->interrupt_ack = VIRTIO_MMIO_INT_VRING;
 
     for (int i = 0; i < BLOCK_SIZE; i++) {
         // printf("%4d", buf[0][i]);
         if (buf[0][i] != (i & 0xff)) {
-            Log(ERROR, "Read data error: buf[%d] = %d\n", i, buf[i]);
+            Log(ERROR, "Read data error: buf[%d] = %d\n", i, buf[0][i]);
             fail();
         }
     }

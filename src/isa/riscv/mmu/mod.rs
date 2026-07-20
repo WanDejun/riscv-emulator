@@ -279,13 +279,18 @@ impl VirtAddrManager {
         T: UnsignedInteger,
     {
         if !crate::utils::check_align::<T>(addr) {
+            // Every SC attempt invalidates the hart's previous reservation, even
+            // when the target address is not normal RAM.
+            self.mmio.clear_reservation();
             return Err(MemError::StoreMisaligned);
         }
 
         let policy = Self::resolve_data_policy(csr, AccessType::Write, true);
         let paddr = self.translate_with_policy(addr, policy)?;
 
-        self.mmio.store_conditional(paddr, data)
+        let res = self.mmio.store_conditional(paddr, data);
+        self.mmio.clear_reservation();
+        res
     }
 
     pub(crate) fn ifetch<T>(&mut self, addr: WordType, csr: &mut CsrRegFile) -> Result<T, MemError>
@@ -347,8 +352,11 @@ impl VirtAddrManager {
         let ram = unsafe { &mut *self.ram.get() };
         let ptr = &mut ram[paddr as usize] as *mut u8 as *mut T::AtomicType;
         let lhs = unsafe { &*ptr };
-
-        f(lhs, rhs_val)
+        let result = f(lhs, rhs_val);
+        if result.is_ok() {
+            ram.try_invalidate_reservation(paddr);
+        }
+        result
     }
 
     pub(crate) fn read_by_paddr<T>(&mut self, paddr: WordType) -> Result<T, MemError>
@@ -491,5 +499,85 @@ impl VirtAddrManager {
 
     pub fn flush_tlb(&mut self) {
         self.page_table.flush_tlb();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::sync::atomic::Ordering;
+
+    use super::*;
+    use crate::device::mmio::MemoryMapItem;
+
+    struct MockDevice;
+
+    impl DeviceTrait for MockDevice {
+        fn read(&mut self, _addr: WordType, _len: u32) -> Result<u64, MemError> {
+            Ok(0)
+        }
+
+        fn write(&mut self, _addr: WordType, _len: u32, _data: u64) -> Result<(), MemError> {
+            Ok(())
+        }
+
+        fn sync(&mut self) {}
+
+        fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+            None
+        }
+    }
+
+    #[test]
+    fn lr_sc_rejects_mmio_and_sc_clears_ram_reservation() {
+        let ram = Rc::new(UnsafeCell::new(Ram::new()));
+        let table = vec![MemoryMapItem::new(
+            0x1000,
+            8,
+            Rc::new(RefCell::new(MockDevice)),
+        )];
+        let mmio = MemoryMapIO::from_mmio_items(ram.clone(), table);
+        let mut memory = VirtAddrManager::from_ram_and_mmio(ram, mmio);
+        let mut csr = CsrRegFile::new();
+
+        assert_eq!(
+            memory.load_reserved::<u32>(0x1000, &mut csr),
+            Err(MemError::LoadFault)
+        );
+
+        let ram_addr = ram_config::BASE_ADDR;
+        memory.load_reserved::<u32>(ram_addr, &mut csr).unwrap();
+        assert_eq!(
+            memory.store_conditional::<u32>(0x1000, 1, &mut csr),
+            Err(MemError::StoreFault)
+        );
+        assert!(
+            !memory
+                .store_conditional::<u32>(ram_addr, 1, &mut csr)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn amo_invalidates_lr_reservation() {
+        let ram = Rc::new(UnsafeCell::new(Ram::new()));
+        let mmio = MemoryMapIO::from_mmio_items(ram.clone(), vec![]);
+        let mut memory = VirtAddrManager::from_ram_and_mmio(ram, mmio);
+        let mut csr = CsrRegFile::new();
+        let addr = ram_config::BASE_ADDR + 8;
+
+        memory.write::<u32>(addr, 0, &mut csr).unwrap();
+        memory.load_reserved::<u32>(addr, &mut csr).unwrap();
+        assert_eq!(
+            memory
+                .fetch_and_op_amo::<u32, _>(addr, 1, &mut csr, |lhs, rhs| {
+                    Ok(lhs.fetch_add(rhs, Ordering::SeqCst))
+                })
+                .unwrap(),
+            0
+        );
+
+        assert!(!memory.store_conditional::<u32>(addr, 2, &mut csr).unwrap());
+        assert_eq!(memory.read::<u32>(addr, &mut csr).unwrap(), 1);
     }
 }

@@ -21,6 +21,7 @@ use crate::{
         aclint::Clint,
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
+            VIRTIO_IRQ_BASE,
         },
         fast_uart::{FastUart16550, UartBytePort},
         mmio::{MemoryMapIO, MemoryMapItem},
@@ -257,13 +258,12 @@ impl RVBoardBuilder {
         // Add VirtIO device.
         let mut virtio_allocator =
             device::IdAllocator::new::<VirtIOMMIO>(0, String::from("virtio"));
-        for virtio_device_cfg in self.virtio_devices.iter() {
+        for (virtio_index, virtio_device_cfg) in self.virtio_devices.iter().enumerate() {
             let virtio_device = match virtio_device_cfg.dev_type {
                 VirtIODeviceID::Block => {
-                    // TODO: Use raw pointer instead of Ram::write will break atomicity of `RVCPU`.
-                    let ram_raw_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
+                    let ram_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
                     VirtIOBlkDeviceBuilder::new(
-                        ram_raw_base,
+                        ram_base,
                         String::from(virtio_device_cfg.path.to_str().unwrap()),
                     )
                     .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::BlockSize)
@@ -273,7 +273,11 @@ impl RVBoardBuilder {
                     panic!("unsupport device: {:#?}", dev_type);
                 }
             };
-            let virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
+            let mut virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
+            virtio_mmio_device.set_irq_line(
+                PlicIRQLine::new(&mut *plic.borrow_mut()),
+                VIRTIO_IRQ_BASE + virtio_index as u32,
+            );
             let virtio_info = virtio_allocator.get();
             self.mmio_items.push(MemoryMapItem::new(
                 virtio_info.base,
@@ -743,7 +747,7 @@ mod tests {
             .cpu
             .write_memory(
                 Address::Phys(TEST_DEVICE_BASE + 2 * size_of::<u32>() as WordType),
-                100_000u32,
+                100u32,
             )
             .unwrap();
         // data register 1
@@ -754,6 +758,7 @@ mod tests {
                 0u32,
             )
             .unwrap();
+        // interrupt_mask_register
         board
             .cpu
             .write_memory(
@@ -761,7 +766,7 @@ mod tests {
                 1u32,
             )
             .unwrap();
-        sleep(Duration::from_millis(20));
+        sleep(Duration::from_millis(200));
 
         for _ in 0..200 {
             board.step();

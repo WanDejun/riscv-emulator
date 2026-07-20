@@ -68,16 +68,14 @@ impl PollerCore {
         pending
     }
 
-    #[cfg(feature = "riscv64")]
-    fn dispatch_irq(&mut self, id: ExternalInterrupt) {
+    fn dispatch_irq(&mut self, id: ExternalInterrupt, level: bool) {
         if let Some(line) = self.plic_irq_line.as_mut() {
-            line.set_irq(id, true);
+            line.set_irq(id, level);
         } else {
             log::error!("Unable to get plic_irq_line");
         }
     }
 
-    #[cfg(feature = "riscv64")]
     fn set_irq_line(&mut self, line: PlicIRQLine) {
         self.plic_irq_line = Some(line);
     }
@@ -138,16 +136,15 @@ impl DevicePoller {
     /// main thread after
     /// [`BackgroundExecutor::poll_once`](crate::background::BackgroundExecutor::poll_once).
     pub fn trigger_external_interrupt(&mut self) {
-        while let Ok(_id) = self.irq_receiver.try_recv() {
-            #[cfg(feature = "riscv64")]
-            self.core.dispatch_irq(_id);
+        while let Ok(id) = self.irq_receiver.try_recv() {
+            self.core.dispatch_irq(id, true);
         }
     }
 }
 
 #[cfg(feature = "riscv64")]
 impl PlicIRQSource for DevicePoller {
-    fn set_irq_line(&mut self, line: PlicIRQLine, _id: usize) {
+    fn set_irq_line(&mut self, line: PlicIRQLine, _id: ExternalInterrupt) {
         self.core.set_irq_line(line);
     }
 }

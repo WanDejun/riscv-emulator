@@ -23,6 +23,8 @@ pub enum RamImageError {
     },
 }
 
+const RESERVATION_SET_SIZE: WordType = 0x08;
+
 #[derive(Debug, Clone, Copy)]
 struct Reservation {
     addr: WordType,
@@ -30,11 +32,13 @@ struct Reservation {
 
 impl Reservation {
     fn new(addr: WordType) -> Self {
-        Self { addr: addr & !0x7 }
+        Self { addr }
     }
 
-    fn is_match(&self, addr: WordType) -> bool {
-        self.addr == (addr & !0x7)
+    fn in_the_same_reservation_set(&self, addr: WordType) -> bool {
+        // Note this LR might have had a different effective address and data size,
+        // but reserved the SC’s address as part of the reservation set.
+        self.addr == (addr & !(RESERVATION_SET_SIZE - 1))
     }
 }
 
@@ -148,13 +152,19 @@ impl Ram {
     }
 
     pub fn store_conditional<T>(&mut self, addr: WordType, data: T) -> Result<bool, MemError> {
+        #[cfg(debug_assertions)]
+        if addr >= ram_config::SIZE as WordType {
+            self.reserved = None;
+            return Err(MemError::StoreFault);
+        }
+
         if let Some(res) = self.reserved {
-            if res.is_match(addr) {
+            if res.in_the_same_reservation_set(addr) {
                 self.write(addr, data)?;
-                self.reserved = None;
                 return Ok(true);
             }
         }
+
         self.reserved = None;
         Ok(false)
     }
@@ -164,17 +174,28 @@ impl Ram {
             return Err(MemError::StoreFault);
         }
 
-        if let Some(res) = self.reserved {
-            if res.is_match(addr) {
-                self.reserved = None;
-            }
-        }
+        self.try_invalidate_reservation(addr);
 
         let ret = unsafe { write_raw_ptr(self.data.as_mut_ptr().add(addr as usize), data) };
         if let Some(()) = ret {
             Ok(())
         } else {
             Err(MemError::StoreMisaligned)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn clear_reservation(&mut self) {
+        self.reserved = None;
+    }
+
+    /// Invalidate an LR reservation when another agent writes an overlapping RAM range.
+    pub(crate) fn try_invalidate_reservation(&mut self, addr: WordType) {
+        if self
+            .reserved
+            .is_some_and(|res| res.in_the_same_reservation_set(addr))
+        {
+            self.reserved = None;
         }
     }
 
@@ -271,6 +292,18 @@ mod tests {
         assert_eq!(ram.data[5], 0x33);
         assert_eq!(ram.data[6], 0x22);
         assert_eq!(ram.data[7], 0x11);
+    }
+
+    #[test]
+    fn failed_sc_clears_reservation_and_validates_access() {
+        let mut ram = Ram::new();
+        ram.load_reserved::<u32>(0).unwrap();
+
+        assert_eq!(
+            ram.store_conditional::<u32>(ram_config::SIZE as WordType, 1),
+            Err(MemError::StoreFault)
+        );
+        assert!(!ram.store_conditional::<u32>(0, 1).unwrap());
     }
 
     #[test]

@@ -112,8 +112,7 @@ impl TestDevice {
             return Err(crate::device::MemError::StoreMisaligned);
         }
 
-        let data_u64 = data.into();
-        let data_u32 = data_u64 as u32;
+        let data_u32 = data.truncate_to();
 
         match addr {
             0x00 => self.layout.control_register = data_u32,
@@ -129,7 +128,7 @@ impl TestDevice {
                     .unwrap();
             }
             0x0c => {
-                self.layout.data_register0 = data_u32;
+                self.layout.data_register1 = data_u32;
                 self.sender
                     .try_send(PollerDataPackage::Data(self.get_data64()))
                     .unwrap();
@@ -169,17 +168,20 @@ impl PollingEventTrait for TestDevicePoller {
         while let Ok(v) = self.receiver.try_recv() {
             match v {
                 PollerDataPackage::Data(t) => {
-                    self.step_time = Duration::from_micros(t);
+                    self.step_time = Duration::from_millis(t);
                     self.pre_time = time::SystemTime::now();
                 }
             }
         }
+        let cur = time::SystemTime::now();
+
         if (self.interrupt_mask_register.load(Ordering::Acquire) & 1) == 0 {
+            self.pre_time = cur;
             return None;
         }
 
-        let cur = time::SystemTime::now();
         if cur.duration_since(self.pre_time).unwrap() > self.step_time {
+            println!("interrupt id: {}.", 63);
             self.pre_time = cur;
             // trigger only one time -> use for debug.
             // self.interrupt_mask_register

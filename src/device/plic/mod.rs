@@ -81,6 +81,7 @@ const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
 pub struct PLICLayout {
     priority: [PlicPriority; VIRT_MAX_INTERRUPTS],
     pending: PLICBitReg,
+    source_level: PLICBitReg,
     contexts: [PLICContext; VIRT_MAX_CONTEXTS],
     /// Interrupt source ids sorted by descending priority, then ascending source id.
     priority_order: [ExternalInterrupt; VIRT_MAX_INTERRUPTS],
@@ -96,6 +97,7 @@ impl PLICLayout {
         Self {
             priority,
             pending: PLICBitReg::new(),
+            source_level: PLICBitReg::new(),
             contexts: core::array::from_fn(|_| PLICContext::new()),
             priority_order,
             interrupt_sources_busy: BitSet::with_capacity(VIRT_MAX_INTERRUPTS),
@@ -202,7 +204,11 @@ impl PLICLayout {
         if !is_valid_interrupt_id(interrupt_id) || !self.is_enabled(context_id, interrupt_id) {
             return;
         }
-        self.interrupt_sources_busy.remove(interrupt_id as usize);
+        if self.interrupt_sources_busy.remove(interrupt_id as usize)
+            && self.source_level.get_bit(interrupt_id)
+        {
+            self.pending.set_bit(interrupt_id);
+        }
     }
 
     fn pending_interrupt_to_notify(&self, context_id: PlicContextId) -> Option<ExternalInterrupt> {
@@ -378,8 +384,8 @@ impl PLIC {
         let register = PLICLayout::decode_register(inner_addr).ok_or(MemError::LoadFault)?;
         let data = self.layout.read_register(register);
 
-        if let PlicRegister::ClaimComplete(context_id) = register {
-            self.update_context_irq_line(context_id);
+        if matches!(register, PlicRegister::ClaimComplete(_)) {
+            self.update_all_context_irq_lines();
         }
 
         Ok(T::truncate_from(data))
@@ -398,16 +404,23 @@ impl PLIC {
             return Err(MemError::StoreFault);
         }
 
-        let context_to_refresh = match register {
-            PlicRegister::Enable { context_id, .. }
-            | PlicRegister::Threshold(context_id)
-            | PlicRegister::ClaimComplete(context_id) => Some(context_id),
-            PlicRegister::Priority(_) | PlicRegister::Pending(_) => None,
+        let contexts_to_refresh = match register {
+            PlicRegister::Enable { context_id, .. } | PlicRegister::Threshold(context_id) => {
+                Some(context_id)
+            }
+            PlicRegister::Priority(_)
+            | PlicRegister::ClaimComplete(_)
+            | PlicRegister::Pending(_) => None,
         };
 
         self.layout.write_register(register, data.truncate_to());
 
-        if let Some(context_id) = context_to_refresh {
+        if matches!(
+            register,
+            PlicRegister::Priority(_) | PlicRegister::ClaimComplete(_)
+        ) {
+            self.update_all_context_irq_lines();
+        } else if let Some(context_id) = contexts_to_refresh {
             self.update_context_irq_line(context_id);
         }
 
@@ -420,6 +433,7 @@ impl PLIC {
             return;
         }
         self.layout.set_pending(interrupt_id);
+        self.update_all_context_irq_lines();
     }
 
     /// Clear a pending external interrupt source.
@@ -428,6 +442,7 @@ impl PLIC {
             return;
         }
         self.layout.clear_pending(interrupt_id);
+        self.update_all_context_irq_lines();
     }
 
     /// Refresh the target CPU interrupt line for one PLIC context.
@@ -456,6 +471,12 @@ impl PLIC {
     fn set_context_irq_line(&mut self, context_id: PlicContextId, level: bool) {
         if let Some(irq_line) = &mut self.irq_line[context_id] {
             irq_line.set_irq(level);
+        }
+    }
+
+    fn update_all_context_irq_lines(&mut self) {
+        for context_id in 0..VIRT_MAX_CONTEXTS {
+            self.update_context_irq_line(context_id);
         }
     }
 }

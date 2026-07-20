@@ -28,5 +28,7 @@ pub const UART_IRQ: u32 = 10;
 pub const VIRTIO_MMIO_NAME: &'static str = "virtio-mmio-device";
 pub const VIRTIO_MMIO_BASE: WordType = 0x1000_1000;
 pub const VIRTIO_MMIO_SIZE: WordType = 0x1000;
+/// First VirtIO PLIC source ID. Subsequent MMIO transports use consecutive IDs.
+pub const VIRTIO_IRQ_BASE: u32 = 1;
 
 // pub const MMIO_FREQ_DIV: usize = 32;
