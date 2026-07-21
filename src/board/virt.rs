@@ -31,8 +31,8 @@ use crate::{
         },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
         virtio::{
-            virtio_blk::VirtIOBlkDeviceBuilder,
-            virtio_mmio::{VirtIODeviceID, VirtIOMMIO},
+            virtio_blk::VirtIOBlkDeviceBuilder, virtio_device::VirtIODeviceEnum,
+            virtio_mmio::VirtIOMMIO,
         },
     },
     device_poller::DevicePoller,
@@ -260,13 +260,14 @@ impl RVBoardBuilder {
             device::IdAllocator::new::<VirtIOMMIO>(0, String::from("virtio"));
         for (virtio_index, virtio_device_cfg) in self.virtio_devices.iter().enumerate() {
             let virtio_device = match virtio_device_cfg.dev_type {
-                VirtIODeviceID::Block => {
+                VirtIODeviceEnum::VirtIOBlock => {
                     let ram_base = unsafe { &mut ram_ref.as_mut_unchecked()[0] as *mut u8 };
                     VirtIOBlkDeviceBuilder::new(
                         ram_base,
                         String::from(virtio_device_cfg.path.to_str().unwrap()),
                     )
                     .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::BlockSize)
+                    .host_feature(crate::device::virtio::virtio_blk::VirtIOBlockFeature::Flush)
                     .get()
                 }
                 dev_type => {

@@ -14,7 +14,7 @@ use crate::device::{
         irq_line::{PlicIRQLine, PlicIRQSource},
     },
     virtio::{
-        config::VIRTIO_F_VERSION_1,
+        config::{VirtIOFeatureSet, virtio_reserved_feature},
         virtio_device::VirtIODeviceTrait,
         virtio_mmio::{VIRTIO_DEVICE_ID_BLOCK, VirtIODeviceStatus},
         virtio_queue::{VirtQueue, VirtQueueDesc},
@@ -26,6 +26,8 @@ pub(super) const SECTOR_SIZE: usize = 512;
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[rustfmt::skip]
+/// Standard VirtIO block feature bits. A variant is advertised only when the
+/// corresponding behavior is implemented and enabled by the device builder.
 pub(crate) enum VirtIOBlockFeature {
     SizeMax     = 1 << 1,   // Maximum segment size supported
     SegMax      = 1 << 2,   // Maximum number of segments supported
@@ -41,6 +43,20 @@ pub(crate) enum VirtIOBlockFeature {
     Lifetime    = 1 << 15,  // Device supports providing storage lifetime information.
     SecureErase = 1 << 16,  // Secure erase supported
     ZONED       = 1 << 17,  // Zoned block device
+}
+
+const VIRTIO_BLK_IMPLEMENTED_FEATURES: VirtIOFeatureSet = VirtIOBlockFeature::BlockSize
+    as VirtIOFeatureSet
+    | VirtIOBlockFeature::Flush as VirtIOFeatureSet;
+
+impl VirtIOBlockFeature {
+    pub(crate) const fn bit(self) -> VirtIOFeatureSet {
+        self as VirtIOFeatureSet
+    }
+
+    const fn is_implemented(self) -> bool {
+        VIRTIO_BLK_IMPLEMENTED_FEATURES & self.bit() != 0
+    }
 }
 
 #[repr(C, packed)]
@@ -190,8 +206,8 @@ pub(crate) struct VirtIOBlkDevice {
     irq_line: Option<PlicIRQLine>,
     interrupt_id: Option<ExternalInterrupt>,
 
-    host_feature: u64,
-    guest_feature: u64,
+    host_feature: VirtIOFeatureSet,
+    guest_feature: VirtIOFeatureSet,
 
     pub(crate) generation: u32,
     ram_base_raw: usize,
@@ -217,6 +233,11 @@ impl VirtIOBlkDevice {
             panic!("Can not find file: {}.", file_path);
         }
         let size = file.seek(SeekFrom::End(0)).unwrap();
+        if !size.is_multiple_of(SECTOR_SIZE as u64) {
+            panic!(
+                "VirtIO block backing file \"{file_path}\" has size {size} bytes; size must be a multiple of {SECTOR_SIZE} bytes"
+            );
+        }
 
         Self {
             name,
@@ -226,7 +247,7 @@ impl VirtIOBlkDevice {
             irq_line: None,
             interrupt_id: None,
 
-            host_feature: VIRTIO_F_VERSION_1,
+            host_feature: virtio_reserved_feature::VERSION_1,
             guest_feature: 0,
 
             generation: 0,
@@ -235,7 +256,7 @@ impl VirtIOBlkDevice {
             file,
 
             queue: VirtQueue::new(ram_base_raw, 0), // will be set later
-            config_region: VirtioBlkConfig::new(size.div_ceil(SECTOR_SIZE as u64)),
+            config_region: VirtioBlkConfig::new(size / SECTOR_SIZE as u64),
         }
     }
 
@@ -244,7 +265,11 @@ impl VirtIOBlkDevice {
     }
 
     pub fn add_host_feature(mut self, new_feature: VirtIOBlockFeature) -> Self {
-        self.host_feature |= new_feature as u64;
+        assert!(
+            new_feature.is_implemented(),
+            "VirtIO block feature {new_feature:?} is not implemented"
+        );
+        self.host_feature |= new_feature.bit();
         self
     }
 
@@ -317,11 +342,13 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
         line.set_irq(interrupt_id, level);
     }
 
-    fn get_host_feature(&self) -> u64 {
+    fn get_host_feature(&self) -> VirtIOFeatureSet {
         self.host_feature
     }
-    fn set_feature(&mut self, feature: u64) {
-        if self.host_feature & feature != feature {
+    fn set_feature(&mut self, feature: VirtIOFeatureSet) {
+        if feature & virtio_reserved_feature::VERSION_1 == 0
+            || self.host_feature & feature != feature
+        {
             self.status &= !VirtIODeviceStatus::FEATURES_OK.bits();
         } else {
             self.guest_feature = feature;
@@ -403,7 +430,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
                     if desc.len < size_of::<VirtioBlkStatus>() as u32 {
                         return 0;
                     }
-                    if req_type == VirtioBlkReqType::Flush && self.file.flush().is_err() {
+                    if req_type == VirtioBlkReqType::Flush && self.file.sync_data().is_err() {
                         req_status = VirtIOBlkReqStatus::IoErr;
                     }
                     let status = unsafe {
@@ -492,7 +519,7 @@ impl PlicIRQSource for VirtIOBlkDevice {
 #[cfg(test)]
 impl VirtIOBlkDevice {
     pub(crate) fn flush(&mut self) {
-        self.file.flush().unwrap();
+        self.file.sync_data().unwrap();
     }
 
     pub(crate) fn queue(&mut self) -> &mut VirtQueue {
@@ -517,7 +544,11 @@ impl VirtIOBlkDeviceBuilder {
     }
 
     pub fn host_feature(mut self, feature: VirtIOBlockFeature) -> Self {
-        self.device.host_feature |= feature as u64;
+        assert!(
+            feature.is_implemented(),
+            "VirtIO block feature {feature:?} is not implemented"
+        );
+        self.device.host_feature |= feature.bit();
         self
     }
 
@@ -570,6 +601,35 @@ mod test {
     use super::*;
     const QUEUE_NUM: usize = 8;
     const DESC_NUM: usize = QUEUE_NUM * 3; // each request need
+
+    #[test]
+    #[should_panic(expected = "size must be a multiple of 512 bytes")]
+    fn rejects_unaligned_backing_file_size() {
+        use std::{fs::create_dir_all, path::Path};
+
+        let file_name = "./tmp/test_unaligned_virtio_blk.img";
+        create_dir_all(Path::new(file_name).parent().unwrap()).unwrap();
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(file_name)
+            .unwrap();
+        file.set_len(SECTOR_SIZE as u64 + 1).unwrap();
+        drop(file);
+
+        let mut ram = Ram::new();
+        let ram_base = &mut ram[0] as *mut u8;
+        let _ = VirtIOBlkDeviceBuilder::new(ram_base, file_name.to_owned()).get();
+    }
+
+    #[test]
+    fn implemented_feature_set_matches_block_handlers() {
+        assert!(VirtIOBlockFeature::BlockSize.is_implemented());
+        assert!(VirtIOBlockFeature::Flush.is_implemented());
+        assert!(!VirtIOBlockFeature::Discard.is_implemented());
+        assert!(!VirtIOBlockFeature::WriteZeroes.is_implemented());
+    }
 
     #[test]
     fn test_file_read_write() {

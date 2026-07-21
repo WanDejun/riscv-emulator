@@ -24,31 +24,7 @@ pub const VIRTIO_DEVICE_ID_BLOCK: u16 = VirtIODeviceEnum::VirtIOBlock as u16;
 const VIRTIO_MMIO_CONFIG_OFFSET: u64 = VirtIO_MMIO_Offset::Config as u64;
 const VIRTIO_MMIO_MAX_QUEUES: usize = 8;
 const FEATURE_SELECT_BITS: u32 = 32;
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy)]
-#[allow(unused)]
-pub enum VirtIODeviceID {
-    Network,
-    Block,
-    Console,
-    Entropy,
-    Balloon,
-    SCSIHost,
-    GPU,
-    Input,
-    Crypto,
-    Socket,
-    FileSystem,
-    RPMB,
-    IOMMU,
-    Sound,
-    Memory,
-    I2CAdapter,
-    SCMI,
-    GPIO,
-    PMEM,
-}
+const FEATURE_WORD_COUNT: u32 = (VIRTIO_MAX_FEATURE_BIT_LEN / FEATURE_SELECT_BITS as usize) as u32;
 
 #[repr(u64)]
 #[derive(TryFromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +114,7 @@ pub(crate) struct VirtIOMMIO {
     device: Box<UnsafeCell<dyn VirtIODeviceTrait>>,
     host_features_sel: u32,
     guest_features_sel: u32,
-    guest_features: u64,
+    guest_features: VirtIOFeatureSet,
 
     queues: [VirtIOMMIOQueueStatus; VIRTIO_MMIO_MAX_QUEUES],
     queue_select: usize,
@@ -174,22 +150,22 @@ impl VirtIOMMIO {
         unsafe { self.device.as_mut_unchecked() }.reset();
     }
 
-    fn feature_word(features: u64, select: u32) -> u32 {
-        if select >= 2 {
+    fn feature_word(features: VirtIOFeatureSet, select: u32) -> u32 {
+        if select >= FEATURE_WORD_COUNT {
             0
         } else {
             (features >> (select * FEATURE_SELECT_BITS)) as u32
         }
     }
 
-    fn set_feature_word(features: &mut u64, select: u32, value: u32) {
-        if select >= 2 {
+    fn set_feature_word(features: &mut VirtIOFeatureSet, select: u32, value: u32) {
+        if select >= FEATURE_WORD_COUNT {
             return;
         }
 
         let shift = select * FEATURE_SELECT_BITS;
-        let mask = (u32::MAX as u64) << shift;
-        *features = (*features & !mask) | ((value as u64) << shift);
+        let mask = (u32::MAX as VirtIOFeatureSet) << shift;
+        *features = (*features & !mask) | ((value as VirtIOFeatureSet) << shift);
     }
 
     fn read_config<T>(&mut self, offset: u64) -> Result<T, MemError>
@@ -561,25 +537,21 @@ impl VirtIOMMIO {
         self.write_u32_impl(VirtIO_MMIO_Offset::Status as u64, status.bits() as u32);
     }
 
-    pub(crate) fn get_host_feature(&mut self) -> u64 {
-        let mut feature: u64 = 0;
-        for i in (0..=1).rev() {
+    pub(crate) fn get_host_feature(&mut self) -> VirtIOFeatureSet {
+        let mut feature: VirtIOFeatureSet = 0;
+        for i in (0..FEATURE_WORD_COUNT).rev() {
             feature <<= 32;
             self.write_u32_impl(VirtIO_MMIO_Offset::DeviceFeaturesSelect as u64, i);
-            feature |= self.read_u32_impl(VirtIO_MMIO_Offset::DeviceFeatures as u64) as u64;
+            feature |=
+                self.read_u32_impl(VirtIO_MMIO_Offset::DeviceFeatures as u64) as VirtIOFeatureSet;
         }
         feature
     }
 
-    pub(crate) fn set_guest_feature(&mut self, mut feature: u64) {
-        for i in 0..=1 {
-            use crate::utils::BIT_ONES_ARRAY;
-
+    pub(crate) fn set_guest_feature(&mut self, mut feature: VirtIOFeatureSet) {
+        for i in 0..FEATURE_WORD_COUNT {
             self.write_u32_impl(VirtIO_MMIO_Offset::DriverFeaturesSelect as u64, i);
-            self.write_u32_impl(
-                VirtIO_MMIO_Offset::DriverFeatures as u64,
-                (feature & BIT_ONES_ARRAY[32]) as u32,
-            );
+            self.write_u32_impl(VirtIO_MMIO_Offset::DriverFeatures as u64, feature as u32);
             feature >>= 32;
         }
     }
@@ -609,7 +581,7 @@ impl VirtIOMMIO {
 
 #[cfg(test)]
 pub(crate) struct GuestFeatureBuilder {
-    feature: u64,
+    feature: VirtIOFeatureSet,
 }
 #[cfg(test)]
 impl GuestFeatureBuilder {
@@ -617,12 +589,12 @@ impl GuestFeatureBuilder {
         Self { feature: 0 }
     }
 
-    pub(crate) fn add_guest_feature(mut self, one_feature: u64) -> Self {
+    pub(crate) fn add_guest_feature(mut self, one_feature: VirtIOFeatureSet) -> Self {
         self.feature |= one_feature;
         self
     }
 
-    pub(crate) fn take(self) -> u64 {
+    pub(crate) fn take(self) -> VirtIOFeatureSet {
         self.feature
     }
 }
@@ -642,7 +614,6 @@ mod test {
             DeviceTrait,
             plic::irq_line::PlicIRQHandler,
             virtio::{
-                config::VIRTIO_F_VERSION_1,
                 virtio_blk::{
                     VirtIOBlkDeviceBuilder, VirtIOBlkReqStatus, VirtIOBlockFeature, VirtioBlkReq,
                     VirtioBlkReqType, VirtioBlkStatus, init_block_file,
@@ -668,6 +639,24 @@ mod test {
         fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
             self.changes.borrow_mut().push((interrupt, level));
         }
+    }
+
+    #[test]
+    fn feature_registers_cover_all_128_bits() {
+        let words = [0x0123_4567, 0x89ab_cdef, 0x1357_9bdf, 0x2468_ace0];
+        let mut features = 0;
+
+        for (selector, word) in words.into_iter().enumerate() {
+            VirtIOMMIO::set_feature_word(&mut features, selector as u32, word);
+        }
+        for (selector, word) in words.into_iter().enumerate() {
+            assert_eq!(VirtIOMMIO::feature_word(features, selector as u32), word);
+        }
+
+        assert_eq!(VirtIOMMIO::feature_word(features, FEATURE_WORD_COUNT), 0);
+        let original = features;
+        VirtIOMMIO::set_feature_word(&mut features, FEATURE_WORD_COUNT, u32::MAX);
+        assert_eq!(features, original);
     }
 
     #[test]
@@ -702,11 +691,11 @@ mod test {
 
         // set feature.
         let device_feature = virtio_mmio_device.get_host_feature();
-        assert_ne!(device_feature & VIRTIO_F_VERSION_1, 0);
+        assert_ne!(device_feature & virtio_reserved_feature::VERSION_1, 0);
         let driver_feature = GuestFeatureBuilder::new()
-            .add_guest_feature(VIRTIO_F_VERSION_1)
-            .add_guest_feature(VirtIOBlockFeature::BlockSize as u64)
-            .add_guest_feature(VirtIOBlockFeature::Flush as u64)
+            .add_guest_feature(virtio_reserved_feature::VERSION_1)
+            .add_guest_feature(VirtIOBlockFeature::BlockSize.bit())
+            .add_guest_feature(VirtIOBlockFeature::Flush.bit())
             .take();
         virtio_mmio_device.set_guest_feature(driver_feature);
 
@@ -864,8 +853,18 @@ mod test {
             0
         );
 
-        let unsupported_features = VIRTIO_F_VERSION_1 | VirtIOBlockFeature::Discard as u64;
+        let unsupported_features = virtio_reserved_feature::VERSION_1 | (1u128 << 127);
         virtio_mmio_device.set_guest_feature(unsupported_features);
+        virtio_mmio_device.write_status(
+            VirtIODeviceStatus::ACKNOWLEDGE
+                | VirtIODeviceStatus::DRIVER
+                | VirtIODeviceStatus::FEATURES_OK,
+        );
+        let status = virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Status as u64);
+        assert_eq!(status & VirtIODeviceStatus::FEATURES_OK.bits() as u32, 0);
+
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::Status as u64, 0);
+        virtio_mmio_device.set_guest_feature(VirtIOBlockFeature::BlockSize.bit());
         virtio_mmio_device.write_status(
             VirtIODeviceStatus::ACKNOWLEDGE
                 | VirtIODeviceStatus::DRIVER

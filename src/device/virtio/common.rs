@@ -1,4 +1,4 @@
-use crate::device::virtio::virtio_queue::VirtQueue;
+use crate::device::virtio::{config::VirtIOFeatureSet, virtio_queue::VirtQueue};
 
 struct VirtIODevice {
     // parent_obj: DeviceState,
@@ -16,9 +16,9 @@ struct VirtIODevice {
      * backend (e.g. vhost) and could potentially be a subset of the
      * total feature set offered by QEMU.
      */
-    host_features: u64,
-    guest_features: u64,
-    backend_features: u64,
+    host_features: VirtIOFeatureSet,
+    guest_features: VirtIOFeatureSet,
+    backend_features: VirtIOFeatureSet,
 
     config_len: usize,
     // config: *mut c_void,

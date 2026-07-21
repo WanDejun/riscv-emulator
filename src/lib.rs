@@ -43,12 +43,12 @@ pub mod wasm_api;
 
 pub use config::ram_config;
 
-use crate::device::virtio::virtio_mmio::VirtIODeviceID;
+use crate::device::virtio::virtio_device::VirtIODeviceEnum;
 use std::{path::PathBuf, str::FromStr};
 
 #[derive(Debug, Clone)]
 pub struct DeviceConfig {
-    pub dev_type: VirtIODeviceID,
+    pub dev_type: VirtIODeviceEnum,
     pub path: PathBuf,
 }
 
@@ -58,8 +58,8 @@ impl FromStr for DeviceConfig {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parts = s.split(':');
         let dev_type = match parts.next() {
-            Some("virtio-block") => VirtIODeviceID::Block,
-            Some("virtio-network") => VirtIODeviceID::Network,
+            Some("virtio-block") => VirtIODeviceEnum::VirtIOBlock,
+            Some("virtio-network") => VirtIODeviceEnum::VirtIONet,
             Some(other) => return Err(format!("Unknown device type: {}", other)),
             None => return Err("Invalid device arguments.".into()),
         };
