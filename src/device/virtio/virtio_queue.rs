@@ -26,7 +26,7 @@ bitflags! {
 // 128 bits (0x10 bytes)
 pub(crate) struct VirtQueueDesc {
     /* Address (guest-physical). */
-    paddr: u64,
+    pub(super) paddr: u64,
     /* Length. */
     pub(super) len: u32,
     /* The flags as indicated above. */
@@ -37,7 +37,20 @@ pub(crate) struct VirtQueueDesc {
 
 impl VirtQueueDesc {
     pub(crate) fn get_request_package<T>(&self, ram_base_raw: usize) -> *mut T {
-        (self.paddr - ram_config::BASE_ADDR + ram_base_raw as u64) as *mut T
+        (self.paddr - ram_config::BASE_ADDR as u64 + ram_base_raw as u64) as *mut T
+    }
+
+    pub(crate) fn has_next(&self) -> bool {
+        self.flags.contains(VirtQueueDescFlag::VIRTQ_DESC_F_NEXT)
+    }
+
+    fn buffer_in_ram(&self) -> bool {
+        let Some(offset) = self.paddr.checked_sub(ram_config::BASE_ADDR as u64) else {
+            return false;
+        };
+        offset
+            .checked_add(self.len as u64)
+            .is_some_and(|end| end <= ram_config::SIZE as u64)
     }
 }
 
@@ -53,43 +66,55 @@ impl VirtQueueDesc {
 
 pub(crate) struct VirtQueueDescHandle<'a> {
     table: &'a [VirtQueueDesc],
-    ram_base: usize,
+    ram_base_raw: usize,
     idx: usize,
+    remaining: usize,
 }
 
 impl VirtQueueDescHandle<'_> {
     pub(crate) fn new(
         table: *const VirtQueueDesc,
-        ram_base: usize,
+        ram_base_raw: usize,
         queue_num: u32,
         idx: usize,
     ) -> Self {
         Self {
             table: unsafe { slice::from_raw_parts(table, queue_num as usize) },
-            ram_base,
+            ram_base_raw,
             idx,
+            remaining: queue_num as usize,
         }
     }
 
-    fn get_indirect(&mut self) {
-        let mut idx = self.idx;
-        while self.table[idx]
-            .flags
-            .contains(VirtQueueDescFlag::VIRTQ_DESC_F_INDIRECT)
-        {
-            // Handle indirect descriptor case
-            debug_assert_eq!(
-                self.table[idx].len as usize % std::mem::size_of::<VirtQueueDesc>(),
-                0
-            );
-            self.table = unsafe {
-                slice::from_raw_parts(
-                    (self.table[idx].paddr - self.ram_base as u64) as *const VirtQueueDesc,
-                    self.table[idx].len as usize / std::mem::size_of::<VirtQueueDesc>(),
-                )
-            };
-            idx = 0;
+    fn get_indirect(&mut self) -> bool {
+        let desc = &self.table[self.idx];
+        let entry_size = size_of::<VirtQueueDesc>();
+        let table_len = desc.len as usize / entry_size;
+        if desc.len as usize % entry_size != 0 || table_len == 0 {
+            return false;
         }
+
+        let Some(offset) = desc.paddr.checked_sub(ram_config::BASE_ADDR as u64) else {
+            return false;
+        };
+        if desc.paddr % align_of::<VirtQueueDesc>() as u64 != 0 {
+            return false;
+        }
+        let Ok(offset) = usize::try_from(offset) else {
+            return false;
+        };
+        if offset
+            .checked_add(desc.len as usize)
+            .is_none_or(|end| end > ram_config::SIZE)
+        {
+            return false;
+        }
+
+        let table = (self.ram_base_raw + offset) as *const VirtQueueDesc;
+        self.table = unsafe { slice::from_raw_parts(table, table_len) };
+        self.idx = 0;
+        self.remaining = table_len;
+        true
     }
 
     pub(crate) fn get_entry_idx(&self) -> u32 {
@@ -97,17 +122,20 @@ impl VirtQueueDescHandle<'_> {
     }
 
     pub(crate) fn try_get(&mut self) -> Option<&VirtQueueDesc> {
-        if self.idx < self.table.len() {
+        if self.idx < self.table.len() && self.remaining != 0 {
             // indirect.
             if self.table[self.idx]
                 .flags
                 .contains(VirtQueueDescFlag::VIRTQ_DESC_F_INDIRECT)
+                && !self.get_indirect()
             {
-                self.get_indirect();
+                self.remaining = 0;
+                return None;
             }
 
             // get current and update to next.
             let cur = self.idx;
+            self.remaining -= 1;
             if self.table[cur]
                 .flags
                 .contains(VirtQueueDescFlag::VIRTQ_DESC_F_NEXT)
@@ -115,6 +143,10 @@ impl VirtQueueDescHandle<'_> {
                 self.idx = self.table[cur].next as usize;
             } else {
                 self.idx = self.table.len(); // mark as end.
+            }
+            if !self.table[cur].buffer_in_ram() {
+                self.remaining = 0;
+                return None;
             }
             Some(&self.table[cur])
         } else {
@@ -168,7 +200,8 @@ impl VirtQueueAvail {
         unsafe { std::slice::from_raw_parts_mut((base + 4) as *mut u16, queue_num as usize) }
     }
     pub(crate) fn idx_atomic_add(&mut self, val: u16) {
-        self.idx.fetch_add(val, std::sync::atomic::Ordering::AcqRel);
+        self.idx
+            .fetch_add(val, std::sync::atomic::Ordering::Release);
     }
     pub(crate) fn idx_store(&mut self, val: u16) {
         self.idx.store(val, std::sync::atomic::Ordering::Release);
@@ -251,7 +284,7 @@ impl VirtQueueUsed {
         self.idx.store(0, std::sync::atomic::Ordering::Relaxed);
     }
     pub(crate) fn get_index(&self) -> u16 {
-        self.idx.load(std::sync::atomic::Ordering::Relaxed)
+        self.idx.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 
@@ -287,6 +320,30 @@ impl VirtQueue {
             used: null_mut::<VirtQueueUsed>(),
         }
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.queue_num = 0;
+        self.last_avail_idx = 0;
+        self.desc_paddr = 0;
+        self.desc = null_mut();
+        self.avail_paddr = 0;
+        self.avail = null_mut();
+        self.used_paddr = 0;
+        self.used = null_mut();
+    }
+
+    fn guest_ram_ptr(&self, paddr: u64, len: usize, align: usize) -> Option<*mut u8> {
+        let offset = usize::try_from(paddr.checked_sub(ram_config::BASE_ADDR as u64)?).ok()?;
+        if paddr % align as u64 != 0
+            || offset
+                .checked_add(len)
+                .is_none_or(|end| end > ram_config::SIZE)
+        {
+            return None;
+        }
+        Some(unsafe { self.ram_base_raw.add(offset) })
+    }
+
     pub(crate) fn set_desc(&mut self, addr: u64) {
         self.desc_paddr = addr;
         self.update_desc_base(self.desc_paddr);
@@ -301,6 +358,7 @@ impl VirtQueue {
         self.used_paddr = addr;
         self.update_used_base(self.used_paddr);
     }
+
     pub(crate) fn set_used_high(&mut self, addr_high: u32) {
         self.used_paddr &= !((u32::MAX as u64) << 32);
         self.used_paddr |= (addr_high as u64) << 32;
@@ -308,43 +366,29 @@ impl VirtQueue {
     }
 
     fn update_avail_base(&mut self, paddr: u64) {
-        if paddr >= ram_config::BASE_ADDR {
-            self.avail = unsafe {
-                self.ram_base_raw
-                    .add((paddr - ram_config::BASE_ADDR) as usize)
-            } as *mut VirtQueueAvail;
-        }
+        let len = 4usize.saturating_add(self.queue_num as usize * size_of::<u16>());
+        self.avail = self
+            .guest_ram_ptr(paddr, len, align_of::<u16>())
+            .map_or(null_mut(), |ptr| ptr.cast());
     }
+
     fn update_desc_base(&mut self, paddr: u64) {
-        if paddr >= ram_config::BASE_ADDR {
-            self.desc = unsafe {
-                self.ram_base_raw
-                    .add((paddr - ram_config::BASE_ADDR) as usize)
-            } as *mut VirtQueueDesc;
-        }
+        let len = self.queue_num as usize * size_of::<VirtQueueDesc>();
+        self.desc = self
+            .guest_ram_ptr(paddr, len, align_of::<VirtQueueDesc>())
+            .map_or(null_mut(), |ptr| ptr.cast());
     }
+
     fn update_used_base(&mut self, paddr: u64) {
-        if paddr >= ram_config::BASE_ADDR {
-            self.used = unsafe {
-                self.ram_base_raw
-                    .add((paddr - ram_config::BASE_ADDR) as usize)
-            } as *mut VirtQueueUsed;
-        }
+        let len = 4usize.saturating_add(self.queue_num as usize * size_of::<VirtQueueUsedElem>());
+        self.used = self
+            .guest_ram_ptr(paddr, len, align_of::<VirtQueueUsed>())
+            .map_or(null_mut(), |ptr| ptr.cast());
     }
 
     pub(super) fn get_used_ring(&self) -> &mut VirtQueueUsed {
         unsafe { self.used.as_mut().unwrap() }
     }
-
-    // unsafe fn get_desc<'a>(
-    //     &'a self,
-    //     table: *mut VirtQueueDesc,
-    //     ram_base: *mut u8,
-    //     queue_num: u32,
-    //     idx: u16,
-    // ) -> VirtQueueDescHandle<'a> {
-    //     VirtQueueDescHandle::new(table, ram_base, queue_num, idx as usize)
-    // }
 
     // will add `last_avail_idx`
     fn try_get_desc(&mut self) -> Option<VirtQueueDescHandle<'_>> {
@@ -419,8 +463,7 @@ impl VirtQueue {
     }
 
     pub(super) fn ready(&self) -> bool {
-        // Always ready for request.
-        true
+        self.queue_num != 0 && !self.desc.is_null() && !self.avail.is_null() && !self.used.is_null()
     }
 }
 

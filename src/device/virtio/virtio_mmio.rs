@@ -8,12 +8,19 @@ use crate::{
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE},
-        virtio::{config::*, virtio_device::VirtIODeviceTrait},
+        plic::{
+            ExternalInterrupt,
+            irq_line::{PlicIRQLine, PlicIRQSource},
+        },
+        virtio::{
+            config::*,
+            virtio_device::{VirtIODeviceEnum, VirtIODeviceTrait},
+        },
     },
     utils::check_align,
 };
 
-pub const VIRTIO_DEVICE_ID_BLOCK: u16 = 2;
+pub const VIRTIO_DEVICE_ID_BLOCK: u16 = VirtIODeviceEnum::VirtIOBlock as u16;
 const VIRTIO_MMIO_CONFIG_OFFSET: u64 = VirtIO_MMIO_Offset::Config as u64;
 const VIRTIO_MMIO_MAX_QUEUES: usize = 8;
 const FEATURE_SELECT_BITS: u32 = 32;
@@ -158,6 +165,15 @@ impl VirtIOMMIO {
         self.queues.get_mut(self.queue_select)
     }
 
+    fn reset(&mut self) {
+        self.host_features_sel = 0;
+        self.guest_features_sel = 0;
+        self.guest_features = 0;
+        self.queues = [VirtIOMMIOQueueStatus::default(); VIRTIO_MMIO_MAX_QUEUES];
+        self.queue_select = 0;
+        unsafe { self.device.as_mut_unchecked() }.reset();
+    }
+
     fn feature_word(features: u64, select: u32) -> u32 {
         if select >= 2 {
             0
@@ -251,7 +267,7 @@ impl VirtIOMMIO {
                         self.selected_queue().is_some_and(|q| q.enable) as u32
                     }
                     VirtIO_MMIO_Offset::InterruptStatus => {
-                        vdev.isr().load(std::sync::atomic::Ordering::Relaxed) as u32
+                        vdev.isr().load(std::sync::atomic::Ordering::Acquire) as u32
                     }
                     VirtIO_MMIO_Offset::Status => *vdev.status() as u32,
                     VirtIO_MMIO_Offset::ConfigGeneration => vdev.get_generation(),
@@ -330,6 +346,12 @@ impl VirtIOMMIO {
                     unsafe { &mut *vdev }.queue_select(value);
                 }
                 VirtIO_MMIO_Offset::QueueNum => {
+                    if value == 0 || value > VIRTQUEUE_MAX_SIZE {
+                        error!(
+                            "VirtIO: invalid queue size {value}, maximum is {VIRTQUEUE_MAX_SIZE}"
+                        );
+                        return;
+                    }
                     let queue_select = self.queue_select;
                     if let Some(q) = self.selected_queue_mut() {
                         q.num = value;
@@ -342,8 +364,16 @@ impl VirtIOMMIO {
                 // VirtIO_MMIO_Offset::QueueAlign => {}, // legacy
                 // VirtIO_MMIO_Offset::QueuePFN => {}, // legacy
                 VirtIO_MMIO_Offset::QueueReady => {
+                    if value > 1 {
+                        error!("VirtIO: QueueReady only accepts 0 or 1, got {value}");
+                        return;
+                    }
                     let queue_select = self.queue_select;
                     let queue_config = if let Some(q) = self.selected_queue_mut() {
+                        if value == 1 && q.num == 0 {
+                            error!("VirtIO: cannot enable queue {queue_select} with size 0");
+                            return;
+                        }
                         q.enable = value != 0;
                         q.enable.then_some((q.num, q.desc, q.avail, q.used))
                     } else {
@@ -360,32 +390,48 @@ impl VirtIOMMIO {
                             vdev.set_desc(desc);
                             vdev.set_avail(avail);
                             vdev.set_used(used);
+                            if !vdev.queue_ready() {
+                                error!("VirtIO: queue {queue_select} addresses are invalid");
+                                self.queues[queue_select].enable = false;
+                            }
                         }
                     };
                 }
                 VirtIO_MMIO_Offset::QueueNotify => {
+                    // Publish the driver's queue writes before ringing the doorbell.
+                    std::sync::atomic::fence(std::sync::atomic::Ordering::Release);
                     let queue_idx = value;
                     let vdev = unsafe { &mut *vdev };
-                    if queue_idx < vdev.get_num_of_queue() {
+                    let ready = self
+                        .queues
+                        .get(queue_idx as usize)
+                        .is_some_and(|queue| queue.enable);
+                    if queue_idx < vdev.get_num_of_queue() && ready {
                         vdev.notify(queue_idx);
                     }
                 }
                 VirtIO_MMIO_Offset::InterruptAck => {
                     let vdev = unsafe { &mut *vdev };
-                    vdev.isr()
-                        .fetch_and(!(value as u8), std::sync::atomic::Ordering::AcqRel);
-                    vdev.update_irq();
+                    let clear_mask = value as u8;
+                    let old = vdev
+                        .isr()
+                        .fetch_and(!clear_mask, std::sync::atomic::Ordering::AcqRel);
+                    if old != old & !clear_mask {
+                        vdev.update_irq();
+                    }
                 }
                 VirtIO_MMIO_Offset::Status => {
+                    if value == 0 {
+                        self.reset();
+                        return;
+                    }
                     if let Some(new_status) = VirtIODeviceStatus::from_bits(value as u8) {
                         let vdev = unsafe { &mut *vdev };
-                        // if (new_status & VirtIODeviceStatus::DRIVER_OK).is_empty() {
-                        //     // virtio_mmio_stop_ioeventfd(proxy);
-                        // }
+
+                        *vdev.status() |= new_status.bits();
                         if !(new_status & VirtIODeviceStatus::FEATURES_OK).is_empty() {
                             vdev.set_feature(self.guest_features)
                         }
-                        *vdev.status() |= new_status.bits();
                     }
                 }
                 VirtIO_MMIO_Offset::QueueDescLow => {
@@ -502,6 +548,13 @@ impl MemMappedDeviceTrait for VirtIOMMIO {
     }
 }
 
+impl PlicIRQSource for VirtIOMMIO {
+    fn set_irq_line(&mut self, line: PlicIRQLine, id: ExternalInterrupt) {
+        let Ok(interrupt_id) = ExternalInterrupt::try_from(id);
+        unsafe { self.device.as_mut_unchecked() }.set_irq_line(line, interrupt_id);
+    }
+}
+
 #[cfg(test)]
 impl VirtIOMMIO {
     pub(crate) fn write_status(&mut self, status: VirtIODeviceStatus) {
@@ -577,12 +630,17 @@ impl GuestFeatureBuilder {
 #[cfg(test)]
 mod test {
     use core::slice;
-    use std::io::{Read, Seek};
+    use std::{
+        cell::RefCell,
+        io::{Read, Seek},
+        rc::Rc,
+    };
 
     use super::*;
     use crate::{
         device::{
             DeviceTrait,
+            plic::irq_line::PlicIRQHandler,
             virtio::{
                 config::VIRTIO_F_VERSION_1,
                 virtio_blk::{
@@ -602,12 +660,26 @@ mod test {
     const QUEUE_NUM: usize = 8;
     const DESC_NUM: usize = 16;
 
+    struct MockPlicIRQHandler {
+        changes: Rc<RefCell<Vec<(ExternalInterrupt, bool)>>>,
+    }
+
+    impl PlicIRQHandler for MockPlicIRQHandler {
+        fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
+            self.changes.borrow_mut().push((interrupt, level));
+        }
+    }
+
     #[test]
     fn test_mmio_blk_device() {
         let file_name = String::from("./tmp/test_mmio_blk_device.txt");
         let mut buf: [u8; 512] = [0u8; 512];
         buf[0xff] = 0x55;
         let mut file = init_block_file(&file_name, 1, |_| &buf);
+        let irq_changes = Rc::new(RefCell::new(Vec::new()));
+        let mut irq_handler = Box::new(MockPlicIRQHandler {
+            changes: irq_changes.clone(),
+        });
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
@@ -619,6 +691,8 @@ mod test {
             .get();
 
         let mut virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virt_device)));
+        virtio_mmio_device.set_irq_line(PlicIRQLine::new(&mut *irq_handler), 1);
+        irq_changes.borrow_mut().clear();
         assert_eq!(
             virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::DeviceId as u64),
             VIRTIO_DEVICE_ID_BLOCK as u32
@@ -681,7 +755,7 @@ mod test {
         let desc0 = &mut virt_queue_desc[0];
         let desc0_buf_addr = 0x8000_2300;
         desc0.init(
-            0x8000_2300,
+            desc0_buf_addr,
             size_of::<VirtioBlkReq>() as u32,
             VirtQueueDescFlag::VIRTQ_DESC_F_NEXT,
             1,
@@ -694,7 +768,12 @@ mod test {
         // data body
         let desc1 = &mut virt_queue_desc[1];
         let desc1_buf_addr = 0x8000_2400;
-        desc1.init(0x8000_2400, 0x200, VirtQueueDescFlag::VIRTQ_DESC_F_NEXT, 2);
+        desc1.init(
+            desc1_buf_addr,
+            0x200,
+            VirtQueueDescFlag::VIRTQ_DESC_F_NEXT,
+            2,
+        );
         let desc_buf = unsafe {
             slice::from_raw_parts_mut(
                 &mut ram[(desc1_buf_addr - ram_config::BASE_ADDR) as usize] as *mut u8,
@@ -727,10 +806,29 @@ mod test {
         let interrupt_status =
             virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::InterruptStatus as u64);
         assert_eq!(interrupt_status, 1);
+        assert_eq!(irq_changes.borrow().last(), Some(&(1, true)));
         virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::InterruptAck as u64, 1);
         let interrupt_status =
             virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::InterruptStatus as u64);
         assert_eq!(interrupt_status, 0);
+        assert_eq!(irq_changes.borrow().last(), Some(&(1, false)));
+
+        // FLUSH uses a two-descriptor chain: request header followed by status.
+        *req = VirtioBlkReq::new(VirtioBlkReqType::Flush, 0);
+        virt_queue_desc[0].init(
+            desc0_buf_addr,
+            size_of::<VirtioBlkReq>() as u32,
+            VirtQueueDescFlag::VIRTQ_DESC_F_NEXT,
+            2,
+        );
+        desc_status.status = 0xff;
+        avail_ring[1] = 0;
+        virtq_avail.idx_atomic_add(1);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::QueueNotify as u64, 0);
+        assert_eq!(desc_status.status, VirtIOBlkReqStatus::Ok as u8);
+        assert_eq!(virtq_used.get_index(), 2);
+        assert_eq!(virtq_used.ring(QUEUE_NUM as u32)[1].get_len(), 1);
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::InterruptAck as u64, 1);
 
         assert_eq!(desc_status.status, VirtIOBlkReqStatus::Ok as u8);
         assert_eq!(desc_buf[0], 0);
@@ -755,5 +853,25 @@ mod test {
             .read_u8(VirtIO_MMIO_Offset::Config as u64 + 0x20)
             .unwrap();
         assert_eq!(writeback, 0);
+
+        virtio_mmio_device.write_u32_impl(VirtIO_MMIO_Offset::Status as u64, 0);
+        assert_eq!(
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Status as u64),
+            0
+        );
+        assert_eq!(
+            virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::QueueReady as u64),
+            0
+        );
+
+        let unsupported_features = VIRTIO_F_VERSION_1 | VirtIOBlockFeature::Discard as u64;
+        virtio_mmio_device.set_guest_feature(unsupported_features);
+        virtio_mmio_device.write_status(
+            VirtIODeviceStatus::ACKNOWLEDGE
+                | VirtIODeviceStatus::DRIVER
+                | VirtIODeviceStatus::FEATURES_OK,
+        );
+        let status = virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::Status as u64);
+        assert_eq!(status & VirtIODeviceStatus::FEATURES_OK.bits() as u32, 0);
     }
 }

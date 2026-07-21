@@ -5,10 +5,62 @@ use std::sync::{
 
 use lazy_static::lazy_static;
 
-pub(crate) trait VirtIODeviceTrait {
+use crate::device::plic::irq_line::PlicIRQSource;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+#[allow(unused)]
+pub(crate) enum VirtIODeviceEnum {
+    Reserved = 0,
+    VirtIONet = 1,
+    VirtIOBlock = 2,
+    VirtIOConsole = 3,
+    VirtIORng = 4,
+    VirtIOBalloonTraditional = 5,
+    VirtIOIomem = 6,
+    VirtIORpmsg = 7,
+    VirtIOScsi = 8,
+    VirtIO9p = 9,
+    VirtIOMac80211Wlan = 10,
+    VirtIORprocSerial = 11,
+    VirtIOCaif = 12,
+    VirtIOBalloon = 13,
+    VirtIOGpu = 16,
+    VirtIOClock = 17,
+    VirtIOInput = 18,
+    VirtIOVsock = 19,
+    VirtIOCrypto = 20,
+    VirtIOSignalDistribution = 21,
+    VirtIOPstore = 22,
+    VirtIOIommu = 23,
+    VirtIOMem = 24,
+    VirtIOSound = 25,
+    VirtIOFs = 26,
+    VirtIOPmem = 27,
+    VirtIORpmb = 28,
+    VirtIOMac80211Hwsim = 29,
+    VirtIOVideoEncoder = 30,
+    VirtIOVideoDecoder = 31,
+    VirtIOScmi = 32,
+    VirtIONitroSecureModule = 33,
+    VirtIOI2cAdapter = 34,
+    VirtIOWatchdog = 35,
+    VirtIOCan = 36,
+    VirtIOParameterServer = 38,
+    VirtIOAudioPolicy = 39,
+    VirtIOBluetooth = 40,
+    VirtIOGpio = 41,
+    VirtIORdma = 42,
+    VirtIOCamera = 43,
+    VirtIOIsm = 44,
+    VirtIOSpiMaster = 45,
+}
+
+pub(crate) trait VirtIODeviceTrait: PlicIRQSource {
     fn get_device_id(&self) -> u16;
     fn status(&mut self) -> &mut u8;
     fn get_generation(&self) -> u32;
+    fn reset(&mut self);
 
     fn isr(&mut self) -> &mut AtomicU8;
     fn update_irq(&mut self);

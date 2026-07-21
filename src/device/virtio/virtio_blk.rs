@@ -8,11 +8,17 @@ use std::{
 use log::error;
 use num_enum::TryFromPrimitive;
 
-use crate::device::virtio::{
-    config::VIRTIO_F_VERSION_1,
-    virtio_device::VirtIODeviceTrait,
-    virtio_mmio::{VIRTIO_DEVICE_ID_BLOCK, VirtIODeviceStatus},
-    virtio_queue::{VirtQueue, VirtQueueDesc},
+use crate::device::{
+    plic::{
+        ExternalInterrupt,
+        irq_line::{PlicIRQLine, PlicIRQSource},
+    },
+    virtio::{
+        config::VIRTIO_F_VERSION_1,
+        virtio_device::VirtIODeviceTrait,
+        virtio_mmio::{VIRTIO_DEVICE_ID_BLOCK, VirtIODeviceStatus},
+        virtio_queue::{VirtQueue, VirtQueueDesc},
+    },
 };
 
 pub(super) const SECTOR_SIZE: usize = 512;
@@ -113,7 +119,7 @@ impl VirtioBlkConfig {
 //      Virtio block request types
 // ======================================
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub(crate) enum VirtioBlkReqType {
     In = 0,
     Out = 1,
@@ -181,7 +187,8 @@ pub(crate) struct VirtIOBlkDevice {
     pub(crate) name: &'static str,
     pub(crate) status: u8,
     pub(crate) isr: AtomicU8,
-    pub(crate) device_id: u16,
+    irq_line: Option<PlicIRQLine>,
+    interrupt_id: Option<ExternalInterrupt>,
 
     host_feature: u64,
     guest_feature: u64,
@@ -196,12 +203,7 @@ pub(crate) struct VirtIOBlkDevice {
 }
 
 impl VirtIOBlkDevice {
-    pub(crate) fn new(
-        name: &'static str,
-        ram_base_raw: *mut u8,
-        device_id: u16,
-        file_path: String,
-    ) -> Self {
+    pub(crate) fn new(name: &'static str, ram_base_raw: *mut u8, file_path: String) -> Self {
         let mut file;
         if let Ok(file_result) = OpenOptions::new()
             .read(true)
@@ -219,9 +221,10 @@ impl VirtIOBlkDevice {
         Self {
             name,
             status: 0,
-            device_id,
 
             isr: AtomicU8::new(0),
+            irq_line: None,
+            interrupt_id: None,
 
             host_feature: VIRTIO_F_VERSION_1,
             guest_feature: 0,
@@ -239,6 +242,7 @@ impl VirtIOBlkDevice {
     pub(crate) fn bound_file(&mut self, file: File) {
         self.file = file;
     }
+
     pub fn add_host_feature(mut self, new_feature: VirtIOBlockFeature) -> Self {
         self.host_feature |= new_feature as u64;
         self
@@ -264,41 +268,61 @@ impl VirtIOBlkDevice {
     }
 
     fn manage_request_header(ram_base_raw: usize, desc: &VirtQueueDesc) -> (VirtioBlkReqType, u64) {
+        const BAD_REQ: (VirtioBlkReqType, u64) = (VirtioBlkReqType::Unsupported, 0);
+        if desc.len < size_of::<VirtioBlkReq>() as u32 {
+            return BAD_REQ;
+        }
         let req = unsafe {
             desc.get_request_package::<VirtioBlkReq>(ram_base_raw)
-                .as_mut()
+                .as_ref()
                 .unwrap()
         };
 
         VirtioBlkReqType::try_from(req.request_type)
-            .map_or((VirtioBlkReqType::Unsupported, 0u64), |req_type| {
-                (req_type, req.sector)
-            })
+            .map_or(BAD_REQ, |req_type| (req_type, req.sector))
     }
 }
 
 impl VirtIODeviceTrait for VirtIOBlkDevice {
     fn get_device_id(&self) -> u16 {
-        self.device_id
+        VIRTIO_DEVICE_ID_BLOCK
     }
+
     fn status(&mut self) -> &mut u8 {
         &mut self.status
     }
+
     fn get_generation(&self) -> u32 {
         self.generation
+    }
+
+    fn reset(&mut self) {
+        self.status = 0;
+        self.guest_feature = 0;
+        self.queue.reset();
+        if self.isr.swap(0, std::sync::atomic::Ordering::AcqRel) != 0 {
+            self.update_irq();
+        }
     }
 
     fn isr(&mut self) -> &mut AtomicU8 {
         &mut self.isr
     }
-    fn update_irq(&mut self) {}
+
+    fn update_irq(&mut self) {
+        let (Some(line), Some(interrupt_id)) = (&mut self.irq_line, self.interrupt_id) else {
+            return;
+        };
+        let level = self.isr.load(std::sync::atomic::Ordering::Acquire) != 0;
+        line.set_irq(interrupt_id, level);
+    }
 
     fn get_host_feature(&self) -> u64 {
         self.host_feature
     }
     fn set_feature(&mut self, feature: u64) {
         if self.host_feature & feature != feature {
-            self.status &= !(VirtIODeviceStatus::DRIVER_OK.bits())
+            self.status &= !VirtIODeviceStatus::FEATURES_OK.bits();
         } else {
             self.guest_feature = feature;
         }
@@ -323,65 +347,72 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
 
     fn manage_one_request(&mut self) -> bool {
         let mut req_type = VirtioBlkReqType::Unsupported;
-        let mut sector: u64 = 0;
+        let mut data_offset = 0;
+        let mut req_status = VirtIOBlkReqStatus::Ok;
         let res = self
             .queue
             .manage_one_request(|desc: &VirtQueueDesc, idx: usize| match idx {
                 0 => {
-                    let t = Self::manage_request_header(self.ram_base_raw, desc);
-                    req_type = t.0;
-                    sector = t.1;
+                    (req_type, data_offset) = Self::manage_request_header(self.ram_base_raw, desc);
+                    data_offset *= SECTOR_SIZE as u64;
+                    if req_type == VirtioBlkReqType::Unsupported {
+                        req_status = VirtIOBlkReqStatus::Unsupported;
+                    }
                     0
                 }
 
-                1 => {
-                    let buf = unsafe {
-                        slice::from_raw_parts_mut(
-                            desc.get_request_package::<u8>(self.ram_base_raw),
-                            desc.len as usize,
-                        )
-                    };
-
+                _ if desc.has_next() => {
                     match req_type {
                         VirtioBlkReqType::In => {
-                            Self::read_blk(&mut self.file, buf, sector * SECTOR_SIZE as u64)
+                            let buf = unsafe {
+                                slice::from_raw_parts_mut(
+                                    desc.get_request_package::<u8>(self.ram_base_raw),
+                                    desc.len as usize,
+                                )
+                            };
+                            let len = Self::read_blk(&mut self.file, buf, data_offset);
+                            if len != desc.len {
+                                req_status = VirtIOBlkReqStatus::IoErr;
+                            }
+                            data_offset += len as u64;
+                            len
                         }
                         VirtioBlkReqType::Out => {
-                            Self::write_blk(&mut self.file, buf, sector * SECTOR_SIZE as u64)
-                        }
-                        VirtioBlkReqType::Flush => {
-                            self.file.flush().unwrap();
+                            let buf = unsafe {
+                                slice::from_raw_parts(
+                                    desc.get_request_package::<u8>(self.ram_base_raw),
+                                    desc.len as usize,
+                                )
+                            };
+                            let len = Self::write_blk(&mut self.file, buf, data_offset);
+                            if len != desc.len {
+                                req_status = VirtIOBlkReqStatus::IoErr;
+                            }
+                            data_offset += len as u64;
+                            // OUT buffers are read by the device, not written.
                             0
                         }
                         _ => {
-                            error!("virtio unsupport request: {:#?}", req_type);
-                            let status_bit = unsafe {
-                                desc.get_request_package::<VirtioBlkStatus>(self.ram_base_raw)
-                                    .as_mut()
-                                    .unwrap()
-                            };
-                            status_bit.write_status(VirtIOBlkReqStatus::Ok);
+                            req_status = VirtIOBlkReqStatus::Unsupported;
                             0
                         }
                     }
                 }
 
-                2 => {
-                    let status_bit = unsafe {
+                _ => {
+                    if desc.len < size_of::<VirtioBlkStatus>() as u32 {
+                        return 0;
+                    }
+                    if req_type == VirtioBlkReqType::Flush && self.file.flush().is_err() {
+                        req_status = VirtIOBlkReqStatus::IoErr;
+                    }
+                    let status = unsafe {
                         desc.get_request_package::<VirtioBlkStatus>(self.ram_base_raw)
                             .as_mut()
                             .unwrap()
                     };
-                    status_bit.write_status(VirtIOBlkReqStatus::Ok);
-                    0
-                }
-
-                _ => {
-                    error!(
-                        "illigal virtio request: {:#?}. More than 3 description table",
-                        req_type
-                    );
-                    0
+                    status.write_status(req_status);
+                    size_of::<VirtioBlkStatus>() as u32
                 }
             });
         res
@@ -400,8 +431,10 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
             && self.queue.get_avail_flag()
                 == crate::device::virtio::virtio_queue::VirtQueueAvailFlag::Default
         {
-            self.isr.fetch_or(1, std::sync::atomic::Ordering::Release);
-            self.update_irq();
+            let isr = self.isr.fetch_or(1, std::sync::atomic::Ordering::AcqRel);
+            if isr & 1 == 0 {
+                self.update_irq();
+            }
         }
     }
 
@@ -448,6 +481,14 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 }
 
+impl PlicIRQSource for VirtIOBlkDevice {
+    fn set_irq_line(&mut self, line: PlicIRQLine, interrupt_id: ExternalInterrupt) {
+        self.irq_line = Some(line);
+        self.interrupt_id = Some(interrupt_id);
+        self.update_irq();
+    }
+}
+
 #[cfg(test)]
 impl VirtIOBlkDevice {
     pub(crate) fn flush(&mut self) {
@@ -466,12 +507,7 @@ pub struct VirtIOBlkDeviceBuilder {
 impl VirtIOBlkDeviceBuilder {
     pub fn new(ram_base_raw: *mut u8, file: String) -> Self {
         Self {
-            device: VirtIOBlkDevice::new(
-                "Unnamed VirtIO Block Device",
-                ram_base_raw,
-                VIRTIO_DEVICE_ID_BLOCK,
-                file,
-            ),
+            device: VirtIOBlkDevice::new("Unnamed VirtIO Block Device", ram_base_raw, file),
         }
     }
 
@@ -569,7 +605,7 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file_name);
+        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, file_name);
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
@@ -660,7 +696,7 @@ mod test {
         // used_ring.index_add(1);
 
         let used_elem = used_ring.ring(QUEUE_NUM as u32)[0];
-        assert_eq!(used_elem.get_len(), 0x200);
+        assert_eq!(used_elem.get_len(), 0x201);
         assert_eq!(used_elem.get_id(), 0);
     }
 
@@ -674,7 +710,7 @@ mod test {
 
         let mut ram = Ram::new();
         let ram_base = &mut ram[0] as *mut u8;
-        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, 0, file_name);
+        let mut virt_device = VirtIOBlkDevice::new("VirtIO Block 0", ram_base, file_name);
         virt_device.set_queue_num(QUEUE_NUM as u32);
 
         let virtq_desc_base = 0x8000_2000 as u64;
@@ -768,7 +804,7 @@ mod test {
         // used_ring.index_add(1);
 
         let used_elem = used_ring.ring(QUEUE_NUM as u32)[0];
-        assert_eq!(used_elem.get_len(), 0x200);
+        assert_eq!(used_elem.get_len(), 1);
         assert_eq!(used_elem.get_id(), 0);
 
         let mut buf: [u8; SECTOR_SIZE] = [0u8; SECTOR_SIZE];
