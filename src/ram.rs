@@ -23,22 +23,24 @@ pub enum RamImageError {
     },
 }
 
-const RESERVATION_SET_SIZE: WordType = 0x08;
+const RESERVATION_SET_BIT_WIDTH: WordType = 3; // 64 bit
 
 #[derive(Debug, Clone, Copy)]
 struct Reservation {
-    addr: WordType,
+    reservation_set_id: WordType,
 }
 
 impl Reservation {
     fn new(addr: WordType) -> Self {
-        Self { addr }
+        Self {
+            reservation_set_id: addr >> RESERVATION_SET_BIT_WIDTH,
+        }
     }
 
     fn in_the_same_reservation_set(&self, addr: WordType) -> bool {
         // Note this LR might have had a different effective address and data size,
         // but reserved the SC’s address as part of the reservation set.
-        self.addr == (addr & !(RESERVATION_SET_SIZE - 1))
+        self.reservation_set_id == addr >> RESERVATION_SET_BIT_WIDTH
     }
 }
 
