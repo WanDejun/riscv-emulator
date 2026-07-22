@@ -309,6 +309,23 @@ mod tests {
     }
 
     #[test]
+    fn lr_sc_within_64bit_reservation_set_succeeds() {
+        let mut ram = Ram::new();
+        ram.write::<u64>(0, 0).unwrap();
+
+        // LR the high 32-bit word of the 64-bit reservation set, then SC it.
+        ram.load_reserved::<u32>(4).unwrap();
+        assert!(ram.store_conditional::<u32>(4, 0x1234_5678).unwrap());
+        assert_eq!(ram.read::<u64>(0).unwrap(), 0x1234_5678_0000_0000);
+
+        // LR the high 32-bit word, then SC the low 32-bit word.
+        // Both belong to the same 64-bit reservation set, so SC should succeed.
+        ram.load_reserved::<u32>(4).unwrap();
+        assert!(ram.store_conditional::<u32>(0, 0xdead_beef).unwrap());
+        assert_eq!(ram.read::<u64>(0).unwrap(), 0x1234_5678_dead_beef);
+    }
+
+    #[test]
     fn test_read_write_reject_end_and_crossing_accesses() {
         let mut ram = Ram::new();
         let last_word = ram_config::SIZE as WordType - size_of::<u64>() as WordType;
