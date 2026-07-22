@@ -1,4 +1,7 @@
-use crate::isa::riscv::executor::{BatchResult, ExecutionHook, NoopExecutionHook, RVCPU};
+use crate::{
+    device::plic::types::PlicContextId,
+    isa::riscv::executor::{BatchResult, ExecutionHook, NoopExecutionHook, RVCPU},
+};
 
 pub mod virt;
 
@@ -6,6 +9,19 @@ pub mod virt;
 pub enum BoardStatus {
     Running,
     Halt,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(usize)]
+pub(crate) enum VirtBoardPlicContextId {
+    Cpu0MachineMode,
+    Cpu0SuperviserMode,
+}
+
+impl Into<PlicContextId> for VirtBoardPlicContextId {
+    fn into(self) -> PlicContextId {
+        self as PlicContextId
+    }
 }
 
 pub trait Board {

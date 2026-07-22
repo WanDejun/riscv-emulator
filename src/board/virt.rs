@@ -13,7 +13,7 @@ use crossbeam::channel;
 use crate::{
     DeviceConfig,
     background::BackgroundExecutor,
-    board::{Board, BoardStatus},
+    board::{Board, BoardStatus, VirtBoardPlicContextId},
     byte_io::{ByteSinkExt, ByteSource},
     config::arch_config::WordType,
     device::{
@@ -325,8 +325,14 @@ impl RVBoardBuilder {
             Interrupt::SupervisorExternal,
         );
 
-        plic.borrow_mut().set_irq_line(plic_mathine_irq_line, 0);
-        plic.borrow_mut().set_irq_line(plic_supervisor_irq_line, 1);
+        plic.borrow_mut().set_irq_line(
+            plic_mathine_irq_line,
+            VirtBoardPlicContextId::Cpu0MachineMode.into(),
+        );
+        plic.borrow_mut().set_irq_line(
+            plic_supervisor_irq_line,
+            VirtBoardPlicContextId::Cpu0SuperviserMode.into(),
+        );
 
         // Hand the device poller's tick to the background executor and start the worker thread.
         let mut background = self.background;
@@ -455,8 +461,12 @@ impl VirtBoard {
         unsafe { self.timer.as_mut_unchecked() }.tick();
         self.background.poll_if_single_thread_mode();
         self.device_poller.trigger_external_interrupt();
-        self.plic.borrow_mut().update_context_irq_line(0);
-        self.plic.borrow_mut().update_context_irq_line(1);
+        self.plic
+            .borrow_mut()
+            .update_context_irq_line(VirtBoardPlicContextId::Cpu0MachineMode.into());
+        self.plic
+            .borrow_mut()
+            .update_context_irq_line(VirtBoardPlicContextId::Cpu0MachineMode.into());
     }
 
     fn finish_cpu_batch(&mut self, cycles: u64) {

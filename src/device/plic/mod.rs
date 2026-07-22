@@ -1,5 +1,5 @@
 pub mod irq_line;
-mod types;
+pub mod types;
 
 use std::hint::unlikely;
 
@@ -433,7 +433,7 @@ impl PLIC {
             return;
         }
         self.layout.set_pending(interrupt_id);
-        self.update_all_context_irq_lines();
+        // self.update_all_context_irq_lines();
     }
 
     /// Clear a pending external interrupt source.
@@ -442,7 +442,7 @@ impl PLIC {
             return;
         }
         self.layout.clear_pending(interrupt_id);
-        self.update_all_context_irq_lines();
+        // self.update_all_context_irq_lines();
     }
 
     /// Refresh the target CPU interrupt line for one PLIC context.
