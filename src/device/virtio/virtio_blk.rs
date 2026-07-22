@@ -5,7 +5,7 @@ use std::{
     sync::atomic::AtomicU8,
 };
 
-use log::error;
+use log::{error, info};
 use num_enum::TryFromPrimitive;
 
 use crate::device::{
@@ -239,6 +239,8 @@ impl VirtIOBlkDevice {
             );
         }
 
+        info!("build virtio block device.");
+
         Self {
             name,
             status: 0,
@@ -310,6 +312,7 @@ impl VirtIOBlkDevice {
 
 impl VirtIODeviceTrait for VirtIOBlkDevice {
     fn get_device_id(&self) -> u16 {
+        info!("get block device id.");
         VIRTIO_DEVICE_ID_BLOCK
     }
 
@@ -322,6 +325,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 
     fn reset(&mut self) {
+        info!("reset virtio block device.");
         self.status = 0;
         self.guest_feature = 0;
         self.queue.reset();
@@ -346,6 +350,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
         self.host_feature
     }
     fn set_feature(&mut self, feature: VirtIOFeatureSet) {
+        info!("set virtio block feature.");
         if feature & virtio_reserved_feature::VERSION_1 == 0
             || self.host_feature & feature != feature
         {
@@ -373,6 +378,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 
     fn manage_one_request(&mut self) -> bool {
+        info!("manage virtio block request.");
         let mut req_type = VirtioBlkReqType::Unsupported;
         let mut data_offset = 0;
         let mut req_status = VirtIOBlkReqStatus::Ok;

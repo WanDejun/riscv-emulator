@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 
 use bitflags::bitflags;
-use log::error;
+use log::{error, info};
 use num_enum::TryFromPrimitive;
 
 use crate::{
@@ -229,6 +229,8 @@ impl VirtIOMMIO {
                     VirtIO_MMIO_Offset::DeviceId => vdev.get_device_id() as u32,
                     VirtIO_MMIO_Offset::VendorId => VIRT_VENDOR,
                     VirtIO_MMIO_Offset::DeviceFeatures => {
+                        info!("virtio-mmio read device feature.");
+
                         Self::feature_word(vdev.get_host_feature(), self.host_features_sel)
                     }
                     VirtIO_MMIO_Offset::QueueNumMax => {
@@ -307,6 +309,7 @@ impl VirtIOMMIO {
             Ok(offset_type) => match offset_type {
                 VirtIO_MMIO_Offset::DeviceFeaturesSelect => self.host_features_sel = value,
                 VirtIO_MMIO_Offset::DriverFeatures => {
+                    info!("virtio-mmio write driver feature.");
                     Self::set_feature_word(
                         &mut self.guest_features,
                         self.guest_features_sel,

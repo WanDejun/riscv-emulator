@@ -314,7 +314,6 @@ impl RVCPU {
             };
 
             // ID
-
             let decoder_result = self.decoder.decode(raw_instr);
             let Some(decode_instr) = decoder_result else {
                 cold_path();
