@@ -72,6 +72,14 @@
 			compatible = "ns16550a";
 		};
 
+		// virtio_mmio 设备
+		// virtio_mmio@10001000 {
+		// 	interrupts = <0x01>;
+		// 	interrupt-parent = <0x11>;
+		// 	reg = <0x00 0x10001000 0x00 0x1000>;
+		// 	compatible = "virtio,mmio";
+		// };
+
 		plic@c000000 {
 			phandle = <0x11>;
 			riscv,ndev = <0x35>;
