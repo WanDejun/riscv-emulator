@@ -7,14 +7,15 @@
 The main features of `RISC-V Emulator` include:
 
 - Supported ISA:
-  - RV64G (RV64IMAFD, Zicsr, Zifencei)
+  - RV64GC (RV64IMAFDC, Zicsr, Zifencei)
+  - supports partial `V` extensions (floating-point support is still not fully developed)
 - Supported privilege modes:
   - M, S, and U modes
 - A simple debugger monitor called rvdb
 - GDB support
 - Virtual memory
 - Devices:
-  - CLINT, PLIC, serial, and VirtIO-blk (VirtIO atomicity is currently broken)
+  - CLINT, PLIC, serial, and virtIO-mmio (Only support block device currently)
 
 An online version with the emulator's core functionality is also available: [rvemu-web](https://blog.satori-march.top/rvemu-web).
 
@@ -76,17 +77,59 @@ cargo run -- ./test_resources/bin/virtio_blk_test.elf --device=virtio-block:./tm
 
 At present, the emulator can boot the Linux 6.18.2 kernel with BusyBox v1.37.0 in an initramfs via OpenSBI. You need to compile OpenSBI, the kernel, and BusyBox yourself, and adjust some configuration because RV64C is not yet supported. The `Makefile` in the repository root may be helpful.
 
+#### Use Virtio Device in Linux
+
+When booting Linux with a Virtio block device attached, the kernel log will show the device being recognized:
+
+```
+[   72.993894] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   73.013248] virtio_blk virtio0: [vda] 8 512-byte logical blocks (4.10 kB/4.00 KiB)
+```
+
+To access the Virtio block device (`/dev/vda`) from the Linux shell:
+
+1. **Determine the device number** — read the major/minor numbers from sysfs:
+   ```sh
+   cat /sys/block/vda/dev
+   ```
+   This typically outputs `254:0`.
+
+2. **Create the device node** — use `mknod` to create the block device file:
+   ```sh
+   mknod /dev/vda b 254 0
+   ```
+
+3. **Verify** — check that the device node appears:
+   ```sh
+   ls /dev
+   ```
+
+Once `/dev/vda` is available, you can perform block-level operations:
+
+- **Read/write raw data** with `dd`:
+  ```sh
+  dd if=/dev/vda of=/tmp/output bs=512 count=8
+  dd if=/tmp/data of=/dev/vda bs=512 count=4 seek=2
+  ```
+- **Create a filesystem and mount it** (if the device contains a disk image with a partition table or filesystem):
+  ```sh
+  mkfs.ext2 /dev/vda
+  mount /dev/vda /mnt
+  ```
+
+Additional device metadata is available under `/sys/block/vda/`.
+
 ## Virt Board
 
 ### MMIO Address Map
 
-| Device | Address Base | Address Length |
-| :-: | :-: | :-: |
-| `power-manager`   | 0x0010_0000   | 0x1000      |
-| `uart`            | 0x1000_0000   | 0x08        |
-| `clint`           | 0x0200_0000   | 0x10000     |
-| `virtio`          | 0x1000_1000   | 0x1000      |
-| `ram`             | 0x8000_0000   | 0x2000_0000 |
+|     Device      | Address Base |   Address Length    | Interrupt ID |
+| :-------------: | :----------: | :-----------------: | :----------: |
+| `power-manager` | 0x0010_0000  |       0x1000        |      -       |
+|     `uart`      | 0x1000_0000  |        0x08         |     0x0a     |
+|     `clint`     | 0x0200_0000  |       0x10000       |      -       |
+|  `virtio-mmio`  | 0x1000_1000  |       0x1000        |     0x01     |
+|      `ram`      | 0x8000_0000  | 0x2000_0000 (512MB) |      -       |
 
 ## License
 
