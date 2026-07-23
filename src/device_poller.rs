@@ -6,14 +6,33 @@ use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
 
 use std::sync::{Arc, Mutex};
 
-pub trait PollingEventTrait: Send {
-    /// Poll once without blocking the caller thread.
-    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlicIRQState {
+    pub interrupt_id: ExternalInterrupt,
+    pub level: bool,
 }
 
-pub trait PollingFn: FnMut() -> Option<ExternalInterrupt> {}
+impl PlicIRQState {
+    pub fn new(interrupt_id: ExternalInterrupt, level: bool) -> Self {
+        Self {
+            interrupt_id,
+            level,
+        }
+    }
+}
 
-impl<F: FnMut() -> Option<ExternalInterrupt>> PollingFn for F {}
+pub trait PollingEventTrait: Send {
+    /// Poll once without blocking and return the current absolute PLIC IRQ line state.
+    ///
+    /// `level` is the line level at the time of this sample. Implementations
+    /// must not convert it into a pulse or suppress unchanged levels; the
+    /// poller owns transition detection.
+    fn poll_nonblocking(&mut self) -> PlicIRQState;
+}
+
+pub trait PollingFn: FnMut() -> PlicIRQState {}
+
+impl<F: FnMut() -> PlicIRQState> PollingFn for F {}
 
 pub struct PollingFnWrapper<F>
 where
@@ -29,14 +48,19 @@ impl<F: PollingFn + Send> PollingFnWrapper<F> {
 }
 
 impl<F: PollingFn + Send> PollingEventTrait for PollingFnWrapper<F> {
-    fn poll_nonblocking(&mut self) -> Option<ExternalInterrupt> {
+    fn poll_nonblocking(&mut self) -> PlicIRQState {
         (self.f)()
     }
 }
 
+struct PollingEventEntry {
+    event: Box<dyn PollingEventTrait>,
+    previous: Option<PlicIRQState>,
+}
+
 // TODO: `PollerCore` is unnecessary after `BackgroundExecutor` has been extracted.
 struct PollerCore {
-    events: Arc<Mutex<Vec<Box<dyn PollingEventTrait>>>>,
+    events: Arc<Mutex<Vec<PollingEventEntry>>>,
 
     #[cfg(feature = "riscv64")]
     plic_irq_line: Option<PlicIRQLine>,
@@ -52,20 +76,46 @@ impl PollerCore {
     }
 
     fn add_event(&mut self, event: Box<dyn PollingEventTrait>) {
-        self.events.lock().unwrap().push(event);
+        self.events.lock().unwrap().push(PollingEventEntry {
+            event,
+            previous: None,
+        });
     }
 
-    fn poll_once_collect(
-        events: &Arc<Mutex<Vec<Box<dyn PollingEventTrait>>>>,
-    ) -> Vec<ExternalInterrupt> {
-        let mut pending = Vec::new();
+    /// Sample each IRQ line and return only changes from its previously observed level.
+    ///
+    /// The returned states carry the new absolute level. Suppressing stable
+    /// samples here prevents unchanged device levels from flooding the channel.
+    fn poll_once_collect(events: &Arc<Mutex<Vec<PollingEventEntry>>>) -> Vec<PlicIRQState> {
+        let mut changes = Vec::new();
         let mut guard = events.lock().unwrap();
-        for event in guard.iter_mut() {
-            if let Some(id) = event.poll_nonblocking() {
-                pending.push(id);
+        for entry in guard.iter_mut() {
+            let current = entry.event.poll_nonblocking();
+
+            match entry.previous {
+                None => {
+                    if current.level {
+                        changes.push(current);
+                    }
+                }
+                Some(previous) if previous.interrupt_id == current.interrupt_id => {
+                    if previous.level != current.level {
+                        changes.push(current);
+                    }
+                }
+                Some(previous) => {
+                    if previous.level {
+                        changes.push(PlicIRQState::new(previous.interrupt_id, false));
+                    }
+                    if current.level {
+                        changes.push(current);
+                    }
+                }
             }
+
+            entry.previous = Some(current);
         }
-        pending
+        changes
     }
 
     fn dispatch_irq(&mut self, id: ExternalInterrupt, level: bool) {
@@ -94,16 +144,16 @@ impl PollerCore {
 pub struct DevicePoller {
     core: PollerCore,
 
-    /// Sent from the polling task (any thread), received on the main thread.
-    irq_sender: Sender<ExternalInterrupt>,
-    irq_receiver: Receiver<ExternalInterrupt>,
+    /// Level transitions produced by `poll_once_collect`, sent from the polling
+    /// task and received on the main thread.
+    irq_sender: Sender<PlicIRQState>,
+    irq_receiver: Receiver<PlicIRQState>,
 }
 
+const MAX_IRQ_CHANGES_PER_BATCH: usize = 256;
+
 impl DevicePoller {
-    pub fn new(
-        plic_irq_tx: Sender<ExternalInterrupt>,
-        plic_irq_rx: Receiver<ExternalInterrupt>,
-    ) -> Self {
+    pub fn new(plic_irq_tx: Sender<PlicIRQState>, plic_irq_rx: Receiver<PlicIRQState>) -> Self {
         Self {
             core: PollerCore::new(),
             irq_sender: plic_irq_tx,
@@ -123,10 +173,10 @@ impl DevicePoller {
         let events = self.core.events.clone();
         let sender = self.irq_sender.clone();
         move || {
-            let pending = PollerCore::poll_once_collect(&events);
-            let triggered = !pending.is_empty();
-            for id in pending {
-                let _ = sender.send(id);
+            let changes = PollerCore::poll_once_collect(&events);
+            let triggered = !changes.is_empty();
+            for change in changes {
+                let _ = sender.send(change);
             }
             triggered
         }
@@ -136,8 +186,20 @@ impl DevicePoller {
     /// main thread after
     /// [`BackgroundExecutor::poll_once`](crate::background::BackgroundExecutor::poll_once).
     pub fn trigger_external_interrupt(&mut self) {
-        while let Ok(id) = self.irq_receiver.try_recv() {
-            self.core.dispatch_irq(id, true);
+        let queued = self.irq_receiver.len();
+        if queued > MAX_IRQ_CHANGES_PER_BATCH {
+            log::warn!(
+                "PLIC IRQ change queue contains {} entries; processing {} this batch",
+                queued,
+                MAX_IRQ_CHANGES_PER_BATCH
+            );
+        }
+
+        for _ in 0..queued.min(MAX_IRQ_CHANGES_PER_BATCH) {
+            let Ok(change) = self.irq_receiver.try_recv() else {
+                break;
+            };
+            self.core.dispatch_irq(change.interrupt_id, change.level);
         }
     }
 }
@@ -146,5 +208,59 @@ impl DevicePoller {
 impl PlicIRQSource for DevicePoller {
     fn set_irq_line(&mut self, line: PlicIRQLine, _id: ExternalInterrupt) {
         self.core.set_irq_line(line);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn stable_irq_level_only_produces_transitions() {
+        let level = Arc::new(AtomicBool::new(false));
+        let poll_level = level.clone();
+        let mut core = PollerCore::new();
+        core.add_event(Box::new(PollingFnWrapper::new(move || {
+            PlicIRQState::new(10, poll_level.load(Ordering::Acquire))
+        })));
+
+        assert!(PollerCore::poll_once_collect(&core.events).is_empty());
+
+        level.store(true, Ordering::Release);
+        assert_eq!(
+            PollerCore::poll_once_collect(&core.events),
+            vec![PlicIRQState::new(10, true)]
+        );
+        assert!(PollerCore::poll_once_collect(&core.events).is_empty());
+
+        level.store(false, Ordering::Release);
+        assert_eq!(
+            PollerCore::poll_once_collect(&core.events),
+            vec![PlicIRQState::new(10, false)]
+        );
+        assert!(PollerCore::poll_once_collect(&core.events).is_empty());
+    }
+
+    #[test]
+    fn changing_irq_id_deasserts_the_previous_source_first() {
+        let interrupt_id = Arc::new(std::sync::atomic::AtomicU32::new(10));
+        let poll_interrupt_id = interrupt_id.clone();
+        let mut core = PollerCore::new();
+        core.add_event(Box::new(PollingFnWrapper::new(move || {
+            PlicIRQState::new(poll_interrupt_id.load(Ordering::Acquire), true)
+        })));
+
+        assert_eq!(
+            PollerCore::poll_once_collect(&core.events),
+            vec![PlicIRQState::new(10, true)]
+        );
+
+        interrupt_id.store(11, Ordering::Release);
+        assert_eq!(
+            PollerCore::poll_once_collect(&core.events),
+            vec![PlicIRQState::new(10, false), PlicIRQState::new(11, true)]
+        );
     }
 }

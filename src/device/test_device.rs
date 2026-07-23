@@ -8,7 +8,7 @@ use std::{
         Arc,
         atomic::{AtomicU32, Ordering},
     },
-    time::{self, Duration, SystemTime},
+    time::{Duration, Instant},
 };
 
 use crossbeam::channel::{Receiver, Sender};
@@ -20,7 +20,7 @@ use crate::{
         config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
         plic::ExternalInterrupt,
     },
-    device_poller::PollingEventTrait,
+    device_poller::{PlicIRQState, PollingEventTrait},
     utils::check_align,
 };
 
@@ -46,11 +46,14 @@ impl TestDeviceLayout {
 
 enum PollerDataPackage {
     // InterruptStatus(u32),
-    Data(u64),
+    Data {
+        interval_ms: u64,
+        configured_at: Instant,
+    },
 }
 pub struct TestDevicePoller {
     interrupt_mask_register: Arc<AtomicU32>,
-    pre_time: SystemTime,
+    pre_time: Instant,
     step_time: Duration,
     receiver: Receiver<PollerDataPackage>,
 }
@@ -59,7 +62,7 @@ impl TestDevicePoller {
     fn new(receiver: Receiver<PollerDataPackage>, imr: Arc<AtomicU32>) -> Self {
         Self {
             interrupt_mask_register: imr,
-            pre_time: SystemTime::now(),
+            pre_time: Instant::now(),
             step_time: Duration::from_micros(0),
             receiver,
         }
@@ -69,7 +72,7 @@ impl TestDevicePoller {
 pub(crate) struct TestDevice {
     layout: TestDeviceLayout,
     sender: Sender<PollerDataPackage>,
-    receiver: Receiver<PollerDataPackage>,
+    receiver: Option<Receiver<PollerDataPackage>>,
 }
 
 impl TestDevice {
@@ -78,7 +81,7 @@ impl TestDevice {
         Self {
             layout: TestDeviceLayout::new(),
             sender,
-            receiver,
+            receiver: Some(receiver),
         }
     }
 
@@ -124,13 +127,19 @@ impl TestDevice {
             0x08 => {
                 self.layout.data_register0 = data_u32;
                 self.sender
-                    .try_send(PollerDataPackage::Data(self.get_data64()))
+                    .try_send(PollerDataPackage::Data {
+                        interval_ms: self.get_data64(),
+                        configured_at: Instant::now(),
+                    })
                     .unwrap();
             }
             0x0c => {
                 self.layout.data_register1 = data_u32;
                 self.sender
-                    .try_send(PollerDataPackage::Data(self.get_data64()))
+                    .try_send(PollerDataPackage::Data {
+                        interval_ms: self.get_data64(),
+                        configured_at: Instant::now(),
+                    })
                     .unwrap();
             }
             _ => return Err(MemError::StoreFault),
@@ -144,7 +153,9 @@ impl DeviceTrait for TestDevice {
 
     fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
         let poller = TestDevicePoller::new(
-            self.receiver.clone(),
+            self.receiver
+                .take()
+                .expect("test device poll event can only be registered once"),
             self.layout.interrupt_mask_register.clone(),
         );
         Some(Box::new(poller))
@@ -164,31 +175,34 @@ impl MemMappedDeviceTrait for TestDevice {
 }
 
 impl PollingEventTrait for TestDevicePoller {
-    fn poll_nonblocking(&mut self) -> Option<super::plic::ExternalInterrupt> {
+    fn poll_nonblocking(&mut self) -> PlicIRQState {
         while let Ok(v) = self.receiver.try_recv() {
             match v {
-                PollerDataPackage::Data(t) => {
-                    self.step_time = Duration::from_millis(t);
-                    self.pre_time = time::SystemTime::now();
+                PollerDataPackage::Data {
+                    interval_ms,
+                    configured_at,
+                } => {
+                    self.step_time = Duration::from_millis(interval_ms);
+                    self.pre_time = configured_at;
                 }
             }
         }
-        let cur = time::SystemTime::now();
+        let cur = Instant::now();
 
         if (self.interrupt_mask_register.load(Ordering::Acquire) & 1) == 0 {
             self.pre_time = cur;
-            return None;
+            return PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, false);
         }
 
-        if cur.duration_since(self.pre_time).unwrap() > self.step_time {
-            println!("interrupt id: {}.", 63);
+        if cur.duration_since(self.pre_time) > self.step_time {
+            println!("interrupt id: {}.", TEST_DEVICE_INTERRUPT_ID);
             self.pre_time = cur;
             // trigger only one time -> use for debug.
             // self.interrupt_mask_register
             //     .fetch_and(!0x1, Ordering::Release);
-            Some(63)
+            PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, true)
         } else {
-            None
+            PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, false)
         }
     }
 }

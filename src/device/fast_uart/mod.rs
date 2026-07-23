@@ -20,7 +20,7 @@ use crate::{
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
         plic::ExternalInterrupt,
     },
-    device_poller::{PollingEventTrait, PollingFnWrapper},
+    device_poller::{PlicIRQState, PollingEventTrait, PollingFnWrapper},
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -430,10 +430,14 @@ impl DeviceTrait for FastUart16550 {
         let thre_pending = self.thre_pending.clone();
         let rx_pending = self.rx_pending.clone();
         Some(Box::new(PollingFnWrapper::new(move || {
-            FastUart16550::eval_irq(
-                ier.load(Ordering::Acquire),
-                thre_pending.load(Ordering::Acquire),
-                rx_pending.load(Ordering::Acquire),
+            PlicIRQState::new(
+                UART_IRQ,
+                FastUart16550::eval_irq(
+                    ier.load(Ordering::Acquire),
+                    thre_pending.load(Ordering::Acquire),
+                    rx_pending.load(Ordering::Acquire),
+                )
+                .is_some(),
             )
         })))
     }
@@ -538,5 +542,25 @@ mod test {
         assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02); // IIR: THR empty
         assert_eq!(uart.poll_interrupt(), None); // cleared, no storm
+    }
+
+    #[test]
+    fn poll_event_reports_uart_irq_level_changes() {
+        let (mut uart, mut port) = FastUart16550::new();
+        let mut event = uart.get_poll_event().unwrap();
+
+        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
+
+        uart.write_impl::<u8>(1, 0x01).unwrap();
+        port.receive_bytes([b'x']);
+        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, true));
+
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'x');
+        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
+
+        uart.write_impl::<u8>(1, 0x02).unwrap();
+        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, true));
+        assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02);
+        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
     }
 }

@@ -17,7 +17,7 @@ use std::{
 use crate::{
     config::arch_config::WordType,
     device::{DeviceTrait, MemError, plic::ExternalInterrupt},
-    device_poller::{PollingEventTrait, PollingFnWrapper},
+    device_poller::{PlicIRQState, PollingEventTrait, PollingFnWrapper},
 };
 
 const SIFIVE_SPI_REGISTER_SIZE: WordType = 0x1000;
@@ -408,7 +408,7 @@ impl DeviceTrait for SifiveSpiController {
         Some(Box::new(PollingFnWrapper::new(move || {
             let enabled = ie.load(Ordering::Acquire);
             let pending = ip.load(Ordering::Acquire);
-            (enabled & pending != 0).then_some(irq_id)
+            PlicIRQState::new(irq_id, enabled & pending != 0)
         })))
     }
 }
@@ -479,12 +479,12 @@ mod test {
             .unwrap();
 
         let mut poller = spi.get_poll_event().unwrap();
-        assert_eq!(poller.poll_nonblocking(), Some(12));
+        assert_eq!(poller.poll_nonblocking(), PlicIRQState::new(12, true));
         assert_eq!(
             spi.read_impl::<u32>(sifive_spi_reg_offset::RXDATA).unwrap() & rxdata::DATA_MASK,
             0x11
         );
-        assert_eq!(poller.poll_nonblocking(), None);
+        assert_eq!(poller.poll_nonblocking(), PlicIRQState::new(12, false));
     }
 
     #[test]

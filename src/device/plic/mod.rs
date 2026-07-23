@@ -81,6 +81,11 @@ const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
 pub struct PLICLayout {
     priority: [PlicPriority; VIRT_MAX_INTERRUPTS],
     pending: PLICBitReg,
+    /// Latest electrical level observed at each interrupt gateway.
+    ///
+    /// This is separate from `pending`: a low level cannot retract an accepted
+    /// request, while a level that remains high must create another request
+    /// after the previous one is claimed and completed.
     source_level: PLICBitReg,
     contexts: [PLICContext; VIRT_MAX_CONTEXTS],
     /// Interrupt source ids sorted by descending priority, then ascending source id.
@@ -131,14 +136,22 @@ impl PLICLayout {
         self.pending.read_word(word_index)
     }
 
-    #[inline]
-    fn set_pending(&mut self, interrupt_id: ExternalInterrupt) {
-        self.pending.set_bit(interrupt_id);
-    }
-
-    #[inline]
-    fn clear_pending(&mut self, interrupt_id: ExternalInterrupt) {
-        self.pending.clear_bit(interrupt_id);
+    /// Update the electrical level observed at one interrupt gateway.
+    ///
+    /// A rising/high level creates at most one request while the source is not
+    /// already pending or claimed. Dropping the line only changes the sampled
+    /// level; an already accepted pending request remains pending until claim.
+    fn set_source_level(&mut self, interrupt_id: ExternalInterrupt, level: bool) {
+        if level {
+            self.source_level.set_bit(interrupt_id);
+            if !self.pending.get_bit(interrupt_id)
+                && !self.interrupt_sources_busy.contains(interrupt_id as usize)
+            {
+                self.pending.set_bit(interrupt_id);
+            }
+        } else {
+            self.source_level.clear_bit(interrupt_id);
+        }
     }
 
     #[inline]
@@ -427,20 +440,12 @@ impl PLIC {
         Ok(())
     }
 
-    /// Mark an external interrupt source as pending.
-    pub fn set_interrupt_pending(&mut self, interrupt_id: ExternalInterrupt) {
+    /// Set the current level of an external interrupt source.
+    fn set_interrupt_level(&mut self, interrupt_id: ExternalInterrupt, level: bool) {
         if unlikely(!is_valid_interrupt_id(interrupt_id)) {
             return;
         }
-        self.layout.set_pending(interrupt_id);
-    }
-
-    /// Clear a pending external interrupt source.
-    pub fn clear_interrupt_pending(&mut self, interrupt_id: ExternalInterrupt) {
-        if unlikely(!is_valid_interrupt_id(interrupt_id)) {
-            return;
-        }
-        self.layout.clear_pending(interrupt_id);
+        self.layout.set_source_level(interrupt_id, level);
     }
 
     /// Refresh the target CPU interrupt line for one PLIC context.
@@ -502,16 +507,22 @@ impl RiscvIRQSource for PLIC {
 // Receive the interrupt signal from peripherals.
 impl PlicIRQHandler for PLIC {
     fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
-        if level {
-            self.set_interrupt_pending(interrupt);
-        } else {
-            self.clear_interrupt_pending(interrupt);
-        }
+        // log::info!("PLIC, receive an interrupt: {interrupt}, level = {level}");
+        self.set_interrupt_level(interrupt, level);
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use crossbeam::channel;
+
+    use crate::device_poller::{DevicePoller, PlicIRQState, PollingFnWrapper};
+
     use super::*;
 
     // all methods go through mmio interface.
@@ -588,6 +599,11 @@ mod test {
         }
     }
 
+    fn pulse_interrupt(plic: &mut PLIC, interrupt_id: ExternalInterrupt) {
+        plic.handle_irq(interrupt_id, true);
+        plic.handle_irq(interrupt_id, false);
+    }
+
     #[test]
     fn plic_layout_test() {
         let mut plic = PLIC::new();
@@ -652,7 +668,7 @@ mod test {
         assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
         plic.set_priority(2, 4).unwrap();
         plic.set_enable_word(0, 0, 1 << 2).unwrap();
-        plic.set_interrupt_pending(2);
+        pulse_interrupt(&mut plic, 2);
         assert_eq!(plic.update_context_irq_line(0), Some(2));
         assert_eq!(plic.get_claim_complete(0).unwrap(), 2);
         plic.set_claim_complete(0, 2).unwrap();
@@ -672,8 +688,8 @@ mod test {
         let mut plic = PLIC::new();
         plic.set_priority(1, 5).unwrap();
         plic.set_priority(2, 7).unwrap();
-        plic.set_interrupt_pending(1);
-        plic.set_interrupt_pending(2);
+        pulse_interrupt(&mut plic, 1);
+        pulse_interrupt(&mut plic, 2);
         assert!(plic.update_context_irq_line(0).is_none());
 
         // context 0 <- interrupt 2 (received)
@@ -689,12 +705,14 @@ mod test {
         // context 1 <- interrupt 1 (completed)
         plic.set_claim_complete(1, 1).unwrap();
 
-        plic.set_interrupt_pending(2);
+        // A second request cannot be accepted while source 2 is claimed.
+        pulse_interrupt(&mut plic, 2);
         assert!(plic.update_context_irq_line(1).is_none()); // interrupt 2 is not completed.
 
         // context 0 <- interrupt 2 (completed)
         plic.set_claim_complete(0, 2).unwrap();
 
+        pulse_interrupt(&mut plic, 2);
         // context 1 <- interrupt 2 (received)
         assert_eq!(plic.update_context_irq_line(1), Some(2));
         assert_eq!(plic.get_claim_complete(1).unwrap(), 2);
@@ -709,7 +727,7 @@ mod test {
         plic.set_priority(3, 4).unwrap();
         plic.set_enable_word(0, 0, 1 << 3).unwrap();
         plic.set_priority_threshold(0, 4).unwrap();
-        plic.set_interrupt_pending(3);
+        pulse_interrupt(&mut plic, 3);
 
         assert!(plic.update_context_irq_line(0).is_none());
         assert_eq!(plic.get_claim_complete(0).unwrap(), 3);
@@ -721,10 +739,88 @@ mod test {
         plic.set_priority(4, 7).unwrap();
         plic.set_priority(5, 7).unwrap();
         plic.set_enable_word(0, 0, (1 << 4) | (1 << 5)).unwrap();
-        plic.set_interrupt_pending(4);
-        plic.set_interrupt_pending(5);
+        pulse_interrupt(&mut plic, 4);
+        pulse_interrupt(&mut plic, 5);
 
         assert_eq!(plic.update_context_irq_line(0), Some(4));
         assert_eq!(plic.get_claim_complete(0).unwrap(), 4);
+    }
+
+    #[test]
+    fn lowering_source_does_not_retract_an_accepted_request() {
+        let mut plic = PLIC::new();
+        plic.set_priority(6, 5).unwrap();
+        plic.set_enable_word(0, 0, 1 << 6).unwrap();
+
+        plic.handle_irq(6, true);
+        plic.handle_irq(6, false);
+
+        assert!(plic.get_pending_bit(6).unwrap());
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 6);
+        plic.set_claim_complete(0, 6).unwrap();
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
+    }
+
+    #[test]
+    fn high_source_reasserts_once_after_completion() {
+        let mut plic = PLIC::new();
+        plic.set_priority(7, 5).unwrap();
+        plic.set_enable_word(0, 0, 1 << 7).unwrap();
+
+        plic.handle_irq(7, true);
+        plic.handle_irq(7, true);
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 7);
+
+        // Repeated high notifications while claimed must not create another
+        // pending request before completion.
+        plic.handle_irq(7, true);
+        assert!(!plic.get_pending_bit(7).unwrap());
+
+        plic.set_claim_complete(0, 7).unwrap();
+        assert!(plic.get_pending_bit(7).unwrap());
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 7);
+
+        plic.handle_irq(7, false);
+        plic.set_claim_complete(0, 7).unwrap();
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
+    }
+
+    #[test]
+    fn poller_forwards_only_irq_level_transitions_to_plic() {
+        use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
+
+        let mut plic = PLIC::new();
+        plic.set_priority(10, 5).unwrap();
+        plic.set_enable_word(0, 0, 1 << 10).unwrap();
+
+        let (sender, receiver) = channel::unbounded();
+        let mut poller = DevicePoller::new(sender, receiver);
+        poller.set_irq_line(PlicIRQLine::new(&mut plic), 0);
+
+        let level = Arc::new(AtomicBool::new(false));
+        let poll_level = level.clone();
+        poller.add_event(Box::new(PollingFnWrapper::new(move || {
+            PlicIRQState::new(10, poll_level.load(Ordering::Acquire))
+        })));
+        let mut poll_task = poller.poll_task();
+
+        assert!(!poll_task());
+        poller.trigger_external_interrupt();
+        assert!(!plic.get_pending_bit(10).unwrap());
+
+        level.store(true, Ordering::Release);
+        assert!(poll_task());
+        poller.trigger_external_interrupt();
+        assert!(plic.get_pending_bit(10).unwrap());
+
+        assert!(!poll_task());
+        poller.trigger_external_interrupt();
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 10);
+
+        level.store(false, Ordering::Release);
+        assert!(poll_task());
+        poller.trigger_external_interrupt();
+        plic.set_claim_complete(0, 10).unwrap();
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
     }
 }

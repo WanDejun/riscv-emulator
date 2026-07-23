@@ -112,6 +112,12 @@ pub trait DeviceTrait {
     impl_write_for_type! { u64 }
 
     fn sync(&mut self);
+
+    /// Return an optional non-blocking sampler for this device's PLIC IRQ line.
+    ///
+    /// Each poll must report the current absolute line level, not a pulse or a
+    /// change notification. [`crate::device_poller::DevicePoller`] compares
+    /// consecutive samples and forwards only level transitions to the PLIC.
     fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>>;
 }
 
