@@ -466,7 +466,7 @@ impl VirtBoard {
             .update_context_irq_line(VirtBoardPlicContextId::Cpu0MachineMode.into());
         self.plic
             .borrow_mut()
-            .update_context_irq_line(VirtBoardPlicContextId::Cpu0MachineMode.into());
+            .update_context_irq_line(VirtBoardPlicContextId::Cpu0SuperviserMode.into());
     }
 
     fn finish_cpu_batch(&mut self, cycles: u64) {
