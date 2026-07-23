@@ -8,14 +8,14 @@ The main features of `RISC-V Emulator` include:
 
 - Supported ISA:
   - RV64GC (RV64IMAFDC, Zicsr, Zifencei)
-  - supports partial `V` extensions (floating-point support is still not fully developed)
+  - Partial `V` extension support (vector floating-point instructions are still incomplete)
 - Supported privilege modes:
   - M, S, and U modes
 - A simple debugger monitor called rvdb
 - GDB support
 - Virtual memory
 - Devices:
-  - CLINT, PLIC, serial, and virtIO-mmio (Only support block device currently)
+  - CLINT, PLIC, serial, and VirtIO MMIO (block devices only at present)
 
 An online version with the emulator's core functionality is also available: [rvemu-web](https://blog.satori-march.top/rvemu-web).
 
@@ -36,9 +36,17 @@ cargo build
 
 ## Testing
 
-We use [riscv-tests](https://github.com/riscv-software-src/riscv-tests) as our test suite. To build the tests, install [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) and follow the instructions in the riscv-tests README.
+We use the [riscv-tests](https://github.com/riscv-software-src/riscv-tests) submodule as our test suite. Initialize the submodule, install [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain), and follow the riscv-tests README to build its ISA binaries:
 
-Then, run `cargo test --features riscv-tests`.
+```sh
+git submodule update --init --recursive
+```
+
+After building the riscv-tests binaries, run:
+
+```sh
+cargo test --features riscv-tests
+```
 
 Test support for `riscv-arch-test` also exists, but it is not integrated into CI. Unfortunately, the test suite stabilized at 4.x a few months after we implemented support for 3.x, so the suite we use is not up to date at present.
 
@@ -48,45 +56,71 @@ Test support for `riscv-arch-test` also exists, but it is not integrated into CI
 
 ```sh
 # Build the demo; make sure you have a RISC-V compiler
-cd ./test_resources && make
+make -C ./test_resources
 
 # Run a simple program
-cargo run -- ./bin/main.elf
+cargo run -- ./test_resources/bin/main.elf
 
 # Run with debugger enabled
-cargo run -- ./bin/main.elf -g
+cargo run -- ./test_resources/bin/main.elf -g
 ```
 
 ### Useful Command Line Options
 
-- `-h`: Show help
-- `-g`: Enable rvdb, the simple debugger (use the `help` command in rvdb for details)
-- `-G`: Enable the GDB stub (listens on localhost:1234)
+- `-h, --help`: Show help
+- `-f, --format <auto|elf|bin>`: Select the executable format (default: `auto`)
+- `-g, --debug`: Enable rvdb, the simple debugger (use the `help` command in rvdb for details)
+- `-G, --gdb`: Enable the GDB stub (listens on localhost:1234)
+- `-S, --script <PATH>`: Run an rvdb script together with `--debug`
+- `-v, --verbose`: Print additional startup details
 - `--device <TYPE:PATH>`: Configure a device
-  - Example: `--device=virtio-block:/path/to/image`
-- `<EXECUTABLE>`: Path to the binary/ELF executable file
-- `--loglevel <LEVEL>`: Set log level
+  - Example: `--device=virtio-block:/path/to/image`; the image must exist and its size must be a multiple of 512 bytes
+- `--isa <ISA>`: Select the decoder ISA string (default: `RV64GC`)
+- `--max-cycles <COUNT>`: Stop after the requested cycle count (`0` means no limit)
+- `--dtb <PATH>`: Load a DTB and pass its guest address to OpenSBI in `a1`
+- `--dtb-address <ADDRESS>`: Select the DTB guest address (default: `0x9f000000`)
+- `--signature <PATH>`: Write a RISC-V architecture-test signature on exit
+- `--signature-granularity <4|8>`: Select the signature word size (default: `4`)
+- `<PATH>`: Path to the binary/ELF executable file
+- `--loglevel <LEVEL>`: Set log level (`trace`, `debug`, `info`, `warn`, or `error`)
 
 ### Example Usage
 
 ```sh
-cargo run -- ./test_resources/bin/virtio_blk_test.elf --device=virtio-block:./tmp/img_blk -g --loglevel=debug
+mkdir -p ./tmp
+truncate -s 4K ./tmp/img_blk
+cargo run -- ./test_resources/bin/virtio_blk_test.elf --device=virtio-block:./tmp/img_blk --loglevel=debug
 ```
 
 ### Running Linux
 
-At present, the emulator can boot the Linux 6.18.2 kernel with BusyBox v1.37.0 in an initramfs via OpenSBI. You need to compile OpenSBI, the kernel, and BusyBox yourself, and adjust some configuration because RV64C is not yet supported. The `Makefile` in the repository root may be helpful.
+At present, the emulator can boot the Linux 6.18.2 kernel with BusyBox v1.37.0 in an initramfs via OpenSBI. Configure the kernel with the required BusyBox initramfs, then provide Linux and OpenSBI source trees to the root `Makefile`:
 
-#### Use Virtio Device in Linux
+```sh
+make linux LINUX_DIR=/path/to/linux OPENSBI_DIR=/path/to/opensbi
+```
 
-When booting Linux with a Virtio block device attached, the kernel log will show the device being recognized:
+The target builds `dts/virt.dtb`, the kernel image, and the OpenSBI payload before starting the emulator. `CROSS_COMPILE`, `PLATFORM_RISCV_ISA`, and other build variables can be overridden when necessary.
+
+#### Use a VirtIO Device in Linux
+
+Enable the `virtio_mmio@10001000` node in `dts/virt.dts`, create a sector-aligned backing image, and pass the device through `RVEMU_ARGS`:
+
+```sh
+mkdir -p ./tmp
+truncate -s 4K ./tmp/img_blk
+make linux LINUX_DIR=/path/to/linux OPENSBI_DIR=/path/to/opensbi \
+  RVEMU_ARGS='--device=virtio-block:./tmp/img_blk'
+```
+
+When Linux boots, the kernel log will show the device being recognized:
 
 ```
 [   72.993894] virtio_blk virtio0: 1/0/0 default/read/poll queues
 [   73.013248] virtio_blk virtio0: [vda] 8 512-byte logical blocks (4.10 kB/4.00 KiB)
 ```
 
-To access the Virtio block device (`/dev/vda`) from the Linux shell:
+If devtmpfs has not already created `/dev/vda`, create it from the Linux shell:
 
 1. **Determine the device number** — read the major/minor numbers from sysfs:
    ```sh
@@ -108,10 +142,10 @@ Once `/dev/vda` is available, you can perform block-level operations:
 
 - **Read/write raw data** with `dd`:
   ```sh
-  dd if=/dev/vda of=/tmp/output bs=512 count=8
-  dd if=/tmp/data of=/dev/vda bs=512 count=4 seek=2
+  dd if=/dev/vda bs=512 count=8 2>/dev/null | hexdump -C
+  echo "VirtIO-Blk Write Test Success!" | dd of=/dev/vda bs=512 count=1 conv=notrunc
   ```
-- **Create a filesystem and mount it** (if the device contains a disk image with a partition table or filesystem):
+- **Create a filesystem and mount it** (this overwrites existing data in the backing image):
   ```sh
   mkfs.ext2 /dev/vda
   mount /dev/vda /mnt
@@ -123,13 +157,19 @@ Additional device metadata is available under `/sys/block/vda/`.
 
 ### MMIO Address Map
 
-|     Device      | Address Base |   Address Length    | Interrupt ID |
-| :-------------: | :----------: | :-----------------: | :----------: |
-| `power-manager` | 0x0010_0000  |       0x1000        |      -       |
-|     `uart`      | 0x1000_0000  |        0x08         |     0x0a     |
-|     `clint`     | 0x0200_0000  |       0x10000       |      -       |
-|  `virtio-mmio`  | 0x1000_1000  |       0x1000        |     0x01     |
-|      `ram`      | 0x8000_0000  | 0x2000_0000 (512MB) |      -       |
+|       Device       | Address Base |    Address Length    | PLIC Interrupt ID |
+| :----------------: | :----------: | :------------------: | :---------------: |
+|  `power-manager`   | 0x0010_0000  |        0x1000        |         -         |
+|   `test-device`*   | 0x0010_1000  |         0x10         |       0x3f        |
+|      `clint`       | 0x0200_0000  |       0x10000        |         -         |
+|       `plic`       | 0x0c00_0000  |      0x0400_0000     |         -         |
+|       `uart`       | 0x1000_0000  |         0x08         |       0x0a        |
+| `virtio-mmio[0]`** | 0x1000_1000  |        0x1000        |       0x01        |
+|       `ram`        | 0x8000_0000  | 0x2000_0000 (512 MiB) |         -         |
+
+\* `test-device` is mapped when the `test-device` Cargo feature is enabled; it is part of the default feature set.
+
+\** Additional VirtIO MMIO transports use consecutive 0x1000-byte regions and interrupt IDs. Keep assigned IDs distinct from the UART interrupt ID 0x0a.
 
 ## License
 
