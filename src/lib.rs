@@ -17,10 +17,10 @@ compile_error!("feature 'multithreading' is not compatible with 'web'");
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 compile_error!("feature 'web' requires wasm32 target");
 
+mod clock;
 mod cpu;
 mod fpu;
 mod utils;
-mod vclock;
 
 #[cfg(feature = "native-cli")]
 pub mod gdb;

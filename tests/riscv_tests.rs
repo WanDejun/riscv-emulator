@@ -53,7 +53,7 @@ fn run_test(elf_path: &Path) -> bool {
             board.step();
 
             // Handle tohost
-            let instr_cnt = board.clock.now();
+            let instr_cnt = board.cycles();
             if (instr_cnt & (0xFFF)) == 0 {
                 let msg = board.cpu.read_memory::<u64>(Address::Phys(tohost)).unwrap();
 

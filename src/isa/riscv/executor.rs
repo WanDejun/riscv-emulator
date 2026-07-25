@@ -217,27 +217,23 @@ impl RVCPU {
         }
 
         let mut executed = 0;
-        while executed < cycles {
-            // TODO: By design, interrupts should be checked once per batch, but doing so currently
-            // causes issues when linux poweroff for reasons that have not yet been identified.
-            let interrupt_pc = self.pc;
-            if TrapController::try_take_interrupt(self).is_some() {
-                let context = hook.on_interrupt_taken(interrupt_pc);
-                self.increment_mcycle();
-                executed += 1;
+        // TODO: By design, interrupts should be checked once per batch, but doing so currently
+        // causes issues when linux poweroff for reasons that have not yet been identified.
+        let interrupt_pc = self.pc;
+        if TrapController::try_take_interrupt(self).is_some() {
+            let context = hook.on_interrupt_taken(interrupt_pc);
+            self.increment_mcycle();
+            executed += 1;
 
-                if hook.after_step(context, self) {
-                    return BatchResult {
-                        cycles: executed,
-                        hook_stopped: true,
-                    };
-                }
-
-                if executed >= cycles {
-                    break;
-                }
+            if hook.after_step(context, self) {
+                return BatchResult {
+                    cycles: executed,
+                    hook_stopped: true,
+                };
             }
+        }
 
+        while executed < cycles {
             let context = hook.before_step(self);
             self.step_impl();
             self.increment_mcycle();

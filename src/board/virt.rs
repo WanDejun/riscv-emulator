@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    cell::{RefCell, UnsafeCell},
+    cell::{Cell, RefCell, UnsafeCell},
     collections::HashMap,
     hint::cold_path,
     pin::Pin,
@@ -15,6 +15,7 @@ use crate::{
     background::BackgroundExecutor,
     board::{Board, BoardStatus, VirtBoardPlicContextId},
     byte_io::{ByteSinkExt, ByteSource},
+    clock::{Timer, VirtualClock},
     config::arch_config::WordType,
     device::{
         self, DeviceTrait, IdAllocator,
@@ -48,7 +49,6 @@ use crate::{
     load::{ELFLoader, load_bin},
     ram::Ram,
     ram_config,
-    vclock::{Timer, VirtualClockRef},
 };
 
 #[cfg(feature = "test-device")]
@@ -194,7 +194,8 @@ impl RVBoardBuilder {
     }
 
     pub fn build(mut self, ram: Ram) -> VirtBoard {
-        let clock = VirtualClockRef::new();
+        let cycles = Rc::new(Cell::new(0));
+        let clock = VirtualClock::new(cycles.clone());
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
         let ram_ref = Rc::new(UnsafeCell::new(ram));
 
@@ -343,6 +344,7 @@ impl RVBoardBuilder {
             background,
             loader: None,
             cpu,
+            cycles,
             clock,
             timer,
 
@@ -366,8 +368,9 @@ pub struct VirtBoard {
     loader: Option<ELFLoader>,
 
     pub cpu: Pin<Box<RVCPU>>,
-    pub clock: VirtualClockRef,
-    pub timer: Rc<UnsafeCell<Timer>>,
+    cycles: Rc<Cell<u64>>,
+    pub clock: VirtualClock,
+    pub timer: Rc<UnsafeCell<Timer<VirtualClock>>>,
 
     // interrupt manager.
     pub clint: Rc<RefCell<Clint>>,
@@ -457,6 +460,10 @@ impl VirtBoard {
         self.uart_port.clone()
     }
 
+    pub fn cycles(&self) -> u64 {
+        self.cycles.get()
+    }
+
     fn prepare_cpu_batch(&mut self) {
         unsafe { self.timer.as_mut_unchecked() }.tick();
         self.background.poll_if_single_thread_mode();
@@ -470,13 +477,13 @@ impl VirtBoard {
     }
 
     fn finish_cpu_batch(&mut self, cycles: u64) {
-        self.clock.advance(cycles);
+        self.cycles.set(self.cycles.get().wrapping_add(cycles));
         // TODO: We can simply read from `PowerManager` if VirtBoard owns `PowerManager`.
         if POWER_STATUS.load(Ordering::Acquire).eq(&POWER_OFF_CODE) {
             cold_path();
             self.cpu.power_off();
             self.status = BoardStatus::Halt;
-            log::info!("Total cycles: {}", self.clock.now());
+            log::info!("Total cycles: {}", self.cycles());
         }
     }
 
@@ -502,23 +509,23 @@ impl Board for VirtBoard {
         cycles: u64,
         hook: &mut H,
     ) -> BatchResult {
-        let mut executed = 0;
+        let initial_cycles = self.cycles();
+        let target_cycles = self.cycles() + cycles;
 
-        while executed < cycles && self.status == BoardStatus::Running {
-            let batch_cycles = (cycles - executed).min(STEP_BATCH_CYCLES);
+        while self.cycles() < target_cycles && self.status == BoardStatus::Running {
+            let batch_cycles = (target_cycles - self.cycles()).min(STEP_BATCH_CYCLES);
             let result = self.step_batch_with_hook(batch_cycles, hook);
-            executed += result.cycles;
 
             if result.hook_stopped {
                 return BatchResult {
-                    cycles: executed,
+                    cycles: self.cycles().wrapping_sub(initial_cycles),
                     hook_stopped: true,
                 };
             }
         }
 
         BatchResult {
-            cycles: executed,
+            cycles: self.cycles().wrapping_sub(initial_cycles),
             hook_stopped: false,
         }
     }
@@ -557,6 +564,7 @@ impl Board for VirtBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::Clock;
     use crate::config::arch_config::XLEN;
     use crate::isa::DebugTarget;
     use crate::isa::riscv::csr_reg::csr_macro::Mcause;
@@ -582,7 +590,8 @@ mod tests {
         let executed = board.step_cycles(requested);
 
         assert_eq!(executed, requested);
-        assert_eq!(board.clock.now(), requested);
+        assert_eq!(board.cycles(), requested);
+        assert_eq!(board.clock.now(), requested >> 3);
         assert_eq!(board.cpu.read_pc(), ram_config::BASE_ADDR + requested * 4);
     }
 

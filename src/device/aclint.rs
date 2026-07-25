@@ -2,13 +2,13 @@ use std::{cell::UnsafeCell, rc::Rc};
 
 use crate::{
     board::virt::{IRQLine, RiscvIRQSource},
+    clock::{Clock, Timer, VirtualClock},
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{CLINT_BASE, CLINT_SIZE},
     },
     utils::{concat_to_u64, negative_of},
-    vclock::{Timer, VirtualClockRef},
 };
 
 pub struct Clint {
@@ -17,8 +17,8 @@ pub struct Clint {
     time_base: u64,
     timecmp_base: u64,
     time_offset: u64,
-    clock: VirtualClockRef,
-    timer: Rc<UnsafeCell<Timer>>,
+    clock: VirtualClock,
+    timer: Rc<UnsafeCell<Timer<VirtualClock>>>,
     msip: Vec<u32>,
     time_cmp: Vec<u64>,
     timer_irq_line: Option<IRQLine>, // TODO: Current implementation only supports 1 hart.
@@ -32,8 +32,8 @@ impl Clint {
         msip_base: u64,
         mtime_base: u64,
         mtimecmp_base: u64,
-        clock: VirtualClockRef,
-        timer: Rc<UnsafeCell<Timer>>,
+        clock: VirtualClock,
+        timer: Rc<UnsafeCell<Timer<VirtualClock>>>,
     ) -> Self {
         Self {
             hart_num,
@@ -233,11 +233,14 @@ mod tests {
 
     fn create_test_clint() -> (
         Clint,
-        Rc<UnsafeCell<Timer>>,
+        Rc<UnsafeCell<Timer<VirtualClock>>>,
         Box<MockIrqHandler>,
         Box<MockIrqHandler>,
     ) {
-        let clock = VirtualClockRef::new();
+        use std::cell::Cell;
+
+        let cycles = Rc::new(Cell::new(0));
+        let clock = VirtualClock::new(cycles);
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
         let mut clint = Clint::new(1, 0x02000000, 0x0200bff8, 0x02004000, clock, timer.clone());
 

@@ -1,29 +1,24 @@
 use std::{cell::Cell, rc::Rc, u64};
 
-/// Simple clock, clone by ref, cannot used in multi-threaded context.
-#[derive(Clone)]
-pub struct VirtualClockRef {
-    time: Rc<Cell<u64>>,
+pub trait Clock {
+    fn now(&self) -> u64;
 }
 
-impl VirtualClockRef {
-    pub fn new() -> Self {
-        Self {
-            time: Rc::new(Cell::new(0)),
-        }
-    }
+/// A clock derived lazily from the board's cycle counter.
+#[derive(Clone)]
+pub struct VirtualClock {
+    cycles: Rc<Cell<u64>>,
+}
 
-    pub fn set(&self, time: u64) {
-        self.time.set(time);
+impl VirtualClock {
+    pub fn new(cycles: Rc<Cell<u64>>) -> Self {
+        Self { cycles }
     }
+}
 
-    pub fn advance(&self, delta: u64) {
-        let prev = self.time.get();
-        self.time.set(prev.wrapping_add(delta));
-    }
-
-    pub fn now(&self) -> u64 {
-        self.time.get()
+impl Clock for VirtualClock {
+    fn now(&self) -> u64 {
+        self.cycles.get() >> 3
     }
 }
 
@@ -43,18 +38,18 @@ impl ScheduledTask {
     }
 }
 
-pub struct Timer {
+pub struct Timer<C: Clock> {
     seq: u64,
     tasks: Vec<ScheduledTask>,
-    vclock: VirtualClockRef,
+    clock: C,
 }
 
-impl Timer {
-    pub fn new(vclock: VirtualClockRef) -> Self {
+impl<C: Clock> Timer<C> {
+    pub fn new(clock: C) -> Self {
         Self {
             seq: 0,
             tasks: Vec::new(),
-            vclock,
+            clock,
         }
     }
 
@@ -86,19 +81,19 @@ impl Timer {
     ///
     /// NOTE: If you want to change multiply tasks, use [`Timer::guard`] instead.
     pub fn set_delay(&mut self, seq: u64, delay: u64) {
-        let now = self.vclock.now();
+        let now = self.clock.now();
         self.set_due(seq, now.saturating_add(delay));
     }
 
     /// Start a guard that allows batching multiple changes without rebuilding on each change.
     /// When the returned `TimerGuard` is dropped, the timer will be rebuilt.
-    pub fn guard(&mut self) -> TimerGuard<'_> {
+    pub fn guard(&mut self) -> TimerGuard<'_, C> {
         TimerGuard { timer: self }
     }
 
     /// Run all tasks whose due time is <= the timer's clock `now()`.
     pub fn tick(&mut self) {
-        let now = self.vclock.now();
+        let now = self.clock.now();
 
         self.tasks
             .iter_mut()
@@ -118,11 +113,11 @@ impl Timer {
 }
 
 /// RAII guard returned by [`Timer::guard()`].
-pub struct TimerGuard<'a> {
-    timer: &'a mut Timer,
+pub struct TimerGuard<'a, C: Clock> {
+    timer: &'a mut Timer<C>,
 }
 
-impl<'a> TimerGuard<'a> {
+impl<'a, C: Clock> TimerGuard<'a, C> {
     /// See [Timer::register].
     pub fn register<F>(&mut self, callback: F) -> u64
     where
@@ -142,13 +137,56 @@ impl<'a> TimerGuard<'a> {
 
     /// See [`Timer::set_delay`].
     pub fn set_delay(&mut self, seq: u64, delay: u64) {
-        let now = self.timer.vclock.now();
+        let now = self.timer.clock.now();
         self.set_due(seq, now.saturating_add(delay));
     }
 }
 
-impl<'a> Drop for TimerGuard<'a> {
+impl<'a, C: Clock> Drop for TimerGuard<'a, C> {
     fn drop(&mut self) {
         self.timer.build();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FixedClock(u64);
+
+    impl Clock for FixedClock {
+        fn now(&self) -> u64 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn virtual_clock_is_derived_lazily_from_cycles() {
+        let cycles = Rc::new(Cell::new(0));
+        let clock = VirtualClock::new(cycles.clone());
+
+        cycles.set(7);
+        assert_eq!(clock.now(), 0);
+
+        cycles.set(8);
+        assert_eq!(clock.now(), 1);
+
+        cycles.set(80);
+        assert_eq!(clock.now(), 10);
+    }
+
+    #[test]
+    fn timer_accepts_any_clock_implementation() {
+        let called = Rc::new(Cell::new(false));
+        let mut timer = Timer::new(FixedClock(10));
+        let task = timer.register({
+            let called = called.clone();
+            move || called.set(true)
+        });
+
+        timer.set_due(task, 10);
+        timer.tick();
+
+        assert!(called.get());
     }
 }

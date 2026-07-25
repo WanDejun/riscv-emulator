@@ -57,7 +57,7 @@ impl WasmEmulator {
     }
 
     pub fn clock_cycles(&self) -> u64 {
-        self.inner.clock.now()
+        self.inner.cycles()
     }
 
     pub fn read_pc(&self) -> u64 {
@@ -124,7 +124,7 @@ impl RvdbSharedState {
         let board = session.board();
 
         self.halted = board.status() == BoardStatus::Halt;
-        self.cycles = board.clock.now();
+        self.cycles = board.cycles();
         self.pc = board.cpu().read_pc() as u64;
         for idx in 0..REGFILE_CNT {
             self.regs[idx] = board.cpu().read_reg(idx as u8) as u64;
