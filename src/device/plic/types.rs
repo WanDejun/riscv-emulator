@@ -1,6 +1,6 @@
 use crate::config::arch_config::WordType;
 
-pub type ExternalInterrupt = u32;
+pub type PeriphIrqId = u32;
 
 pub(super) const PLIC_SPEC_MAX_INTERRUPT_SOURCES: usize = 1024;
 pub(super) const VIRT_MAX_INTERRUPTS: usize = 64;
@@ -17,8 +17,8 @@ pub(super) type PlicRegisterIndex = usize;
 
 pub(super) const REGISTER_BYTES: WordType = size_of::<PlicRegisterWord>() as WordType;
 pub(super) const INTERRUPTS_PER_REGISTER: usize = PlicRegisterWord::BITS as usize;
-pub(super) const INTERRUPT_SOURCE_ZERO: ExternalInterrupt = 0;
-pub(super) const NO_PENDING_INTERRUPT: ExternalInterrupt = 0;
+pub(super) const INTERRUPT_SOURCE_ZERO: PeriphIrqId = 0;
+pub(super) const NO_PENDING_INTERRUPT: PeriphIrqId = 0;
 pub(super) const PLIC_INTERRUPT_WORDS: usize = VIRT_MAX_INTERRUPTS / INTERRUPTS_PER_REGISTER;
 pub(super) const CLAIM_COMPLETE_REGISTER_INDEX: PlicRegisterIndex = 1;
 
@@ -56,25 +56,25 @@ impl PLICBitReg {
     }
 
     #[inline]
-    pub(super) fn set_bit(&mut self, interrupt_id: ExternalInterrupt) {
+    pub(super) fn set_bit(&mut self, interrupt_id: PeriphIrqId) {
         let (index, mask) = interrupt_word_and_mask(interrupt_id);
         self.bits[index] |= mask;
     }
 
     #[inline]
-    pub(super) fn clear_bit(&mut self, interrupt_id: ExternalInterrupt) {
+    pub(super) fn clear_bit(&mut self, interrupt_id: PeriphIrqId) {
         let (index, mask) = interrupt_word_and_mask(interrupt_id);
         self.bits[index] &= !mask;
     }
 
     #[inline]
-    pub(super) fn get_bit(&self, interrupt_id: ExternalInterrupt) -> bool {
+    pub(super) fn get_bit(&self, interrupt_id: PeriphIrqId) -> bool {
         let (index, mask) = interrupt_word_and_mask(interrupt_id);
         (self.bits[index] & mask) != 0
     }
 
     #[inline]
-    pub(super) fn take_bit(&mut self, interrupt_id: ExternalInterrupt) -> bool {
+    pub(super) fn take_bit(&mut self, interrupt_id: PeriphIrqId) -> bool {
         let (index, mask) = interrupt_word_and_mask(interrupt_id);
         let old = self.bits[index];
         self.bits[index] &= !mask;
@@ -98,7 +98,7 @@ impl PLICBitReg {
 /// enum, then delegate behavior to `PLICLayout`.
 #[derive(Clone, Copy)]
 pub(super) enum PlicRegister {
-    Priority(ExternalInterrupt),
+    Priority(PeriphIrqId),
     Pending(PlicRegisterIndex),
     Enable {
         context_id: PlicContextId,
@@ -118,9 +118,7 @@ pub(super) fn source_zero_bit_mask() -> PlicRegisterWord {
     mask
 }
 
-fn interrupt_word_and_mask(
-    interrupt_id: ExternalInterrupt,
-) -> (PlicRegisterIndex, PlicRegisterWord) {
+fn interrupt_word_and_mask(interrupt_id: PeriphIrqId) -> (PlicRegisterIndex, PlicRegisterWord) {
     let interrupt_id = interrupt_id as usize;
     let word_index = interrupt_id / INTERRUPTS_PER_REGISTER;
     let bit_index = interrupt_id % INTERRUPTS_PER_REGISTER;

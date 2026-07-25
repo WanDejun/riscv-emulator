@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{config::arch_config::WordType, device_poller::PollingEventTrait};
+use crate::{async_worker::AsyncWorker, config::arch_config::WordType};
 
 macro_rules! dispatch_read_write {
     ($read_impl: ident, $write_impl: ident) => {
@@ -113,12 +113,18 @@ pub trait DeviceTrait {
 
     fn sync(&mut self);
 
-    /// Return an optional non-blocking sampler for this device's PLIC IRQ line.
+    /// Return optional non-blocking work to run on the shared background executor.
+    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>>;
+}
+
+pub trait PlicDeviceHandler {
+    /// Return the device's current absolute interrupt-line level.
     ///
-    /// Each poll must report the current absolute line level, not a pulse or a
-    /// change notification. [`crate::device_poller::DevicePoller`] compares
-    /// consecutive samples and forwards only level transitions to the PLIC.
-    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>>;
+    /// This sampled interface is intended for level-triggered sources that
+    /// remain asserted until serviced. A source that can emit short pulses
+    /// must drive [`crate::device::plic::irq_line::PlicIRQLine`] directly so a
+    /// pulse cannot occur entirely between PLIC samples.
+    fn irq_level(&self) -> bool;
 }
 
 pub trait MemMappedDeviceTrait: DeviceTrait {

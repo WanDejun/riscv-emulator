@@ -3,17 +3,16 @@ pub mod types;
 
 use std::hint::unlikely;
 
-use bit_set::BitSet;
-
 use crate::{
     board::virt::RiscvIRQSource,
     config::arch_config::WordType,
     device::{DeviceTrait, MemError, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler},
 };
+use bit_set::BitSet;
 
-pub use types::ExternalInterrupt;
 #[cfg(test)]
 use types::INTERRUPTS_PER_REGISTER;
+pub use types::PeriphIrqId;
 use types::{
     CLAIM_COMPLETE_REGISTER_INDEX, INTERRUPT_SOURCE_ZERO, NO_PENDING_INTERRUPT,
     PLIC_INTERRUPT_WORDS, PLICBitReg, PLICContext, PlicContextId, PlicPriority, PlicRegister,
@@ -89,7 +88,7 @@ pub struct PLICLayout {
     source_level: PLICBitReg,
     contexts: [PLICContext; VIRT_MAX_CONTEXTS],
     /// Interrupt source ids sorted by descending priority, then ascending source id.
-    priority_order: [ExternalInterrupt; VIRT_MAX_INTERRUPTS],
+    priority_order: [PeriphIrqId; VIRT_MAX_INTERRUPTS],
     /// Sources claimed by a context but not completed yet.
     interrupt_sources_busy: BitSet,
 }
@@ -97,7 +96,7 @@ pub struct PLICLayout {
 impl PLICLayout {
     pub fn new() -> Self {
         let priority = [0; VIRT_MAX_INTERRUPTS];
-        let priority_order = core::array::from_fn(|interrupt_id| interrupt_id as ExternalInterrupt);
+        let priority_order = core::array::from_fn(|interrupt_id| interrupt_id as PeriphIrqId);
 
         Self {
             priority,
@@ -110,12 +109,12 @@ impl PLICLayout {
     }
 
     #[inline]
-    fn read_priority(&self, interrupt_id: ExternalInterrupt) -> PlicPriority {
+    fn read_priority(&self, interrupt_id: PeriphIrqId) -> PlicPriority {
         self.priority[interrupt_id as usize]
     }
 
     #[inline]
-    fn write_priority(&mut self, interrupt_id: ExternalInterrupt, value: PlicPriority) {
+    fn write_priority(&mut self, interrupt_id: PeriphIrqId, value: PlicPriority) {
         if value != self.priority[interrupt_id as usize] {
             self.priority[interrupt_id as usize] = value;
             self.sort_priority_order();
@@ -141,7 +140,7 @@ impl PLICLayout {
     /// A rising/high level creates at most one request while the source is not
     /// already pending or claimed. Dropping the line only changes the sampled
     /// level; an already accepted pending request remains pending until claim.
-    fn set_source_level(&mut self, interrupt_id: ExternalInterrupt, level: bool) {
+    fn set_source_level(&mut self, interrupt_id: PeriphIrqId, level: bool) {
         if level {
             self.source_level.set_bit(interrupt_id);
             if !self.pending.get_bit(interrupt_id)
@@ -181,7 +180,7 @@ impl PLICLayout {
     }
 
     #[inline]
-    fn is_enabled(&self, context_id: PlicContextId, interrupt_id: ExternalInterrupt) -> bool {
+    fn is_enabled(&self, context_id: PlicContextId, interrupt_id: PeriphIrqId) -> bool {
         self.contexts[context_id].enable.get_bit(interrupt_id)
     }
 
@@ -200,7 +199,7 @@ impl PLICLayout {
     /// Per the PLIC spec, claim ignores the context threshold. A successful
     /// claim atomically clears the source pending bit and marks the source busy
     /// until completion.
-    fn read_claim(&mut self, context_id: PlicContextId) -> ExternalInterrupt {
+    fn read_claim(&mut self, context_id: PlicContextId) -> PeriphIrqId {
         let Some(interrupt_id) = self.find_pending_interrupt(context_id, false) else {
             return NO_PENDING_INTERRUPT;
         };
@@ -213,7 +212,7 @@ impl PLICLayout {
     ///
     /// Completion is ignored when the source id is invalid or disabled for the
     /// completing context.
-    fn write_complete(&mut self, context_id: PlicContextId, interrupt_id: ExternalInterrupt) {
+    fn write_complete(&mut self, context_id: PlicContextId, interrupt_id: PeriphIrqId) {
         if !is_valid_interrupt_id(interrupt_id) || !self.is_enabled(context_id, interrupt_id) {
             return;
         }
@@ -224,7 +223,7 @@ impl PLICLayout {
         }
     }
 
-    fn pending_interrupt_to_notify(&self, context_id: PlicContextId) -> Option<ExternalInterrupt> {
+    fn pending_interrupt_to_notify(&self, context_id: PlicContextId) -> Option<PeriphIrqId> {
         self.find_pending_interrupt(context_id, true)
     }
 
@@ -237,7 +236,7 @@ impl PLICLayout {
         &self,
         context_id: PlicContextId,
         apply_threshold: bool,
-    ) -> Option<ExternalInterrupt> {
+    ) -> Option<PeriphIrqId> {
         let threshold = self.contexts[context_id].priority_threshold;
 
         for interrupt_id in self.priority_order.iter().copied() {
@@ -274,7 +273,7 @@ impl PLICLayout {
 
         match inner_addr {
             PRIORITY_OFFSET..PENDING_BIT_OFFSET => {
-                let interrupt_id = (inner_addr / REGISTER_BYTES) as ExternalInterrupt;
+                let interrupt_id = (inner_addr / REGISTER_BYTES) as PeriphIrqId;
                 is_valid_interrupt_id(interrupt_id).then_some(PlicRegister::Priority(interrupt_id))
             }
             PENDING_BIT_OFFSET..CONTEXT_ENABLE_BIT_OFFSET => {
@@ -328,8 +327,8 @@ impl PLICLayout {
             PlicRegister::Threshold(context_id) => self.read_priority_threshold(context_id),
             PlicRegister::ClaimComplete(context_id) => {
                 let interrupt_id = self.read_claim(context_id);
-                log::trace!(
-                    "[PLIC] claim read ctx={} => id={}",
+                log::info!(
+                    "[PLIC] Claim read ctx={} => id={}",
                     context_id,
                     interrupt_id
                 );
@@ -349,7 +348,7 @@ impl PLICLayout {
                 self.write_priority_threshold(context_id, value);
             }
             PlicRegister::ClaimComplete(context_id) => {
-                log::trace!("[PLIC] complete write ctx={} id={}", context_id, value);
+                log::info!("[PLIC] Complete write ctx={} id={}", context_id, value);
                 self.write_complete(context_id, value);
             }
             PlicRegister::Pending(_) => {}
@@ -357,7 +356,7 @@ impl PLICLayout {
     }
 }
 
-fn is_valid_interrupt_id(interrupt_id: ExternalInterrupt) -> bool {
+fn is_valid_interrupt_id(interrupt_id: PeriphIrqId) -> bool {
     interrupt_id != INTERRUPT_SOURCE_ZERO && (interrupt_id as usize) < VIRT_MAX_INTERRUPTS
 }
 
@@ -375,17 +374,25 @@ fn is_register_aligned(inner_addr: WordType) -> bool {
 /// exposes the PLIC MMIO register map, and drives per-context CPU IRQ lines.
 pub struct PLIC {
     layout: PLICLayout,
-    irq_line: [Option<crate::board::virt::IRQLine>; VIRT_MAX_CONTEXTS],
+    riscv_irq_line: [Option<crate::board::virt::IRQLine>; VIRT_MAX_CONTEXTS],
+    riscv_irq_level: [Option<bool>; VIRT_MAX_CONTEXTS],
+    peripheral_irq_handlers:
+        [Option<Box<dyn crate::device::PlicDeviceHandler>>; VIRT_MAX_INTERRUPTS],
 }
 
 impl PLIC {
     pub fn new() -> Self {
         Self {
             layout: PLICLayout::new(),
-            irq_line: core::array::from_fn(|_| None),
+            riscv_irq_line: core::array::from_fn(|_| None),
+            riscv_irq_level: [None; VIRT_MAX_CONTEXTS],
+            peripheral_irq_handlers: core::array::from_fn(|_| None),
         }
     }
 
+    // MMIO accesses update only internal PLIC state. CPU IRQ outputs are
+    // driven at the next board batch boundary; calling back into the CPU from
+    // its own MMIO access would alias its active mutable borrow.
     fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, super::MemError>
     where
         T: crate::utils::UnsignedInteger,
@@ -395,11 +402,10 @@ impl PLIC {
         }
 
         let register = PLICLayout::decode_register(inner_addr).ok_or(MemError::LoadFault)?;
-        let data = self.layout.read_register(register);
-
         if matches!(register, PlicRegister::ClaimComplete(_)) {
-            self.update_all_context_irq_lines();
+            self.sync_peripheral_irq_levels();
         }
+        let data = self.layout.read_register(register);
 
         Ok(T::truncate_from(data))
     }
@@ -417,46 +423,54 @@ impl PLIC {
             return Err(MemError::StoreFault);
         }
 
-        let contexts_to_refresh = match register {
-            PlicRegister::Enable { context_id, .. } | PlicRegister::Threshold(context_id) => {
-                Some(context_id)
-            }
-            PlicRegister::Priority(_)
-            | PlicRegister::ClaimComplete(_)
-            | PlicRegister::Pending(_) => None,
-        };
+        if matches!(register, PlicRegister::ClaimComplete(_)) {
+            self.sync_peripheral_irq_levels();
+        }
 
         self.layout.write_register(register, data.truncate_to());
-
-        if matches!(
-            register,
-            PlicRegister::Priority(_) | PlicRegister::ClaimComplete(_)
-        ) {
-            self.update_all_context_irq_lines();
-        } else if let Some(context_id) = contexts_to_refresh {
-            self.update_context_irq_line(context_id);
-        }
 
         Ok(())
     }
 
     /// Set the current level of an external interrupt source.
-    fn set_interrupt_level(&mut self, interrupt_id: ExternalInterrupt, level: bool) {
+    fn set_interrupt_level(&mut self, interrupt_id: PeriphIrqId, level: bool) {
         if unlikely(!is_valid_interrupt_id(interrupt_id)) {
             return;
         }
         self.layout.set_source_level(interrupt_id, level);
     }
 
+    fn sync_peripheral_irq_levels(&mut self) {
+        for (interrupt_id, source_handler) in self.peripheral_irq_handlers.iter().enumerate() {
+            let Some(source_handler) = source_handler else {
+                continue;
+            };
+
+            self.layout
+                .set_source_level(interrupt_id as PeriphIrqId, source_handler.irq_level());
+        }
+    }
+
     /// Refresh the target CPU interrupt line for one PLIC context.
-    pub fn update_context_irq_line(
-        &mut self,
-        context_id: PlicContextId,
-    ) -> Option<ExternalInterrupt> {
+    pub fn update_context_irq_line(&mut self, context_id: PlicContextId) -> Option<PeriphIrqId> {
         if unlikely(!is_valid_context_id(context_id)) {
             return None;
         }
+        self.sync_peripheral_irq_levels();
+        self.refresh_context_irq_line(context_id)
+    }
 
+    /// Refresh several CPU contexts from one coherent peripheral snapshot.
+    pub fn update_context_irq_lines(&mut self, context_ids: &[PlicContextId]) {
+        self.sync_peripheral_irq_levels();
+        for &context_id in context_ids {
+            if is_valid_context_id(context_id) {
+                self.refresh_context_irq_line(context_id);
+            }
+        }
+    }
+
+    fn refresh_context_irq_line(&mut self, context_id: PlicContextId) -> Option<PeriphIrqId> {
         let pending_interrupt = self.layout.pending_interrupt_to_notify(context_id);
         self.set_context_irq_line(context_id, pending_interrupt.is_some());
 
@@ -472,14 +486,13 @@ impl PLIC {
     }
 
     fn set_context_irq_line(&mut self, context_id: PlicContextId, level: bool) {
-        if let Some(irq_line) = &mut self.irq_line[context_id] {
-            irq_line.set_irq(level);
+        if self.riscv_irq_level[context_id] == Some(level) {
+            return;
         }
-    }
+        self.riscv_irq_level[context_id] = Some(level);
 
-    fn update_all_context_irq_lines(&mut self) {
-        for context_id in 0..VIRT_MAX_CONTEXTS {
-            self.update_context_irq_line(context_id);
+        if let Some(irq_line) = &mut self.riscv_irq_line[context_id] {
+            irq_line.set_irq(level);
         }
     }
 }
@@ -487,7 +500,7 @@ impl PLIC {
 impl DeviceTrait for PLIC {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
         None
     }
     fn sync(&mut self) {
@@ -500,15 +513,25 @@ impl RiscvIRQSource for PLIC {
     fn set_irq_line(&mut self, line: crate::board::virt::IRQLine, id: usize) {
         assert!(id < VIRT_MAX_CONTEXTS);
         // plic external interrupt source id will be write to plic.claim register.
-        self.irq_line[id] = Some(line);
+        self.riscv_irq_line[id] = Some(line);
+        self.riscv_irq_level[id] = None;
+        self.refresh_context_irq_line(id);
     }
 }
 
 // Receive the interrupt signal from peripherals.
 impl PlicIRQHandler for PLIC {
-    fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
+    fn handle_irq(&mut self, interrupt: PeriphIrqId, level: bool) {
         // log::info!("PLIC, receive an interrupt: {interrupt}, level = {level}");
         self.set_interrupt_level(interrupt, level);
+    }
+    fn register_source_handler(
+        &mut self,
+        source_handler: Option<Box<dyn super::PlicDeviceHandler>>,
+        interrupt_id: PeriphIrqId,
+    ) {
+        assert!(is_valid_interrupt_id(interrupt_id));
+        self.peripheral_irq_handlers[interrupt_id as usize] = source_handler;
     }
 }
 
@@ -516,12 +539,8 @@ impl PlicIRQHandler for PLIC {
 mod test {
     use std::sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
-
-    use crossbeam::channel;
-
-    use crate::device_poller::{DevicePoller, PlicIRQState, PollingFnWrapper};
 
     use super::*;
 
@@ -599,7 +618,7 @@ mod test {
         }
     }
 
-    fn pulse_interrupt(plic: &mut PLIC, interrupt_id: ExternalInterrupt) {
+    fn pulse_interrupt(plic: &mut PLIC, interrupt_id: PeriphIrqId) {
         plic.handle_irq(interrupt_id, true);
         plic.handle_irq(interrupt_id, false);
     }
@@ -785,42 +804,103 @@ mod test {
         assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
     }
 
+    struct AtomicIRQHandler(Arc<AtomicBool>);
+
+    impl crate::device::PlicDeviceHandler for AtomicIRQHandler {
+        fn irq_level(&self) -> bool {
+            self.0.load(Ordering::Acquire)
+        }
+    }
+
     #[test]
-    fn poller_forwards_only_irq_level_transitions_to_plic() {
-        use crate::device::plic::irq_line::{PlicIRQLine, PlicIRQSource};
+    fn completion_samples_registered_source_before_rearming() {
+        use crate::device::plic::irq_line::PlicIRQLine;
 
         let mut plic = PLIC::new();
         plic.set_priority(10, 5).unwrap();
         plic.set_enable_word(0, 0, 1 << 10).unwrap();
 
-        let (sender, receiver) = channel::unbounded();
-        let mut poller = DevicePoller::new(sender, receiver);
-        poller.set_irq_line(PlicIRQLine::new(&mut plic), 0);
-
         let level = Arc::new(AtomicBool::new(false));
-        let poll_level = level.clone();
-        poller.add_event(Box::new(PollingFnWrapper::new(move || {
-            PlicIRQState::new(10, poll_level.load(Ordering::Acquire))
-        })));
-        let mut poll_task = poller.poll_task();
+        let _irq_line = PlicIRQLine::new(
+            &mut plic,
+            Some(Box::new(AtomicIRQHandler(level.clone()))),
+            10,
+        );
 
-        assert!(!poll_task());
-        poller.trigger_external_interrupt();
-        assert!(!plic.get_pending_bit(10).unwrap());
+        assert!(plic.update_context_irq_line(0).is_none());
 
         level.store(true, Ordering::Release);
-        assert!(poll_task());
-        poller.trigger_external_interrupt();
-        assert!(plic.get_pending_bit(10).unwrap());
-
-        assert!(!poll_task());
-        poller.trigger_external_interrupt();
+        assert_eq!(plic.update_context_irq_line(0), Some(10));
         assert_eq!(plic.get_claim_complete(0).unwrap(), 10);
 
+        // The device clears its line before the guest writes complete. The
+        // complete path must sample that state before deciding whether to
+        // create another pending request.
         level.store(false, Ordering::Release);
-        assert!(poll_task());
-        poller.trigger_external_interrupt();
         plic.set_claim_complete(0, 10).unwrap();
+        assert!(!plic.get_pending_bit(10).unwrap());
         assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
+    }
+
+    struct RecordingCPUInterruptHandler {
+        levels: Vec<bool>,
+    }
+
+    impl crate::board::virt::RiscvIRQHandler for RecordingCPUInterruptHandler {
+        fn handle_irq(&mut self, _interrupt: crate::isa::riscv::trap::Interrupt, level: bool) {
+            self.levels.push(level);
+        }
+    }
+
+    #[test]
+    fn context_irq_line_is_driven_only_on_level_changes() {
+        use crate::{
+            board::virt::{IRQLine, RiscvIRQSource},
+            isa::riscv::trap::Interrupt,
+        };
+
+        let mut cpu_handler = RecordingCPUInterruptHandler { levels: Vec::new() };
+        let mut plic = PLIC::new();
+        plic.set_irq_line(
+            IRQLine::new(&mut cpu_handler, Interrupt::MachineExternal),
+            0,
+        );
+        plic.set_priority(11, 5).unwrap();
+        plic.set_enable_word(0, 0, 1 << 11).unwrap();
+
+        plic.handle_irq(11, true);
+        assert_eq!(plic.update_context_irq_line(0), Some(11));
+        assert_eq!(plic.update_context_irq_line(0), Some(11));
+        assert_eq!(cpu_handler.levels, vec![false, true]);
+
+        assert_eq!(plic.get_claim_complete(0).unwrap(), 11);
+        assert!(plic.update_context_irq_line(0).is_none());
+        assert_eq!(cpu_handler.levels, vec![false, true, false]);
+    }
+
+    struct CountingIRQHandler(Arc<AtomicUsize>);
+
+    impl crate::device::PlicDeviceHandler for CountingIRQHandler {
+        fn irq_level(&self) -> bool {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    }
+
+    #[test]
+    fn multiple_contexts_share_one_peripheral_snapshot() {
+        use crate::device::plic::irq_line::PlicIRQLine;
+
+        let samples = Arc::new(AtomicUsize::new(0));
+        let mut plic = PLIC::new();
+        let _irq_line = PlicIRQLine::new(
+            &mut plic,
+            Some(Box::new(CountingIRQHandler(samples.clone()))),
+            12,
+        );
+
+        plic.update_context_irq_lines(&[0, 1]);
+
+        assert_eq!(samples.load(Ordering::Relaxed), 1);
     }
 }

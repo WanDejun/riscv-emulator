@@ -28,12 +28,12 @@ pub mod gdb;
 #[cfg(any(feature = "native-cli", feature = "web"))]
 pub mod rvdb;
 
+pub mod async_worker;
 pub mod background;
 pub mod board;
 pub mod byte_io;
 pub mod config;
 pub mod device;
-pub mod device_poller;
 pub mod isa;
 pub mod load;
 pub mod ram;

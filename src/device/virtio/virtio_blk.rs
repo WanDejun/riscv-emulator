@@ -10,8 +10,8 @@ use num_enum::TryFromPrimitive;
 
 use crate::device::{
     plic::{
-        ExternalInterrupt,
-        irq_line::{PlicIRQLine, PlicIRQSource},
+        PeriphIrqId,
+        irq_line::{PlicIRQHandler, PlicIRQLine, PlicIRQSource},
     },
     virtio::{
         config::{VirtIOFeatureSet, virtio_reserved_feature},
@@ -204,7 +204,6 @@ pub(crate) struct VirtIOBlkDevice {
     pub(crate) status: u8,
     pub(crate) isr: AtomicU8,
     irq_line: Option<PlicIRQLine>,
-    interrupt_id: Option<ExternalInterrupt>,
 
     host_feature: VirtIOFeatureSet,
     guest_feature: VirtIOFeatureSet,
@@ -247,7 +246,6 @@ impl VirtIOBlkDevice {
 
             isr: AtomicU8::new(0),
             irq_line: None,
-            interrupt_id: None,
 
             host_feature: virtio_reserved_feature::VERSION_1,
             guest_feature: 0,
@@ -339,11 +337,11 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
     }
 
     fn update_irq(&mut self) {
-        let (Some(line), Some(interrupt_id)) = (&mut self.irq_line, self.interrupt_id) else {
+        let Some(line) = &mut self.irq_line else {
             return;
         };
         let level = self.isr.load(std::sync::atomic::Ordering::Acquire) != 0;
-        line.set_irq(interrupt_id, level);
+        line.set_irq(level);
     }
 
     fn get_host_feature(&self) -> VirtIOFeatureSet {
@@ -509,15 +507,15 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
         }
     }
 
-    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
         None
     }
 }
 
 impl PlicIRQSource for VirtIOBlkDevice {
-    fn set_irq_line(&mut self, line: PlicIRQLine, interrupt_id: ExternalInterrupt) {
+    fn set_irq_line(&mut self, target: *mut dyn PlicIRQHandler, interrupt_id: PeriphIrqId) {
+        let line = PlicIRQLine::new(target, None, interrupt_id);
         self.irq_line = Some(line);
-        self.interrupt_id = Some(interrupt_id);
         self.update_irq();
     }
 }

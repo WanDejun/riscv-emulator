@@ -6,7 +6,7 @@ use std::{
     mem::transmute_copy,
     sync::{
         Arc,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -14,17 +14,20 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
+    async_worker::AsyncWorker,
     config::arch_config::WordType,
     device::{
-        DeviceTrait, MemError, MemMappedDeviceTrait,
+        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
         config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
-        plic::ExternalInterrupt,
+        plic::{
+            PeriphIrqId,
+            irq_line::{PlicIRQLine, PlicIRQSource},
+        },
     },
-    device_poller::{PlicIRQState, PollingEventTrait},
     utils::check_align,
 };
 
-pub const TEST_DEVICE_INTERRUPT_ID: ExternalInterrupt = 63;
+pub const TEST_DEVICE_INTERRUPT_ID: PeriphIrqId = 63;
 
 struct TestDeviceLayout {
     control_register: u32,
@@ -44,35 +47,43 @@ impl TestDeviceLayout {
     }
 }
 
-enum PollerDataPackage {
+enum WorkerCommand {
     // InterruptStatus(u32),
     Data {
         interval_ms: u64,
         configured_at: Instant,
     },
 }
-pub struct TestDevicePoller {
+pub struct TestDeviceWorker {
     interrupt_mask_register: Arc<AtomicU32>,
     pre_time: Instant,
     step_time: Duration,
-    receiver: Receiver<PollerDataPackage>,
+    receiver: Receiver<WorkerCommand>,
+    irq_pending: Arc<AtomicBool>,
 }
 
-impl TestDevicePoller {
-    fn new(receiver: Receiver<PollerDataPackage>, imr: Arc<AtomicU32>) -> Self {
+impl TestDeviceWorker {
+    fn new(
+        receiver: Receiver<WorkerCommand>,
+        imr: Arc<AtomicU32>,
+        irq_pending: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             interrupt_mask_register: imr,
             pre_time: Instant::now(),
             step_time: Duration::from_micros(0),
             receiver,
+            irq_pending,
         }
     }
 }
 
 pub(crate) struct TestDevice {
     layout: TestDeviceLayout,
-    sender: Sender<PollerDataPackage>,
-    receiver: Option<Receiver<PollerDataPackage>>,
+    sender: Sender<WorkerCommand>,
+    receiver: Option<Receiver<WorkerCommand>>,
+    irq_pending: Arc<AtomicBool>,
+    plic_irq_line: Option<PlicIRQLine>,
 }
 
 impl TestDevice {
@@ -82,6 +93,8 @@ impl TestDevice {
             layout: TestDeviceLayout::new(),
             sender,
             receiver: Some(receiver),
+            irq_pending: Arc::new(AtomicBool::new(false)),
+            plic_irq_line: None,
         }
     }
 
@@ -127,7 +140,7 @@ impl TestDevice {
             0x08 => {
                 self.layout.data_register0 = data_u32;
                 self.sender
-                    .try_send(PollerDataPackage::Data {
+                    .try_send(WorkerCommand::Data {
                         interval_ms: self.get_data64(),
                         configured_at: Instant::now(),
                     })
@@ -136,7 +149,7 @@ impl TestDevice {
             0x0c => {
                 self.layout.data_register1 = data_u32;
                 self.sender
-                    .try_send(PollerDataPackage::Data {
+                    .try_send(WorkerCommand::Data {
                         interval_ms: self.get_data64(),
                         configured_at: Instant::now(),
                     })
@@ -151,14 +164,15 @@ impl TestDevice {
 impl DeviceTrait for TestDevice {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
-        let poller = TestDevicePoller::new(
+    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
+        let worker = TestDeviceWorker::new(
             self.receiver
                 .take()
-                .expect("test device poll event can only be registered once"),
+                .expect("test device async worker can only be registered once"),
             self.layout.interrupt_mask_register.clone(),
+            self.irq_pending.clone(),
         );
-        Some(Box::new(poller))
+        Some(Box::new(worker))
     }
     fn sync(&mut self) {
         // nothing to do.
@@ -174,11 +188,27 @@ impl MemMappedDeviceTrait for TestDevice {
     }
 }
 
-impl PollingEventTrait for TestDevicePoller {
-    fn poll_nonblocking(&mut self) -> PlicIRQState {
+impl PlicIRQSource for TestDevice {
+    fn set_irq_line(
+        &mut self,
+        target: *mut dyn super::plic::irq_line::PlicIRQHandler,
+        interrupt_id: PeriphIrqId,
+    ) {
+        let handler = Box::new(PlicTestDeviceHandler {
+            irq_pending: self.irq_pending.clone(),
+        });
+        let line = PlicIRQLine::new(target, Some(handler), interrupt_id);
+        self.plic_irq_line = Some(line);
+    }
+}
+
+impl AsyncWorker for TestDeviceWorker {
+    fn async_task(&mut self) -> bool {
+        let mut made_progress = false;
         while let Ok(v) = self.receiver.try_recv() {
+            made_progress = true;
             match v {
-                PollerDataPackage::Data {
+                WorkerCommand::Data {
                     interval_ms,
                     configured_at,
                 } => {
@@ -191,7 +221,6 @@ impl PollingEventTrait for TestDevicePoller {
 
         if (self.interrupt_mask_register.load(Ordering::Acquire) & 1) == 0 {
             self.pre_time = cur;
-            return PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, false);
         }
 
         if cur.duration_since(self.pre_time) > self.step_time {
@@ -200,9 +229,20 @@ impl PollingEventTrait for TestDevicePoller {
             // trigger only one time -> use for debug.
             // self.interrupt_mask_register
             //     .fetch_and(!0x1, Ordering::Release);
-            PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, true)
-        } else {
-            PlicIRQState::new(TEST_DEVICE_INTERRUPT_ID, false)
+
+            self.irq_pending.store(true, Ordering::Release);
+            made_progress = true;
         }
+        made_progress
+    }
+}
+
+struct PlicTestDeviceHandler {
+    irq_pending: Arc<AtomicBool>,
+}
+
+impl PlicDeviceHandler for PlicTestDeviceHandler {
+    fn irq_level(&self) -> bool {
+        self.irq_pending.load(Ordering::Acquire)
     }
 }

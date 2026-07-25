@@ -13,14 +13,17 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
+    async_worker::AsyncWorker,
     byte_io::{ByteSink, ByteSource, ChannelIOContext},
     config::arch_config::WordType,
     device::{
-        DeviceTrait, MemError, MemMappedDeviceTrait,
+        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        plic::ExternalInterrupt,
+        plic::{
+            PeriphIrqId,
+            irq_line::{self, PlicIRQLine, PlicIRQSource},
+        },
     },
-    device_poller::{PlicIRQState, PollingEventTrait, PollingFnWrapper},
     utils::{clear_bit, read_bit, set_bit},
 };
 
@@ -149,14 +152,16 @@ pub struct FastUart16550 {
     input_rx: Receiver<u8>,
     output_tx: Sender<u8>,
 
-    /// Shared IER value for the polling thread to check interrupt conditions.
+    /// Shared IER value sampled by the PLIC source handler.
     ier_shared: Arc<AtomicU8>,
     /// THRE event latch for simplified ETBEI behavior.
     /// Cleared when IIR reports THRE as the identified interrupt source.
     thre_pending: Arc<AtomicBool>,
     /// RX-data-pending latch (mirrors LSR[0] plus any queued input) for the
-    /// interrupt poll. Set when bytes arrive, cleared once all input is read.
+    /// PLIC source handler. Set when bytes arrive, cleared once all input is read.
     rx_pending: Arc<AtomicBool>,
+
+    plic_irq_line: Option<PlicIRQLine>,
 }
 
 impl FastUart16550 {
@@ -228,6 +233,7 @@ impl FastUart16550 {
             ier_shared,
             thre_pending,
             rx_pending,
+            plic_irq_line: None,
         }
     }
 
@@ -276,7 +282,7 @@ impl FastUart16550 {
 
     /// Pure evaluation of the UART interrupt state,
     /// returning the UART IRQ id when an enabled source is currently active.
-    fn eval_irq(ier: u8, thre_pending: bool, rx_pending: bool) -> Option<ExternalInterrupt> {
+    fn eval_irq(ier: u8, thre_pending: bool, rx_pending: bool) -> Option<PeriphIrqId> {
         let rda = ier & 0x01 != 0 && rx_pending; // Received Data Available
         let thre = ier & 0x02 != 0 && thre_pending; // Transmit Holding Register Empty
         (rda || thre).then_some(UART_IRQ)
@@ -284,7 +290,7 @@ impl FastUart16550 {
 
     /// Snapshot the current interrupt state.
     #[cfg(test)]
-    pub fn poll_interrupt(&self) -> Option<ExternalInterrupt> {
+    pub fn irq_status(&self) -> Option<PeriphIrqId> {
         Self::eval_irq(
             self.ier_shared.load(Ordering::Acquire),
             self.thre_pending.load(Ordering::Acquire),
@@ -415,6 +421,43 @@ impl FastUart16550 {
         self.rx_pending.store(true, Ordering::Release);
         self.reg.borrow_mut().RBR = data
     }
+
+    fn build_plic_handler(&self) -> PlicUartHandler {
+        PlicUartHandler {
+            ier: self.ier_shared.clone(),
+            thre_pending: self.thre_pending.clone(),
+            rx_pending: self.rx_pending.clone(),
+        }
+    }
+}
+
+impl PlicIRQSource for FastUart16550 {
+    fn set_irq_line(
+        &mut self,
+        target: *mut dyn irq_line::PlicIRQHandler,
+        interrupt_id: PeriphIrqId,
+    ) {
+        let uart_handler = Box::new(self.build_plic_handler());
+        let line = PlicIRQLine::new(target, Some(uart_handler), interrupt_id);
+        self.plic_irq_line = Some(line);
+    }
+}
+
+struct PlicUartHandler {
+    ier: Arc<AtomicU8>,
+    thre_pending: Arc<AtomicBool>,
+    rx_pending: Arc<AtomicBool>,
+}
+
+impl PlicDeviceHandler for PlicUartHandler {
+    fn irq_level(&self) -> bool {
+        FastUart16550::eval_irq(
+            self.ier.load(Ordering::Acquire),
+            self.thre_pending.load(Ordering::Acquire),
+            self.rx_pending.load(Ordering::Acquire),
+        )
+        .is_some()
+    }
 }
 
 impl DeviceTrait for FastUart16550 {
@@ -422,24 +465,8 @@ impl DeviceTrait for FastUart16550 {
 
     fn sync(&mut self) {}
 
-    fn get_poll_event(&mut self) -> Option<Box<dyn PollingEventTrait>> {
-        // Evaluate the UART's interrupt conditions on the device poller's
-        // cadence — independent of terminal input — so THRE and RDA are
-        // delivered even when no bytes are flowing.
-        let ier = self.ier_shared.clone();
-        let thre_pending = self.thre_pending.clone();
-        let rx_pending = self.rx_pending.clone();
-        Some(Box::new(PollingFnWrapper::new(move || {
-            PlicIRQState::new(
-                UART_IRQ,
-                FastUart16550::eval_irq(
-                    ier.load(Ordering::Acquire),
-                    thre_pending.load(Ordering::Acquire),
-                    rx_pending.load(Ordering::Acquire),
-                )
-                .is_some(),
-            )
-        })))
+    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
+        None
     }
 }
 
@@ -487,8 +514,8 @@ mod test {
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 0);
     }
 
-    // Interrupt evaluation is now driven by `poll_interrupt`, decoupled from the
-    // byte-receive callbacks. These tests exercise it directly.
+    // Interrupt evaluation is exposed as an absolute status for the PLIC
+    // source handler. These tests exercise that status directly.
 
     /// Receiving input while RDA (IER bit0) is enabled must raise UART_IRQ.
     #[test]
@@ -497,11 +524,11 @@ mod test {
         uart.write_impl::<u8>(1, 0x01).unwrap(); // enable Received Data Available (IER bit0)
 
         // No interrupt before any input arrives.
-        assert_eq!(uart.poll_interrupt(), None);
+        assert_eq!(uart.irq_status(), None);
 
         port.receive_bytes([b'x']);
 
-        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+        assert_eq!(uart.irq_status(), Some(UART_IRQ));
     }
 
     /// Without RDA enabled, incoming bytes are buffered but must not interrupt.
@@ -511,7 +538,7 @@ mod test {
 
         port.receive_bytes([b'x']);
 
-        assert_eq!(uart.poll_interrupt(), None);
+        assert_eq!(uart.irq_status(), None);
     }
 
     /// RDA stays asserted until every queued byte has been read, then clears.
@@ -522,13 +549,13 @@ mod test {
         uart.write_impl::<u8>(1, 0x01).unwrap(); // enable RDA
         port.receive_bytes([b'a', b'b']);
 
-        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+        assert_eq!(uart.irq_status(), Some(UART_IRQ));
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x04); // IIR: data available
 
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'a');
-        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ)); // 'b' still pending
+        assert_eq!(uart.irq_status(), Some(UART_IRQ)); // 'b' still pending
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'b');
-        assert_eq!(uart.poll_interrupt(), None); // fully drained
+        assert_eq!(uart.irq_status(), None); // fully drained
     }
 
     /// THRE (transmit) interrupts are input-independent: enabling ETBEI raises
@@ -539,28 +566,28 @@ mod test {
         let (mut uart, _port) = FastUart16550::new();
         uart.write_impl::<u8>(1, 0x02).unwrap(); // enable ETBEI (IER bit1)
 
-        assert_eq!(uart.poll_interrupt(), Some(UART_IRQ));
+        assert_eq!(uart.irq_status(), Some(UART_IRQ));
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02); // IIR: THR empty
-        assert_eq!(uart.poll_interrupt(), None); // cleared, no storm
+        assert_eq!(uart.irq_status(), None); // cleared, no storm
     }
 
     #[test]
-    fn poll_event_reports_uart_irq_level_changes() {
+    fn plic_handler_reports_current_uart_irq_level() {
         let (mut uart, mut port) = FastUart16550::new();
-        let mut event = uart.get_poll_event().unwrap();
+        let handler = uart.build_plic_handler();
 
-        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
+        assert!(!handler.irq_level());
 
         uart.write_impl::<u8>(1, 0x01).unwrap();
         port.receive_bytes([b'x']);
-        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, true));
+        assert!(handler.irq_level());
 
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'x');
-        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
+        assert!(!handler.irq_level());
 
         uart.write_impl::<u8>(1, 0x02).unwrap();
-        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, true));
+        assert!(handler.irq_level());
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02);
-        assert_eq!(event.poll_nonblocking(), PlicIRQState::new(UART_IRQ, false));
+        assert!(!handler.irq_level());
     }
 }

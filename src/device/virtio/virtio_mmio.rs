@@ -9,8 +9,8 @@ use crate::{
         DeviceTrait, MemError, MemMappedDeviceTrait,
         config::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_SIZE},
         plic::{
-            ExternalInterrupt,
-            irq_line::{PlicIRQLine, PlicIRQSource},
+            PeriphIrqId,
+            irq_line::{PlicIRQHandler, PlicIRQSource},
         },
         virtio::{
             config::*,
@@ -513,8 +513,8 @@ impl DeviceTrait for VirtIOMMIO {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
-        self.device.get_mut().get_poll_event()
+    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
+        self.device.get_mut().get_async_worker()
     }
 }
 
@@ -528,9 +528,8 @@ impl MemMappedDeviceTrait for VirtIOMMIO {
 }
 
 impl PlicIRQSource for VirtIOMMIO {
-    fn set_irq_line(&mut self, line: PlicIRQLine, id: ExternalInterrupt) {
-        let Ok(interrupt_id) = ExternalInterrupt::try_from(id);
-        unsafe { self.device.as_mut_unchecked() }.set_irq_line(line, interrupt_id);
+    fn set_irq_line(&mut self, target: *mut dyn PlicIRQHandler, interrupt_id: PeriphIrqId) {
+        unsafe { self.device.as_mut_unchecked() }.set_irq_line(target, interrupt_id);
     }
 }
 
@@ -635,12 +634,22 @@ mod test {
     const DESC_NUM: usize = 16;
 
     struct MockPlicIRQHandler {
-        changes: Rc<RefCell<Vec<(ExternalInterrupt, bool)>>>,
+        changes: Rc<RefCell<Vec<(PeriphIrqId, bool)>>>,
+        periphs: Vec<(Box<dyn crate::device::PlicDeviceHandler>, PeriphIrqId)>,
     }
 
     impl PlicIRQHandler for MockPlicIRQHandler {
-        fn handle_irq(&mut self, interrupt: ExternalInterrupt, level: bool) {
+        fn handle_irq(&mut self, interrupt: PeriphIrqId, level: bool) {
             self.changes.borrow_mut().push((interrupt, level));
+        }
+        fn register_source_handler(
+            &mut self,
+            source_handler: Option<Box<dyn crate::device::PlicDeviceHandler>>,
+            interrupt_id: PeriphIrqId,
+        ) {
+            if let Some(handler) = source_handler {
+                self.periphs.push((handler, interrupt_id));
+            }
         }
     }
 
@@ -671,6 +680,7 @@ mod test {
         let irq_changes = Rc::new(RefCell::new(Vec::new()));
         let mut irq_handler = Box::new(MockPlicIRQHandler {
             changes: irq_changes.clone(),
+            periphs: vec![],
         });
 
         let mut ram = Ram::new();
@@ -683,7 +693,7 @@ mod test {
             .get();
 
         let mut virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virt_device)));
-        virtio_mmio_device.set_irq_line(PlicIRQLine::new(&mut *irq_handler), 1);
+        virtio_mmio_device.set_irq_line(&mut *irq_handler, 1);
         irq_changes.borrow_mut().clear();
         assert_eq!(
             virtio_mmio_device.read_u32_impl(VirtIO_MMIO_Offset::DeviceId as u64),

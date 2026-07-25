@@ -244,7 +244,7 @@ impl DeviceTrait for MemoryMapIO {
             item.device.borrow_mut().sync();
         }
     }
-    fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
         None
     }
 }
@@ -329,7 +329,7 @@ mod test {
 
         fn sync(&mut self) {}
 
-        fn get_poll_event(&mut self) -> Option<Box<dyn crate::device_poller::PollingEventTrait>> {
+        fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
             None
         }
     }
