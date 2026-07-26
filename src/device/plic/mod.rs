@@ -327,7 +327,7 @@ impl PLICLayout {
             PlicRegister::Threshold(context_id) => self.read_priority_threshold(context_id),
             PlicRegister::ClaimComplete(context_id) => {
                 let interrupt_id = self.read_claim(context_id);
-                log::info!(
+                log::debug!(
                     "[PLIC] Claim read ctx={} => id={}",
                     context_id,
                     interrupt_id
@@ -348,7 +348,7 @@ impl PLICLayout {
                 self.write_priority_threshold(context_id, value);
             }
             PlicRegister::ClaimComplete(context_id) => {
-                log::info!("[PLIC] Complete write ctx={} id={}", context_id, value);
+                log::debug!("[PLIC] Complete write ctx={} id={}", context_id, value);
                 self.write_complete(context_id, value);
             }
             PlicRegister::Pending(_) => {}
@@ -522,7 +522,7 @@ impl RiscvIRQSource for PLIC {
 // Receive the interrupt signal from peripherals.
 impl PlicIRQHandler for PLIC {
     fn handle_irq(&mut self, interrupt: PeriphIrqId, level: bool) {
-        // log::info!("PLIC, receive an interrupt: {interrupt}, level = {level}");
+        // log::debug!("PLIC, receive an interrupt: {interrupt}, level = {level}");
         self.set_interrupt_level(interrupt, level);
     }
     fn register_source_handler(
