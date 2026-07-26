@@ -2,14 +2,15 @@
 #include "io.h"
 #include <stdint.h>
 
-typedef struct TEST_DEVICE_T {
-    uint32_t icr;
-    uint32_t imr;
-    uint32_t idr0;
-    uint32_t idr1;
-} TestDevice;
-const uint64_t TEST_DEVICE_BASE_ADDR = 0x101000;
-volatile TestDevice* test_device = (TestDevice*)TEST_DEVICE_BASE_ADDR;
+typedef struct SAMPLE_TIMER_T {
+    uint32_t control;
+    uint32_t interrupt_mask;
+    uint32_t interval_low;
+    uint32_t interval_high;
+} SampleTimer;
+const uint64_t SAMPLE_TIMER_BASE_ADDR = 0x101000;
+const uint32_t SAMPLE_TIMER_CONTROL_RESET = 1u << 0;
+volatile SampleTimer* sample_timer = (SampleTimer*)SAMPLE_TIMER_BASE_ADDR;
 
 struct PLICContextConfig {
     volatile uint32_t threshold;
@@ -34,7 +35,8 @@ volatile uint32_t trap_cnt = 0;
 
 void external_irq_handler() {
     uint32_t claimed_id = plic->context_config[0].claimed_id;
-        
+
+    sample_timer->control = SAMPLE_TIMER_CONTROL_RESET;
     trap_cnt++;
 
     uint64_t mip = read_csr_mip();
@@ -68,18 +70,18 @@ void plic_disenable_interrupt(uint32_t context, uint32_t interrupt_id) {
     plic->context_enable_bits[context][interrupt_id / 32] &= ~(1u << (interrupt_id % 32));
 }
 
-const uint32_t TEST_DEVICE_INTERRUPT_ID = 63;
+const uint32_t SAMPLE_TIMER_INTERRUPT_ID = 63;
 int main() {
     TEST_START(__BASE_FILE__);
     printf("%x\n", sizeof(PLIC));
     trap_init();
-    plic_set_priority(TEST_DEVICE_INTERRUPT_ID, 5);
-    plic_set_threshold(0, 1);
-    plic_enable_interrupt(0, TEST_DEVICE_INTERRUPT_ID);
+    plic_set_priority(SAMPLE_TIMER_INTERRUPT_ID, 5);
+    plic_set_threshold(0, 1); // 0 for machine mode interrupt
+    plic_enable_interrupt(0, SAMPLE_TIMER_INTERRUPT_ID);
 
-    test_device->idr0 = 1;
-    test_device->idr1 = 0;
-    test_device->imr = 0x1;  // enable interrupt
+    sample_timer->interval_low = 1000;
+    sample_timer->interval_high = 0;
+    sample_timer->interrupt_mask = 0x1;  // enable interrupt
     while (trap_cnt < 10) {
     }
 

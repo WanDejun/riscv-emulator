@@ -1,9 +1,8 @@
-// A simple timer(microseconds) for external interrupt testing.
+// A simple millisecond timer used to exercise external interrupts.
 
 #![cfg(feature = "test-device")]
 use std::{
     hint::unlikely,
-    mem::transmute_copy,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -18,7 +17,7 @@ use crate::{
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
-        config::{TEST_DEVICE_BASE, TEST_DEVICE_SIZE},
+        config::{SAMPLE_TIMER_BASE, SAMPLE_TIMER_SIZE},
         plic::{
             PeriphIrqId,
             irq_line::{PlicIRQLine, PlicIRQSource},
@@ -27,16 +26,17 @@ use crate::{
     utils::check_align,
 };
 
-pub const TEST_DEVICE_INTERRUPT_ID: PeriphIrqId = 63;
+pub const SAMPLE_TIMER_INTERRUPT_ID: PeriphIrqId = 63;
+const CONTROL_RESET: u32 = 1 << 0;
 
-struct TestDeviceLayout {
+struct SampleTimerLayout {
     control_register: u32,
     interrupt_mask_register: Arc<AtomicU32>,
     data_register0: u32,
     data_register1: u32,
 }
 
-impl TestDeviceLayout {
+impl SampleTimerLayout {
     fn new() -> Self {
         Self {
             control_register: 0,
@@ -48,13 +48,15 @@ impl TestDeviceLayout {
 }
 
 enum WorkerCommand {
-    // InterruptStatus(u32),
     Data {
         interval_ms: u64,
         configured_at: Instant,
     },
+    Reset {
+        reset_at: Instant,
+    },
 }
-pub struct TestDeviceWorker {
+pub struct SampleTimerWorker {
     interrupt_mask_register: Arc<AtomicU32>,
     pre_time: Instant,
     step_time: Duration,
@@ -62,7 +64,7 @@ pub struct TestDeviceWorker {
     irq_pending: Arc<AtomicBool>,
 }
 
-impl TestDeviceWorker {
+impl SampleTimerWorker {
     fn new(
         receiver: Receiver<WorkerCommand>,
         imr: Arc<AtomicU32>,
@@ -78,19 +80,19 @@ impl TestDeviceWorker {
     }
 }
 
-pub(crate) struct TestDevice {
-    layout: TestDeviceLayout,
+pub(crate) struct SampleTimerDevice {
+    layout: SampleTimerLayout,
     sender: Sender<WorkerCommand>,
     receiver: Option<Receiver<WorkerCommand>>,
     irq_pending: Arc<AtomicBool>,
     plic_irq_line: Option<PlicIRQLine>,
 }
 
-impl TestDevice {
+impl SampleTimerDevice {
     pub fn new() -> Self {
         let (sender, receiver) = crossbeam::channel::unbounded();
         Self {
-            layout: TestDeviceLayout::new(),
+            layout: SampleTimerLayout::new(),
             sender,
             receiver: Some(receiver),
             irq_pending: Arc::new(AtomicBool::new(false)),
@@ -111,13 +113,13 @@ impl TestDevice {
         }
 
         let data = match addr {
-            0x00 => unsafe { transmute_copy(&self.layout.control_register) },
-            0x04 => unsafe { transmute_copy(&self.layout.interrupt_mask_register) },
-            0x08 => unsafe { transmute_copy(&self.layout.data_register0) },
-            0x0c => unsafe { transmute_copy(&self.layout.data_register1) },
+            0x00 => self.layout.control_register,
+            0x04 => self.layout.interrupt_mask_register.load(Ordering::Acquire),
+            0x08 => self.layout.data_register0,
+            0x0c => self.layout.data_register1,
             _ => return Err(MemError::LoadFault),
         };
-        return Ok(data);
+        Ok(T::truncate_from(data))
     }
 
     fn write_impl<T>(&mut self, addr: u64, data: T) -> Result<(), crate::device::MemError>
@@ -131,7 +133,19 @@ impl TestDevice {
         let data_u32 = data.truncate_to();
 
         match addr {
-            0x00 => self.layout.control_register = data_u32,
+            0x00 => {
+                self.layout.control_register = data_u32;
+                if data_u32 & CONTROL_RESET != 0 {
+                    // Deassert synchronously so a following PLIC completion cannot
+                    // observe the stale interrupt level before the worker runs.
+                    self.irq_pending.store(false, Ordering::Release);
+                    self.sender
+                        .try_send(WorkerCommand::Reset {
+                            reset_at: Instant::now(),
+                        })
+                        .unwrap();
+                }
+            }
             0x04 => {
                 self.layout
                     .interrupt_mask_register
@@ -161,14 +175,14 @@ impl TestDevice {
     }
 }
 
-impl DeviceTrait for TestDevice {
+impl DeviceTrait for SampleTimerDevice {
     dispatch_read_write! { read_impl, write_impl }
 
     fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
-        let worker = TestDeviceWorker::new(
+        let worker = SampleTimerWorker::new(
             self.receiver
                 .take()
-                .expect("test device async worker can only be registered once"),
+                .expect("sample timer async worker can only be registered once"),
             self.layout.interrupt_mask_register.clone(),
             self.irq_pending.clone(),
         );
@@ -179,22 +193,22 @@ impl DeviceTrait for TestDevice {
     }
 }
 
-impl MemMappedDeviceTrait for TestDevice {
+impl MemMappedDeviceTrait for SampleTimerDevice {
     fn base() -> WordType {
-        TEST_DEVICE_BASE
+        SAMPLE_TIMER_BASE
     }
     fn size() -> WordType {
-        TEST_DEVICE_SIZE
+        SAMPLE_TIMER_SIZE
     }
 }
 
-impl PlicIRQSource for TestDevice {
+impl PlicIRQSource for SampleTimerDevice {
     fn set_irq_line(
         &mut self,
         target: *mut dyn super::plic::irq_line::PlicIRQHandler,
         interrupt_id: PeriphIrqId,
     ) {
-        let handler = Box::new(PlicTestDeviceHandler {
+        let handler = Box::new(PlicSampleTimerHandler {
             irq_pending: self.irq_pending.clone(),
         });
         let line = PlicIRQLine::new(target, Some(handler), interrupt_id);
@@ -202,7 +216,7 @@ impl PlicIRQSource for TestDevice {
     }
 }
 
-impl AsyncWorker for TestDeviceWorker {
+impl AsyncWorker for SampleTimerWorker {
     fn async_task(&mut self) -> bool {
         let mut made_progress = false;
         while let Ok(v) = self.receiver.try_recv() {
@@ -215,21 +229,23 @@ impl AsyncWorker for TestDeviceWorker {
                     self.step_time = Duration::from_millis(interval_ms);
                     self.pre_time = configured_at;
                 }
+                WorkerCommand::Reset { reset_at } => {
+                    self.irq_pending.store(false, Ordering::Release);
+                    self.pre_time = reset_at;
+                }
             }
         }
         let cur = Instant::now();
 
         if (self.interrupt_mask_register.load(Ordering::Acquire) & 1) == 0 {
             self.pre_time = cur;
+            return made_progress;
         }
 
-        if cur.duration_since(self.pre_time) > self.step_time {
-            println!("interrupt id: {}.", TEST_DEVICE_INTERRUPT_ID);
-            self.pre_time = cur;
-            // trigger only one time -> use for debug.
-            // self.interrupt_mask_register
-            //     .fetch_and(!0x1, Ordering::Release);
-
+        if !self.irq_pending.load(Ordering::Acquire)
+            && cur.duration_since(self.pre_time) >= self.step_time
+        {
+            log::trace!("interrupt id: {}.", SAMPLE_TIMER_INTERRUPT_ID);
             self.irq_pending.store(true, Ordering::Release);
             made_progress = true;
         }
@@ -237,12 +253,73 @@ impl AsyncWorker for TestDeviceWorker {
     }
 }
 
-struct PlicTestDeviceHandler {
+struct PlicSampleTimerHandler {
     irq_pending: Arc<AtomicBool>,
 }
 
-impl PlicDeviceHandler for PlicTestDeviceHandler {
+impl PlicDeviceHandler for PlicSampleTimerHandler {
     fn irq_level(&self) -> bool {
         self.irq_pending.load(Ordering::Acquire)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_rearms_timer_for_another_interrupt() {
+        let (sender, receiver) = crossbeam::channel::unbounded();
+        let interrupt_mask_register = Arc::new(AtomicU32::new(1));
+        let irq_pending = Arc::new(AtomicBool::new(false));
+        let mut worker =
+            SampleTimerWorker::new(receiver, interrupt_mask_register, irq_pending.clone());
+        let interval = Duration::from_millis(10);
+
+        sender
+            .send(WorkerCommand::Data {
+                interval_ms: interval.as_millis() as u64,
+                configured_at: Instant::now() - interval,
+            })
+            .unwrap();
+        assert!(worker.async_task());
+        assert!(irq_pending.load(Ordering::Acquire));
+
+        worker.pre_time = Instant::now() - interval;
+        assert!(!worker.async_task());
+
+        let reset_at = Instant::now();
+        sender.send(WorkerCommand::Reset { reset_at }).unwrap();
+        assert!(worker.async_task());
+        assert!(!irq_pending.load(Ordering::Acquire));
+        assert_eq!(worker.pre_time, reset_at);
+
+        worker.pre_time = Instant::now() - interval;
+        assert!(worker.async_task());
+        assert!(irq_pending.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn control_bit_zero_does_not_clear_pending_interrupt() {
+        let mut device = SampleTimerDevice::new();
+        device.irq_pending.store(true, Ordering::Release);
+
+        device.write_u32(0, !CONTROL_RESET).unwrap();
+
+        assert!(device.irq_pending.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn control_bit_one_clears_pending_interrupt_immediately() {
+        let mut device = SampleTimerDevice::new();
+        device.irq_pending.store(true, Ordering::Release);
+
+        device.write_u32(0, CONTROL_RESET).unwrap();
+
+        assert!(!device.irq_pending.load(Ordering::Acquire));
+        assert!(matches!(
+            device.receiver.as_ref().unwrap().try_recv(),
+            Ok(WorkerCommand::Reset { .. })
+        ));
     }
 }

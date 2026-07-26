@@ -46,7 +46,7 @@ use crate::{
 };
 
 #[cfg(feature = "test-device")]
-use crate::device::test_device::{TEST_DEVICE_INTERRUPT_ID, TestDevice};
+use crate::device::sample_timer::{SAMPLE_TIMER_INTERRUPT_ID, SampleTimerDevice};
 
 pub trait RiscvIRQHandler {
     fn handle_irq(&mut self, interrupt: Interrupt, level: bool);
@@ -435,8 +435,8 @@ impl VirtBoard {
 
         #[cfg(feature = "test-device")]
         let builder = builder.add_plic_device(
-            Rc::new(RefCell::new(TestDevice::new())),
-            TEST_DEVICE_INTERRUPT_ID,
+            Rc::new(RefCell::new(SampleTimerDevice::new())),
+            SAMPLE_TIMER_INTERRUPT_ID,
         );
 
         Ok(builder.build(ram))
@@ -722,25 +722,39 @@ mod tests {
 
     #[cfg(feature = "test-device")]
     #[test]
-    #[ignore = "test-device IRQ currently remains asserted after completion"]
-    fn test_plic() {
-        use std::{thread::sleep, time::Duration};
+    fn sample_timer_rearms_after_control_reset() {
+        use std::{
+            thread::sleep,
+            time::{Duration, Instant},
+        };
 
-        use crate::device::config::TEST_DEVICE_BASE;
-        use crate::device::test_device::TEST_DEVICE_INTERRUPT_ID;
-        use crate::ram_config;
+        use crate::device::config::SAMPLE_TIMER_BASE;
+        use crate::device::sample_timer::SAMPLE_TIMER_INTERRUPT_ID;
         use crate::{config::arch_config::WordType, isa::riscv::debugger::Address};
-        const PRIORITY_OFFSET: WordType = 0;
-        const PENDING_BIT_OFFSET: WordType = 0x001000;
         const CONTEXT_ENABLE_BIT_OFFSET: WordType = 0x002000;
         const CONTEXT_ENABLE_BIT_SIZE: WordType = 0x80;
         const CONTEXT_CONFIG_OFFSET: WordType = 0x200000;
         const CONTEXT_CONFIG_SIZE: WordType = 0x1000;
+        const CLAIM_COMPLETE_OFFSET: WordType =
+            CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE) + 4;
+
+        fn wait_for_claim(board: &mut VirtBoard, claim_addr: WordType) -> u32 {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                board.step();
+                let claimed_id = board.plic.borrow_mut().read_u32(claim_addr).unwrap();
+                if claimed_id != 0 {
+                    return claimed_id;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "sample timer interrupt timed out"
+                );
+                sleep(Duration::from_millis(1));
+            }
+        }
 
         let mut board = create_test_board();
-        let mstatus = board.cpu.debug_csr(csr_index::mstatus, None).unwrap() | 1 << 3; // enable MIE
-        board.cpu.debug_csr(csr_index::mstatus, Some(mstatus));
-        board.cpu.debug_csr(csr_index::mie, Some(1 << 11)); // enable MEIE
 
         {
             let mut plic = board.plic.borrow_mut();
@@ -748,8 +762,8 @@ mod tests {
             let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE);
             plic.write_u32(addr, 1).unwrap();
 
-            // test_device interrupt priority
-            plic.write_u32(TEST_DEVICE_INTERRUPT_ID as WordType * 4, 5)
+            // Sample timer interrupt priority.
+            plic.write_u32(SAMPLE_TIMER_INTERRUPT_ID as WordType * 4, 5)
                 .unwrap();
 
             // interrupt enable.
@@ -757,51 +771,52 @@ mod tests {
             plic.write_u32(addr, 0xffffffff).unwrap();
         }
 
-        // data register 0
+        // Configure a short interval and enable the timer interrupt.
         board
             .cpu
             .write_memory(
-                Address::Phys(TEST_DEVICE_BASE + 2 * size_of::<u32>() as WordType),
-                100u32,
+                Address::Phys(SAMPLE_TIMER_BASE + 2 * size_of::<u32>() as WordType),
+                10u32,
             )
             .unwrap();
-        // data register 1
         board
             .cpu
             .write_memory(
-                Address::Phys(TEST_DEVICE_BASE + 3 * size_of::<u32>() as WordType),
+                Address::Phys(SAMPLE_TIMER_BASE + 3 * size_of::<u32>() as WordType),
                 0u32,
             )
             .unwrap();
-        // interrupt_mask_register
         board
             .cpu
             .write_memory(
-                Address::Phys(TEST_DEVICE_BASE + 1 * size_of::<u32>() as WordType),
+                Address::Phys(SAMPLE_TIMER_BASE + size_of::<u32>() as WordType),
                 1u32,
             )
             .unwrap();
-        sleep(Duration::from_millis(200));
 
-        for _ in 0..200 {
-            board.step();
-        }
+        let first_claim = wait_for_claim(&mut board, CLAIM_COMPLETE_OFFSET);
+        assert_eq!(first_claim, SAMPLE_TIMER_INTERRUPT_ID);
 
-        let meip = 1 << 11;
-        assert_eq!(board.cpu.debug_csr(csr_index::mip, None).unwrap(), meip);
+        // Clear the device before completing the level-triggered PLIC interrupt.
+        board
+            .cpu
+            .write_memory(Address::Phys(SAMPLE_TIMER_BASE), 1u32)
+            .unwrap();
+        board
+            .plic
+            .borrow_mut()
+            .write_u32(CLAIM_COMPLETE_OFFSET, first_claim)
+            .unwrap();
+        assert_eq!(
+            board
+                .plic
+                .borrow_mut()
+                .read_u32(CLAIM_COMPLETE_OFFSET)
+                .unwrap(),
+            0
+        );
 
-        // let mecause: WordType = Trap::Interrupt(Interrupt::MachineExternal).into();
-        // assert_eq!(
-        //     board.cpu.debug_csr(csr_index::mcause, None).unwrap(),
-        //     mecause
-        // );
-
-        let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE) + 4;
-        let mut plic = board.plic.borrow_mut();
-        let claimed_id = plic.read_u32(addr).unwrap();
-        assert_eq!(claimed_id as u32, TEST_DEVICE_INTERRUPT_ID);
-
-        let mepc = board.cpu.debug_csr(csr_index::mepc, None).unwrap();
-        assert!(mepc >= ram_config::BASE_ADDR);
+        let second_claim = wait_for_claim(&mut board, CLAIM_COMPLETE_OFFSET);
+        assert_eq!(second_claim, SAMPLE_TIMER_INTERRUPT_ID);
     }
 }
