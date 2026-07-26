@@ -9,7 +9,6 @@
 ## Medium Priority
 
 - 修复 `riscv32` 支持
-- 探究为何 TLB 会导致行为错误
 - 让 ram size 可配置
 - 将 linux kernel 加入 CI
 

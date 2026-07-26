@@ -32,6 +32,7 @@ enum TargetFormat {
 }
 
 const DEFAULT_DTB_ADDRESS: WordType = 0x9f00_0000;
+const DEFAULT_GDB_PORT: u16 = 1234;
 
 fn parse_address(value: &str) -> Result<WordType, String> {
     let value = value.trim();
@@ -87,9 +88,24 @@ struct Args {
     )]
     debug: bool,
 
-    /// Start a GDB remote stub on localhost:1234.
+    /// Enable GDB remote debugging server (TCP 127.0.0.1:1234 by default).
     #[arg(short = 'G', long = "gdb", default_value_t = false)]
     gdb: bool,
+
+    /// TCP port for the GDB server (conflicts with --gdb-uds).
+    #[arg(long = "gdb-port", value_name = "PORT", requires = "gdb")]
+    #[cfg_attr(unix, arg(conflicts_with = "gdb_uds"))]
+    gdb_port: Option<u16>,
+
+    /// Use a Unix domain socket for the GDB server (conflicts with --gdb-port).
+    #[cfg(unix)]
+    #[arg(
+        long = "gdb-uds",
+        value_name = "PATH",
+        requires = "gdb",
+        conflicts_with = "gdb_port"
+    )]
+    gdb_uds: Option<std::path::PathBuf>,
 
     /// Run rvdb commands from this file before entering the interactive debugger. Requires --debug.
     #[arg(short = 'S', long = "script", value_name = "FILE", requires = "debug")]
@@ -149,6 +165,19 @@ struct Args {
         value_parser = parse_address
     )]
     dtb_address: Option<WordType>,
+}
+
+fn gdb_config(args: &Args) -> Option<gdb::Config> {
+    if !args.gdb {
+        return None;
+    }
+
+    #[cfg(unix)]
+    if let Some(path) = &args.gdb_uds {
+        return Some(gdb::Config::Uds(path.clone()));
+    }
+
+    Some(gdb::Config::Tcp(args.gdb_port.unwrap_or(DEFAULT_GDB_PORT)))
 }
 
 /// Used for riscv-arch-test.
@@ -314,8 +343,8 @@ fn main() {
         }
         repl.run();
         return;
-    } else if cli_args.gdb {
-        if let Err(e) = gdb::event_loop(board, gdb::Config::Tcp(1234)) {
+    } else if let Some(config) = gdb_config(&cli_args) {
+        if let Err(e) = gdb::event_loop(board, config) {
             log::error!("{:?}", e);
             panic!();
         }
@@ -355,5 +384,63 @@ fn main() {
         drop(board);
 
         println!("Used time: {}s", now.elapsed().as_secs_f32());
+    }
+}
+
+#[cfg(test)]
+mod arg_tests {
+    use super::*;
+
+    #[test]
+    fn gdb_defaults_to_tcp_port_1234() {
+        let args = Args::try_parse_from(["riscv-emulator", "program.elf", "-G"]).unwrap();
+
+        assert_eq!(gdb_config(&args), Some(gdb::Config::Tcp(1234)));
+    }
+
+    #[test]
+    fn gdb_tcp_port_is_configurable() {
+        let args =
+            Args::try_parse_from(["riscv-emulator", "program.elf", "-G", "--gdb-port", "4321"])
+                .unwrap();
+
+        assert_eq!(gdb_config(&args), Some(gdb::Config::Tcp(4321)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gdb_uds_path_is_configurable() {
+        let args = Args::try_parse_from([
+            "riscv-emulator",
+            "program.elf",
+            "-G",
+            "--gdb-uds",
+            "/tmp/riscv-gdb.sock",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            gdb_config(&args),
+            Some(gdb::Config::Uds(std::path::PathBuf::from(
+                "/tmp/riscv-gdb.sock"
+            )))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gdb_tcp_and_uds_are_mutually_exclusive() {
+        let error = Args::try_parse_from([
+            "riscv-emulator",
+            "program.elf",
+            "-G",
+            "--gdb-port",
+            "4321",
+            "--gdb-uds",
+            "/tmp/riscv-gdb.sock",
+        ])
+        .unwrap_err();
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 }

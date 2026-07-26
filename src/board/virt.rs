@@ -3,7 +3,6 @@ use std::{
     cell::{Cell, RefCell, UnsafeCell},
     collections::HashMap,
     hint::cold_path,
-    pin::Pin,
     rc::Rc,
     sync::atomic::Ordering,
 };
@@ -289,7 +288,7 @@ impl RVBoardBuilder {
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
         let decoder = self.decoder.take().unwrap_or_else(Decoder::new);
-        let mut cpu = Box::pin(RVCPU::from_decoder(decoder, vaddr_manager));
+        let mut cpu = Box::new(RVCPU::from_decoder(decoder, vaddr_manager));
 
         for (register, value) in self.initial_registers {
             cpu.write_reg(register, value);
@@ -361,7 +360,7 @@ pub struct VirtBoard {
 
     loader: Option<ELFLoader>,
 
-    pub cpu: Pin<Box<RVCPU>>,
+    pub cpu: Box<RVCPU>,
     cycles: Rc<Cell<u64>>,
     pub clock: VirtualClock,
     pub timer: Rc<UnsafeCell<Timer<VirtualClock>>>,

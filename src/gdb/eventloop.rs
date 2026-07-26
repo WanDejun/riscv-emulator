@@ -10,6 +10,8 @@ use gdbstub::stub::run_blocking;
 use gdbstub::target::Target;
 use std::net::TcpListener;
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 
 use crate::isa::riscv::csr_reg::NamedCsrReg;
 use crate::isa::riscv::csr_reg::csr_macro::CSR_NAME;
@@ -127,7 +129,7 @@ fn wait_for_tcp(port: u16) -> DynResult<TcpStream> {
 }
 
 #[cfg(unix)]
-fn wait_for_uds(path: &str) -> DynResult<UnixStream> {
+fn wait_for_uds(path: &Path) -> DynResult<UnixStream> {
     match std::fs::remove_file(path) {
         Ok(_) => {}
         Err(e) => match e.kind() {
@@ -136,7 +138,7 @@ fn wait_for_uds(path: &str) -> DynResult<UnixStream> {
         },
     }
 
-    eprintln!("Waiting for a GDB connection on {}...", path);
+    eprintln!("Waiting for a GDB connection on {}...", path.display());
 
     let sock = UnixListener::bind(path)?;
     let (stream, addr) = sock.accept()?;
@@ -145,11 +147,12 @@ fn wait_for_uds(path: &str) -> DynResult<UnixStream> {
     Ok(stream)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Config {
     Tcp(u16),
 
     #[cfg(unix)]
-    Uds(String),
+    Uds(PathBuf),
 }
 
 pub fn event_loop<B: Board>(board: B, cfg: Config) -> DynResult<()> {
