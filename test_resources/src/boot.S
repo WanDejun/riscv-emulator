@@ -3,7 +3,7 @@
 
 _start:
     la sp, stack_top        # 设置栈指针
-    #claer bss
+    #clear bss
     la a0, stack_lower_bound
     la a1, stack_top
 1:

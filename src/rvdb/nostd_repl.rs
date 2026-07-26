@@ -12,7 +12,7 @@ use noline::{
 
 use crate::board::Board;
 use crate::isa::riscv::debugger::DebugEvent;
-use crate::rvdb::{Printer, RvdbCommand, RvdbSession};
+use crate::rvdb::{Printer, RvdbCommand, RvdbSession, format_clap_error, is_clap_display};
 
 const PROMPT: &str = "(rvdb) ";
 const CONTINUE_CHUNK: u64 = 100_000;
@@ -270,7 +270,20 @@ impl<B: Board> NostdREPL<B> {
             self.last_line = Some(line.to_owned());
         }
 
-        let cmd = self.session.parse_line(line)?;
+        let cmd = match self.session.parse_line(line) {
+            Ok(cmd) => cmd,
+            Err(error) if is_clap_display(&error) => {
+                self.channel
+                    .write(error.to_string().as_bytes())
+                    .await
+                    .unwrap();
+                return Ok(REPLResponse {
+                    exit: false,
+                    cancel: false,
+                });
+            }
+            Err(error) => return Err(format_clap_error(error)),
+        };
         match cmd {
             RvdbCommand::Continue { steps } => {
                 self.run_continue_with_hook(steps, after_continue_chunk)

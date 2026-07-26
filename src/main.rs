@@ -9,7 +9,6 @@ use std::fs;
 use std::time::Instant;
 
 use clap::Parser;
-use lazy_static::lazy_static;
 use riscv_emulator::board::Board;
 use riscv_emulator::gdb;
 use riscv_emulator::isa::DebugTarget;
@@ -24,10 +23,6 @@ use riscv_emulator::{
 };
 
 use crate::{logging::LogLevel, welcome::display_welcome_message};
-
-lazy_static! {
-    static ref cli_args: Args = Args::parse();
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum)]
 enum TargetFormat {
@@ -54,7 +49,7 @@ fn parse_address(value: &str) -> Result<WordType, String> {
     WordType::try_from(parsed).map_err(|_| format!("address {value:?} does not fit WordType"))
 }
 
-fn display_device_list(devices: &Vec<DeviceConfig>) {
+fn display_device_list(devices: &[DeviceConfig]) {
     println!("\x1b[{}mdevice list:", 34);
     for device in devices {
         println!("\t{:#?}: {:#?}", device.dev_type, device.path);
@@ -63,61 +58,96 @@ fn display_device_list(devices: &Vec<DeviceConfig>) {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    next_line_help = true,
+    about = "An educational full-system RISC-V emulator written in Rust.",
+    after_help = "Terminal controls:\n  Ctrl+A, then x  Exit during normal execution (not in rvdb REPL or GDB mode)."
+)]
 struct Args {
-    /// Path of the target executable file (elf/bin).
+    /// RISC-V ELF executable or raw binary image to run.
     path: std::path::PathBuf,
 
-    /// Specify target executable file format.
-    #[arg(value_enum, short, long, default_value_t = TargetFormat::Auto)]
+    /// Choose the input format; auto will check by filename extension.
+    #[arg(
+        value_enum,
+        short,
+        long,
+        value_name = "FORMAT",
+        default_value_t = TargetFormat::Auto
+    )]
     format: TargetFormat,
 
-    /// Enable builtin debugger REPL (rvdb).
-    #[arg(short = 'g', long = "debug", default_value_t = false)]
+    /// Start the built-in rvdb debugger.
+    #[arg(
+        short = 'g',
+        long = "debug",
+        conflicts_with = "gdb",
+        default_value_t = false
+    )]
     debug: bool,
 
-    /// Enable GDB remote debugging server (gdb).
+    /// Start a GDB remote stub on localhost:1234.
     #[arg(short = 'G', long = "gdb", default_value_t = false)]
     gdb: bool,
 
-    /// Script file for debugger REPL, will be ignored if --debug is not set.
-    #[arg(short = 'S', long = "script")]
+    /// Run rvdb commands from this file before entering the interactive debugger. Requires --debug.
+    #[arg(short = 'S', long = "script", value_name = "FILE", requires = "debug")]
     script: Option<std::path::PathBuf>,
 
-    /// Enable to print more details.
+    /// Print additional startup details.
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
-    /// Switch log level.
-    #[arg(value_enum, long = "loglevel", default_value_t = LogLevel::Info)]
+    /// Set the logging level.
+    #[arg(
+        value_enum,
+        long = "loglevel",
+        value_name = "LEVEL",
+        default_value_t = LogLevel::Info
+    )]
     log_level: LogLevel,
 
-    /// Add devices to emulator. Example: --device=virtio-block:./tmp/img_blk
-    #[arg(long = "device", action = clap::ArgAction::Append)]
+    /// Attach a VirtIO block device; may be repeated. Format: virtio-block:PATH
+    #[arg(
+        long = "device",
+        value_name = "TYPE:PATH",
+        action = clap::ArgAction::Append
+    )]
     devices: Vec<DeviceConfig>,
 
-    /// RISC-V ISA string used to build the decoder. Example: RV64GC or RV64GCV.
-    #[arg(long = "isa", default_value = DEFAULT_ISA)]
+    /// Configure the decoder with an ISA string such as RV64GC or RV64GCV.
+    #[arg(long = "isa", value_name = "ISA", default_value = DEFAULT_ISA)]
     isa: String,
 
-    /// Dump RISC-V arch-test signature into this file on exit.
-    #[arg(long = "signature")]
+    /// Write the RISC-V architecture-test signature to this file on exit.
+    #[arg(long = "signature", value_name = "FILE")]
     signature: Option<std::path::PathBuf>,
 
-    /// Signature granularity in bytes (4 or 8).
-    #[arg(long = "signature-granularity", default_value_t = 4)]
+    /// Set the architecture-test signature word size in bytes (4 or 8). Requires --signature.
+    #[arg(
+        long = "signature-granularity",
+        value_name = "BYTES",
+        requires = "signature",
+        default_value_t = 4
+    )]
     signature_granularity: u32,
 
-    /// Maximum cycles to execute before aborting (0 means no limit).
-    #[arg(long = "max-cycles", default_value_t = 0)]
+    /// Stop after this many emulated cycles; 0 disables the limit.
+    #[arg(long = "max-cycles", value_name = "COUNT", default_value_t = 0)]
     max_cycles: u64,
 
-    /// Load a device tree blob and pass its guest physical address to OpenSBI in a1.
-    #[arg(long = "dtb")]
+    /// Load a DTB and pass its guest address to OpenSBI in register a1.
+    #[arg(long = "dtb", value_name = "FILE")]
     dtb: Option<std::path::PathBuf>,
 
-    /// Guest physical address at which to load --dtb (default: 0x9f000000).
-    #[arg(long = "dtb-address", requires = "dtb", value_parser = parse_address)]
+    /// Load --dtb at this guest physical address (default: 0x9f000000).
+    #[arg(
+        long = "dtb-address",
+        value_name = "ADDRESS",
+        requires = "dtb",
+        value_parser = parse_address
+    )]
     dtb_address: Option<WordType>,
 }
 
@@ -202,6 +232,7 @@ fn dump_signature(
 }
 
 fn main() {
+    let cli_args = Args::parse();
     display_welcome_message();
 
     if cli_args.verbose {
@@ -210,11 +241,6 @@ fn main() {
             cli_args.path, cli_args.debug, cli_args.verbose, cli_args.log_level
         );
         display_device_list(&cli_args.devices);
-    }
-
-    if cli_args.debug && cli_args.gdb {
-        log::error!("Cannot enable both rvdb and gdb.");
-        panic!();
     }
 
     let _logger_handle = logging::init(cli_args.log_level);

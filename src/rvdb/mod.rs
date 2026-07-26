@@ -14,6 +14,7 @@ use crate::isa::riscv::csr_reg::PrivilegeLevel;
 use crate::isa::riscv::debugger;
 use crate::isa::riscv::mmu::AccessType;
 use crate::isa::riscv::{debugger::Address, decoder::DecodeInstr};
+use clap::error::ErrorKind;
 use clap::{Parser, Subcommand};
 use std::fmt;
 
@@ -49,136 +50,205 @@ impl From<ClapAccessType> for AccessType {
     }
 }
 
+fn is_clap_display(error: &clap::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+    )
+}
+
+fn format_clap_error(error: clap::Error) -> String {
+    let message = error.to_string();
+    message
+        .strip_prefix("error: ")
+        .unwrap_or(&message)
+        .to_string()
+}
+
 #[derive(Debug, PartialEq, Eq, Parser)]
-#[command(multicall = true)]
+#[command(
+    multicall = true,
+    about = "Inspect and control a running RISC-V guest.",
+    after_help = "Addresses are physical unless --virt is specified.\nEnter an empty line to repeat the previous command."
+)]
 enum RvdbCommand {
-    /// Print items such as registers, the PC, or memory.
-    #[command(alias = "p", subcommand)]
+    /// Print registers, memory, and other CPU state.
+    #[command(visible_alias = "p", subcommand)]
     Print(PrintCmd),
 
-    /// Display a given item each time the program stops.
-    #[command(alias = "d", subcommand)]
+    /// Print an item whenever guest execution stops.
+    #[command(visible_alias = "d", subcommand)]
     Display(PrintCmd),
-    /// Translate a given address as a real instruction would.
-    /// This respects the current CPU state (e.g., privilege level and CSR settings)
-    /// and page table flags, based on the given access type.
-    #[command(aliases = ["t", "trans"])]
+
+    /// Translate a virtual address using the current CPU and page-table state.
+    #[command(visible_aliases = ["t", "trans"])]
     Translate {
+        /// Virtual address to translate. Decimal by default; prefix hexadecimal values with 0x.
+        #[arg(value_name = "ADDRESS")]
         addr: String,
-        #[arg(default_value_t = ClapAccessType::Read)]
+
+        /// Access type used for permission checks.
+        #[arg(value_enum, value_name = "ACCESS", default_value_t = ClapAccessType::Read)]
         access: ClapAccessType,
     },
 
-    /// Cancel a display request.
+    /// Stop printing an item whenever guest execution stops.
     #[command(subcommand)]
     Undisplay(PrintCmd),
 
-    /// List assembly around the current position.
-    #[command(aliases = ["l", "ls"])]
+    /// Disassemble instructions starting at the current PC.
+    #[command(visible_aliases = ["l", "ls"])]
     List,
 
-    /// Show historical PC values.
-    #[command(alias = "his")]
+    /// Show recently executed instructions.
+    #[command(visible_alias = "his")]
     History {
-        #[arg(default_value_t = 20)]
+        /// Maximum number of history entries to show.
+        #[arg(value_name = "COUNT", default_value_t = 20)]
         count: usize,
     },
 
-    /// Show function call trace.
-    #[command(aliases = ["ft", "ftrace"], subcommand)]
+    /// Record and inspect function calls and returns.
+    #[command(name = "ftrace", visible_alias = "ft", alias = "f-trace", subcommand)]
     FTrace(FTraceCmd),
 
-    /// Load an ELF symbol file.
-    #[command(aliases = ["symbol", "file"])]
-    SymbolFile { path: String },
+    /// Load debug symbols from an ELF file.
+    #[command(visible_aliases = ["symbol", "file"])]
+    SymbolFile {
+        /// ELF file containing the symbol table.
+        #[arg(value_name = "FILE")]
+        path: String,
+    },
 
-    /// Step a single instruction.
-    #[command(aliases = ["s", "step"])]
+    /// Execute one guest instruction.
+    #[command(name = "step", visible_aliases = ["s", "si"])]
     Si,
 
-    /// Continue running.
-    #[command(name = "continue", aliases = ["c"])]
+    /// Resume guest execution with an optional maximum steps.
+    #[command(name = "continue", visible_alias = "c")]
     Continue {
-        #[arg(default_value_t = u64::MAX)]
+        /// Maximum execution steps before returning; omit to run until a breakpoint or halt.
+        #[arg(value_name = "STEPS", default_value_t = u64::MAX, hide_default_value = true)]
         steps: u64,
     },
 
-    /// Set or delete a breakpoint.
-    #[command(name = "break", alias = "b")]
+    /// Set a breakpoint, or delete one with --delete.
+    #[command(name = "break", visible_alias = "b")]
     Breakpoint {
+        /// Delete the breakpoint instead of setting it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
-        /// Address or function symbol name to set/delete a breakpoint.
-        /// Address should be decimal by default, or hex if prefixed with `0x`.
+
+        /// Guest address or function name. Decimal by default; prefix hexadecimal values with 0x.
+        #[arg(value_name = "TARGET")]
         symbol: String,
 
-        /// Whether the address is virtual or physical.
+        /// Treat an address as virtual; addresses are physical by default.
         #[arg(short, long, default_value_t = false)]
         virt: bool,
     },
 
-    /// Show information such as breakpoints.
+    /// Show debugger state such as breakpoints and loaded symbols.
     #[command(subcommand)]
     Info(InfoCmd),
 
-    /// Quit the debugger
-    #[command(name = "quit", aliases = ["q", "exit"])]
+    /// Quit rvdb.
+    #[command(name = "quit", visible_aliases = ["q", "exit"])]
     Quit,
 }
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 enum PrintCmd {
-    /// Program counter
+    /// Print the current program counter.
     Pc,
-    /// General-purpose register
+
+    /// Print one general-purpose register.
     Reg {
-        /// Register name
+        /// Register name (for example, a0 or x10).
+        #[arg(value_name = "REGISTER")]
         reg: String,
     },
-    /// Some general-purpose registers
+
+    /// Print a range of general-purpose registers.
     Regs {
-        /// Starting register index
-        #[arg(long, default_value_t = 0)]
+        /// Index of the first register to print.
+        #[arg(long, value_name = "INDEX", default_value_t = 0)]
         start: u8,
-        /// Number of registers
-        #[arg(short, long, default_value_t = REGFILE_CNT as u8)]
+
+        /// Maximum number of registers to print.
+        #[arg(short, long, value_name = "COUNT", default_value_t = REGFILE_CNT as u8)]
         len: u8,
     },
-    /// Memory (in virtual or physical address space)
+
+    /// Read bytes from guest memory.
     Mem {
+        /// Starting address. Decimal by default; prefix hexadecimal values with 0x.
+        #[arg(value_name = "ADDRESS")]
         addr: String,
-        #[arg(short, long, default_value_t = 16)]
+
+        /// Number of bytes to read.
+        #[arg(short, long, value_name = "BYTES", default_value_t = 16)]
         len: u32,
-        /// Whether the address is virtual or physical.
+
+        /// Treat the address as virtual; addresses are physical by default.
         #[arg(short, long, default_value_t = false)]
         virt: bool,
     },
-    /// Control and status register
-    Csr { addr: String },
-    /// Floating-point register
-    FReg { reg: String },
-    /// Vector register
-    VReg { reg: String },
-    /// Privilege level
+
+    /// Print a control and status register.
+    Csr {
+        /// CSR name or address (for example, mstatus or 0x300).
+        #[arg(value_name = "CSR")]
+        addr: String,
+    },
+
+    /// Print one floating-point register.
+    #[command(name = "freg", alias = "f-reg")]
+    FReg {
+        /// Register name, ABI name, or f-register number (for example, fa0 or f10).
+        #[arg(value_name = "REGISTER")]
+        reg: String,
+    },
+
+    /// Print one vector register in several element widths.
+    #[command(name = "vreg", alias = "v-reg")]
+    VReg {
+        /// Vector register name (for example, v0 or v31).
+        #[arg(value_name = "REGISTER")]
+        reg: String,
+    },
+
+    /// Print the current privilege level.
     Priv,
 }
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 enum InfoCmd {
-    #[command(aliases = ["b", "bp", "break"])]
+    /// List active breakpoints.
+    #[command(visible_aliases = ["b", "bp", "break"])]
     Breakpoints,
-    #[command(aliases = ["sym", "symbol"])]
+
+    /// List symbols loaded from the current ELF or a symbol file.
+    #[command(visible_aliases = ["sym", "symbol"])]
     Symbols,
 }
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 enum FTraceCmd {
+    /// Start recording function calls and returns.
     Start,
+
+    /// Stop recording function calls and returns.
     Stop,
+
+    /// Show the most recent function calls and returns.
     Show {
-        #[arg(default_value_t = 20)]
+        /// Maximum number of trace entries to show.
+        #[arg(value_name = "COUNT", default_value_t = 20)]
         count: usize,
     },
+
+    /// Show trace status and per-function call counts.
     Stat,
 }
 

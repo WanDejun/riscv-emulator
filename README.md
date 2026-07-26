@@ -65,24 +65,24 @@ cargo run -- ./test_resources/bin/main.elf
 cargo run -- ./test_resources/bin/main.elf -g
 ```
 
-### Useful Command Line Options
+### Useful Command-Line Options
 
-- `-h, --help`: Show help
-- `-f, --format <auto|elf|bin>`: Select the executable format (default: `auto`)
-- `-g, --debug`: Enable rvdb, the simple debugger (use the `help` command in rvdb for details)
-- `-G, --gdb`: Enable the GDB stub (listens on localhost:1234)
-- `-S, --script <PATH>`: Run an rvdb script together with `--debug`
+- `<PATH>`: RISC-V ELF executable or raw binary image to run
+- `-h, --help`: Print help
+- `-f, --format <auto|elf|bin>`: Choose the input format; `auto` uses the `.elf` or `.bin` filename extension
+- `-g, --debug`: Start the built-in rvdb debugger (run `help` inside rvdb for its command list)
+- `-G, --gdb`: Start a GDB remote stub on `localhost:1234`
+- `-S, --script <FILE>`: Run rvdb commands from a file before entering the interactive debugger; requires `--debug`
 - `-v, --verbose`: Print additional startup details
-- `--device <TYPE:PATH>`: Configure a device
-  - Example: `--device=virtio-block:/path/to/image`; the image must exist and its size must be a multiple of 512 bytes
-- `--isa <ISA>`: Select the decoder ISA string (default: `RV64GC`)
-- `--max-cycles <COUNT>`: Stop after the requested cycle count (`0` means no limit)
-- `--dtb <PATH>`: Load a DTB and pass its guest address to OpenSBI in `a1`
-- `--dtb-address <ADDRESS>`: Select the DTB guest address (default: `0x9f000000`)
-- `--signature <PATH>`: Write a RISC-V architecture-test signature on exit
-- `--signature-granularity <4|8>`: Select the signature word size (default: `4`)
-- `<PATH>`: Path to the binary/ELF executable file
-- `--loglevel <LEVEL>`: Set log level (`trace`, `debug`, `info`, `warn`, or `error`)
+- `--loglevel <LEVEL>`: Set the logging level (`trace`, `debug`, `info`, `warn`, or `error`)
+- `--device <TYPE:PATH>`: Attach a VirtIO block device; may be repeated
+  - Use `virtio-block:/path/to/image`; the image must exist and its size must be a multiple of 512 bytes
+- `--isa <ISA>`: Configure the decoder with an ISA string (default: `RV64GC`)
+- `--max-cycles <COUNT>`: Stop after the requested number of emulated cycles (`0` disables the limit)
+- `--dtb <FILE>`: Load a DTB and pass its guest address to OpenSBI in register `a1`
+- `--dtb-address <ADDRESS>`: Set the guest physical address for `--dtb` (default: `0x9f000000`)
+
+During normal emulation, press `Ctrl+A`, release the keys, and then press `x` to exit emulator.
 
 ### Example Usage
 

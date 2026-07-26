@@ -263,8 +263,8 @@ impl<B: Board> RvdbSession<B> {
         })
     }
 
-    pub(super) fn parse_line(&self, line: &str) -> Result<RvdbCommand, String> {
-        RvdbCommand::try_parse_from(line.split_whitespace()).map_err(|e| e.to_string())
+    pub(super) fn parse_line(&self, line: &str) -> Result<RvdbCommand, clap::Error> {
+        RvdbCommand::try_parse_from(line.split_whitespace())
     }
 
     /// Returns the event that caused the stop and the actual steps executed.
@@ -724,6 +724,16 @@ mod tests {
                 symbol: "main".to_string(),
                 virt: false,
             }
+        );
+        assert_eq!(session.parse_line("step").unwrap(), RvdbCommand::Si);
+        assert_eq!(session.parse_line("si").unwrap(), RvdbCommand::Si);
+        assert_eq!(
+            session.parse_line("ftrace stat").unwrap(),
+            RvdbCommand::FTrace(FTraceCmd::Stat)
+        );
+        assert_eq!(
+            session.parse_line("f-trace stat").unwrap(),
+            RvdbCommand::FTrace(FTraceCmd::Stat)
         );
     }
 }

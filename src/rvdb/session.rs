@@ -1,4 +1,6 @@
-use super::{CommandOutput, PrintObject, RvdbCommand, printer::Printer};
+use super::{
+    CommandOutput, PrintObject, RvdbCommand, format_clap_error, is_clap_display, printer::Printer,
+};
 use crate::{
     board::Board,
     isa::riscv::debugger::Debugger,
@@ -40,7 +42,16 @@ impl<B: Board> RvdbSession<B> {
             });
         }
 
-        let cmd = self.parse_line(line)?;
+        let cmd = match self.parse_line(line) {
+            Ok(cmd) => cmd,
+            Err(error) if is_clap_display(&error) => {
+                return Ok(RvdbCommandResponse {
+                    text: error.to_string(),
+                    exit: false,
+                });
+            }
+            Err(error) => return Err(format_clap_error(error)),
+        };
         self.execute_command(cmd)
     }
 
