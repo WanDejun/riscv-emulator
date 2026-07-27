@@ -45,6 +45,9 @@ use crate::{
     ram_config,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::task_spawner::TaskSpawner;
+
 #[cfg(feature = "test-device")]
 use crate::device::sample_timer::{SAMPLE_TIMER_INTERRUPT_ID, SampleTimerDevice};
 
@@ -131,6 +134,8 @@ pub struct RVBoardBuilder {
     background: BackgroundExecutor,
     decoder: Option<Decoder>,
     initial_registers: Vec<(u8, WordType)>,
+    #[cfg(not(target_arch = "wasm32"))]
+    spawner: TaskSpawner,
 }
 
 impl RVBoardBuilder {
@@ -144,7 +149,14 @@ impl RVBoardBuilder {
             background: BackgroundExecutor::new(),
             decoder: None,
             initial_registers: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            spawner: TaskSpawner::new(),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn get_spawner(&self) -> TaskSpawner {
+        self.spawner.clone()
     }
 
     pub fn with_decoder(mut self, decoder: Decoder) -> Self {
@@ -434,10 +446,13 @@ impl VirtBoard {
             .with_initial_registers(initial_registers);
 
         #[cfg(feature = "test-device")]
-        let builder = builder.add_plic_device(
-            Rc::new(RefCell::new(SampleTimerDevice::new())),
-            SAMPLE_TIMER_INTERRUPT_ID,
-        );
+        {
+            let spawner = builder.get_spawner();
+            builder = builder.add_plic_device(
+                Rc::new(RefCell::new(SampleTimerDevice::new(spawner))),
+                SAMPLE_TIMER_INTERRUPT_ID,
+            );
+        }
 
         Ok(builder.build(ram))
     }
@@ -771,7 +786,15 @@ mod tests {
             plic.write_u32(addr, 0xffffffff).unwrap();
         }
 
-        // Configure a short interval and enable the timer interrupt.
+        // Mask writes cancel an outstanding deadline, so configure it before
+        // the interval registers that schedule the timer.
+        board
+            .cpu
+            .write_memory(
+                Address::Phys(SAMPLE_TIMER_BASE + size_of::<u32>() as WordType),
+                1u32,
+            )
+            .unwrap();
         board
             .cpu
             .write_memory(
@@ -784,13 +807,6 @@ mod tests {
             .write_memory(
                 Address::Phys(SAMPLE_TIMER_BASE + 3 * size_of::<u32>() as WordType),
                 0u32,
-            )
-            .unwrap();
-        board
-            .cpu
-            .write_memory(
-                Address::Phys(SAMPLE_TIMER_BASE + size_of::<u32>() as WordType),
-                1u32,
             )
             .unwrap();
 

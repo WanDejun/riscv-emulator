@@ -63,6 +63,7 @@ flexi_logger = { version = "0.31.2", optional = true }
 crossterm = { version = "0.28", optional = true }
 rustyline = { version = "17.0.1", optional = true }
 gdbstub = "0.7.10"
+tokio = { version = "1.53.1", features = ["full"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
