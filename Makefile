@@ -1,4 +1,4 @@
-# Makefile for building and running linux kernel on RISC-V emulator (and on QEMU for debugging).
+# Makefile for building and running linux kernel on `HERE` (and on QEMU for debugging).
 
 JOBS ?= 14
 CROSS_COMPILE ?= riscv64-linux-gnu-

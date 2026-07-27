@@ -9,11 +9,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crossterm::style::Stylize;
-use riscv_emulator::board::virt::VirtBoard;
-use riscv_emulator::board::{Board, BoardStatus};
-use riscv_emulator::config::arch_config::WordType;
-use riscv_emulator::isa::DebugTarget;
-use riscv_emulator::isa::riscv::debugger::Address;
+use here::board::virt::VirtBoard;
+use here::board::{Board, BoardStatus};
+use here::config::arch_config::WordType;
+use here::isa::DebugTarget;
+use here::isa::riscv::debugger::Address;
 
 fn find_tests_exclude(prefix: &str, exclude_names: &[&str]) -> Vec<PathBuf> {
     let mut paths = Vec::new();

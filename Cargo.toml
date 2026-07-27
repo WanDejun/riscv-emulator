@@ -2,7 +2,7 @@
 cargo-features = ["profile-rustflags"]
 
 [package]
-name = "riscv-emulator"
+name = "here"
 version = "0.1.0"
 edition = "2024"
 
@@ -81,7 +81,7 @@ doctest = false
 crate-type = ["rlib", "cdylib"]
 
 [[bin]]
-name = "riscv-emulator"
+name = "here"
 path = "src/main.rs"
 required-features = ["native-cli"]
 

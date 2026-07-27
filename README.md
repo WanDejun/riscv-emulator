@@ -1,10 +1,10 @@
-# RISC-V Emulator
+# HERE
 
 ## About
 
-`RISC-V Emulator` is an educational full-system emulator for the RISC-V architecture, written in Rust :fire:.
+`HERE` is a HEU Educational Rust-based Emulator for the RISC-V architecture :fire:.
 
-The main features of `RISC-V Emulator` include:
+The main features of `HERE` include:
 
 - Supported ISA:
   - RV64GC (RV64IMAFDC, Zicsr, Zifencei)

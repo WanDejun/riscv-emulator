@@ -21,19 +21,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: riscv-emulator-x86_64-linux
+            artifact: here-x86_64-linux
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: riscv-emulator-aarch64-linux
+            artifact: here-aarch64-linux
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact: riscv-emulator-x86_64-macos
+            artifact: here-x86_64-macos
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: riscv-emulator-aarch64-macos
+            artifact: here-aarch64-macos
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact: riscv-emulator-x86_64-windows.exe
+            artifact: here-x86_64-windows.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -57,11 +57,11 @@ jobs:
 
       - name: Rename binary (unix)
         if: matrix.os != 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/riscv-emulator ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/here ${{ matrix.artifact }}
 
       - name: Rename binary (windows)
         if: matrix.os == 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/riscv-emulator.exe ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/here.exe ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:

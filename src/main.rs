@@ -9,14 +9,14 @@ use std::fs;
 use std::time::Instant;
 
 use clap::Parser;
-use riscv_emulator::board::Board;
-use riscv_emulator::gdb;
-use riscv_emulator::isa::DebugTarget;
-use riscv_emulator::isa::riscv::debugger::Address;
-use riscv_emulator::isa::riscv::decoder::Decoder;
-use riscv_emulator::isa::riscv::isa_builder::DEFAULT_ISA;
-use riscv_emulator::rvdb::NativeREPL;
-use riscv_emulator::{
+use here::board::Board;
+use here::gdb;
+use here::isa::DebugTarget;
+use here::isa::riscv::debugger::Address;
+use here::isa::riscv::decoder::Decoder;
+use here::isa::riscv::isa_builder::DEFAULT_ISA;
+use here::rvdb::NativeREPL;
+use here::{
     DeviceConfig,
     board::virt::{MemoryImage, VirtBoard, VirtBoardConfig},
     config::arch_config::WordType,
@@ -361,7 +361,7 @@ fn main() {
             board.run();
         } else {
             board.step_cycles(cli_args.max_cycles);
-            if board.status() != riscv_emulator::board::BoardStatus::Halt {
+            if board.status() != here::board::BoardStatus::Halt {
                 log::error!(
                     "Max cycles reached: {} at pc {}",
                     cli_args.max_cycles,
@@ -393,7 +393,7 @@ mod arg_tests {
 
     #[test]
     fn gdb_defaults_to_tcp_port_1234() {
-        let args = Args::try_parse_from(["riscv-emulator", "program.elf", "-G"]).unwrap();
+        let args = Args::try_parse_from(["here", "program.elf", "-G"]).unwrap();
 
         assert_eq!(gdb_config(&args), Some(gdb::Config::Tcp(1234)));
     }
@@ -401,8 +401,7 @@ mod arg_tests {
     #[test]
     fn gdb_tcp_port_is_configurable() {
         let args =
-            Args::try_parse_from(["riscv-emulator", "program.elf", "-G", "--gdb-port", "4321"])
-                .unwrap();
+            Args::try_parse_from(["here", "program.elf", "-G", "--gdb-port", "4321"]).unwrap();
 
         assert_eq!(gdb_config(&args), Some(gdb::Config::Tcp(4321)));
     }
@@ -411,7 +410,7 @@ mod arg_tests {
     #[test]
     fn gdb_uds_path_is_configurable() {
         let args = Args::try_parse_from([
-            "riscv-emulator",
+            "here",
             "program.elf",
             "-G",
             "--gdb-uds",
@@ -431,7 +430,7 @@ mod arg_tests {
     #[test]
     fn gdb_tcp_and_uds_are_mutually_exclusive() {
         let error = Args::try_parse_from([
-            "riscv-emulator",
+            "here",
             "program.elf",
             "-G",
             "--gdb-port",

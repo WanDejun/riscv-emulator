@@ -4,7 +4,7 @@
 	#address-cells = <0x2>;  // 节点中的 reg 的地址宽度为64位
 	#size-cells = <0x2>;     // 节点中的 reg 的大小宽度为64位
 	compatible = "virt-board"; // 设备兼容性标识
-	model = "virt-board,riscv-emulator"; // 人类可读的板级型号
+	model = "virt-board,here"; // 人类可读的板级型号
 
 	// 通过 syscon-poweroff 关机：向 regmap 指向的寄存器 offset 写入 value 后触发关机
 	poweroff {

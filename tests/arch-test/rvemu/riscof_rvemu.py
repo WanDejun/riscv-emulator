@@ -40,7 +40,7 @@ class rvemu(pluginTemplate):
             self.dut_exe = (
                 config["PATH"]
                 if os.path.isabs(config["PATH"])
-                else os.path.join(os.getcwd(), config["PATH"], "riscv-emulator")
+                else os.path.join(os.getcwd(), config["PATH"], "here")
             )
 
         # Number of parallel jobs that can be spawned off by RISCOF
