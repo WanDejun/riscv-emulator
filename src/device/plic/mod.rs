@@ -500,9 +500,6 @@ impl PLIC {
 impl DeviceTrait for PLIC {
     dispatch_read_write! { read_impl, write_impl }
 
-    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
-        None
-    }
     fn sync(&mut self) {
         // nothing to do.
     }

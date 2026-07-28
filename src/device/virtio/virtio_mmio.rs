@@ -513,9 +513,6 @@ impl DeviceTrait for VirtIOMMIO {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
-        self.device.get_mut().get_async_worker()
-    }
 }
 
 impl MemMappedDeviceTrait for VirtIOMMIO {

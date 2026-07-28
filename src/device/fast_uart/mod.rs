@@ -13,7 +13,6 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
-    async_worker::AsyncWorker,
     byte_io::{ByteSink, ByteSource, ChannelIOContext},
     config::arch_config::WordType,
     device::{
@@ -464,10 +463,6 @@ impl DeviceTrait for FastUart16550 {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-
-    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
-        None
-    }
 }
 
 impl MemMappedDeviceTrait for FastUart16550 {

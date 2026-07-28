@@ -9,7 +9,6 @@ use std::{
 
 use crate::{
     DeviceConfig,
-    async_worker::AsyncWorkerManager,
     background::BackgroundExecutor,
     board::{Board, BoardStatus, VirtBoardPlicContextId},
     byte_io::{ByteSinkExt, ByteSource},
@@ -43,10 +42,8 @@ use crate::{
     load::{ELFLoader, load_bin},
     ram::Ram,
     ram_config,
+    task_spawner::TaskSpawner,
 };
-
-#[cfg(not(target_arch = "wasm32"))]
-use crate::task_spawner::TaskSpawner;
 
 #[cfg(feature = "test-device")]
 use crate::device::sample_timer::{SAMPLE_TIMER_INTERRUPT_ID, SampleTimerDevice};
@@ -130,11 +127,9 @@ pub struct RVBoardBuilder {
     virtio_devices: Vec<DeviceConfig>,
     mmio_items: Vec<MemoryMapItem>,
     id_allocators: HashMap<TypeId, IdAllocator>,
-    async_workers: AsyncWorkerManager,
     background: BackgroundExecutor,
     decoder: Option<Decoder>,
     initial_registers: Vec<(u8, WordType)>,
-    #[cfg(not(target_arch = "wasm32"))]
     spawner: TaskSpawner,
 }
 
@@ -145,7 +140,6 @@ impl RVBoardBuilder {
             virtio_devices: Vec::new(),
             mmio_items: Vec::new(),
             id_allocators: HashMap::new(),
-            async_workers: AsyncWorkerManager::new(),
             background: BackgroundExecutor::new(),
             decoder: None,
             initial_registers: Vec::new(),
@@ -154,7 +148,6 @@ impl RVBoardBuilder {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_spawner(&self) -> TaskSpawner {
         self.spawner.clone()
     }
@@ -178,10 +171,6 @@ impl RVBoardBuilder {
         let info = allocator.get();
         self.mmio_items
             .push(MemoryMapItem::new(info.base, info.size, device.clone()));
-
-        if let Some(worker) = device.borrow_mut().get_async_worker() {
-            self.async_workers.add_worker(worker);
-        }
 
         self.extra_plic_devices.push((device, interrupt_id));
 
@@ -345,7 +334,6 @@ impl RVBoardBuilder {
 
         // Hand device background work to the shared executor and start its worker thread.
         let mut background = self.background;
-        background.add_polling_task(self.async_workers.into_polling_task());
         background.start();
 
         VirtBoard {

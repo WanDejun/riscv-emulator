@@ -1,9 +1,6 @@
-use crate::{
-    async_worker::AsyncWorker,
-    device::{
-        DeviceTrait, MemError, MemMappedDeviceTrait,
-        config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
-    },
+use crate::device::{
+    DeviceTrait, MemError, MemMappedDeviceTrait,
+    config::{POWER_MANAGER_BASE, POWER_MANAGER_SIZE},
 };
 use std::sync::atomic::AtomicU16;
 
@@ -50,9 +47,6 @@ impl DeviceTrait for PowerManager {
     dispatch_read_write! { read_impl, write_impl }
 
     fn sync(&mut self) {}
-    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
-        None
-    }
 }
 
 impl MemMappedDeviceTrait for PowerManager {

@@ -199,9 +199,6 @@ impl DeviceTrait for Clint {
     fn sync(&mut self) {
         // Nothing to do
     }
-    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
-        None
-    }
 }
 
 impl MemMappedDeviceTrait for Clint {

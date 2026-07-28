@@ -82,10 +82,6 @@ pub(crate) trait VirtIODeviceTrait: PlicIRQSource {
 
     fn read_config(&mut self, offset: u64, len: u32) -> u64;
     fn write_config(&mut self, offset: u64, len: u32, data: u64);
-
-    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
-        None
-    }
 }
 
 pub(super) struct DeviceIDAllocator(AtomicU16);

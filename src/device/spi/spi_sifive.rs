@@ -15,7 +15,6 @@ use std::{
 };
 
 use crate::{
-    async_worker::AsyncWorker,
     config::arch_config::WordType,
     device::{DeviceTrait, MemError, plic::PeriphIrqId},
 };
@@ -398,10 +397,6 @@ impl DeviceTrait for SifiveSpiController {
         for slave in self.slaves.iter_mut().flatten() {
             slave.sync();
         }
-    }
-
-    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
-        None
     }
 }
 

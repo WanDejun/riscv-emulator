@@ -28,7 +28,6 @@ pub mod gdb;
 #[cfg(any(feature = "native-cli", feature = "web"))]
 pub mod rvdb;
 
-pub mod async_worker;
 pub mod background;
 pub mod board;
 pub mod byte_io;
@@ -37,8 +36,6 @@ pub mod device;
 pub mod isa;
 pub mod load;
 pub mod ram;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub mod task_spawner;
 
 #[cfg(feature = "web")]

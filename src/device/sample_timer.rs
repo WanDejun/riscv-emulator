@@ -1,6 +1,7 @@
-// A simple millisecond timer used to exercise external interrupts.
-
+#![allow(unused)]
 #![cfg(feature = "test-device")]
+
+//! A simple millisecond timer used to exercise external interrupts.
 
 use std::{
     cell::Cell,
@@ -16,7 +17,6 @@ use std::{
 use tokio::{sync::watch, time::Instant};
 
 use crate::{
-    async_worker::AsyncWorker,
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
@@ -167,10 +167,6 @@ impl DeviceTrait for SampleTimerDevice {
             _ => return Err(MemError::StoreFault),
         };
         return Ok(());
-    }
-
-    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>> {
-        None
     }
 
     fn sync(&mut self) {

@@ -1,3 +1,5 @@
+//! Always perfer `task_spawner` instead of registering non-blocking function on this.
+
 impl Drop for BackgroundExecutor {
     fn drop(&mut self) {
         self.shutdown();

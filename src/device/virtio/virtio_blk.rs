@@ -506,10 +506,6 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
             *byte = (data >> (idx * u8::BITS as usize)) as u8;
         }
     }
-
-    fn get_async_worker(&mut self) -> Option<Box<dyn crate::async_worker::AsyncWorker>> {
-        None
-    }
 }
 
 impl PlicIRQSource for VirtIOBlkDevice {

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{async_worker::AsyncWorker, config::arch_config::WordType};
+use crate::config::arch_config::WordType;
 
 macro_rules! dispatch_read_write {
     ($read_impl: ident, $write_impl: ident) => {
@@ -112,9 +112,6 @@ pub trait DeviceTrait {
     impl_write_for_type! { u64 }
 
     fn sync(&mut self);
-
-    /// Return optional non-blocking work to run on the shared background executor.
-    fn get_async_worker(&mut self) -> Option<Box<dyn AsyncWorker>>;
 }
 
 pub trait PlicDeviceHandler {
@@ -127,6 +124,7 @@ pub trait PlicDeviceHandler {
     fn irq_level(&self) -> bool;
 }
 
+// TODO: Remove this
 pub trait MemMappedDeviceTrait: DeviceTrait {
     fn base() -> WordType;
     fn size() -> WordType;
