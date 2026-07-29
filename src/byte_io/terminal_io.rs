@@ -30,14 +30,9 @@ impl ByteSink for TerminalIOContext {
     fn before_receive(&mut self) {}
 
     #[inline]
-    fn do_receive(&mut self, byte: u8) {
-        log::trace!(
-            "[terminal] receive byte 0x{:x} (char {:?})",
-            byte,
-            byte as char
-        );
+    fn do_receive(&mut self, bytes: &[u8]) {
         // do not use `print!` because we need to output the raw byte sequence.
-        std::io::stdout().write_all(&[byte]).unwrap();
+        std::io::stdout().write_all(bytes).unwrap();
     }
 
     #[inline]
@@ -79,53 +74,53 @@ fn receive_key(k: KeyEvent, target: &mut dyn ByteSink) -> bool {
     // control sequence introducer (CSI)
     // ignore first when no modifier
     let emit_csi_1 = |first: u8, name: u8, mut guard: ReceiveGuard<_>| {
-        guard.receives(&[0x1B, b'[']);
+        guard.receive(&[0x1B, b'[']);
         if let Some(value) = calc_modifiers(k.modifiers) {
-            guard.receives(&[first, b';', value + b'0']);
+            guard.receive(&[first, b';', value + b'0']);
         }
-        guard.receive(name);
+        guard.receive_byte(name);
     };
 
     // don't ignore first when no modifier
     let emit_csi_2 = |first: u8, name: u8, mut guard: ReceiveGuard<_>| {
-        guard.receives(&[0x1B, b'[', first]);
+        guard.receive(&[0x1B, b'[', first]);
         if let Some(value) = calc_modifiers(k.modifiers) {
-            guard.receives(&[b';', value + b'0']);
+            guard.receive(&[b';', value + b'0']);
         }
-        guard.receive(name);
+        guard.receive_byte(name);
     };
 
     match k.code {
         KeyCode::Char(c) => {
             if k.modifiers.contains(KeyModifiers::ALT) {
-                guard.receive(0x1B);
+                guard.receive_byte(0x1B);
             }
             if k.modifiers.contains(KeyModifiers::CONTROL) {
-                guard.receive(ctrl_byte(c));
+                guard.receive_byte(ctrl_byte(c));
             } else {
                 let mut buf = [0; 4];
                 for &byte in c.encode_utf8(&mut buf).as_bytes() {
-                    guard.receive(byte);
+                    guard.receive_byte(byte);
                 }
             }
         }
 
-        KeyCode::Tab => guard.receive(b'\t'),
+        KeyCode::Tab => guard.receive_byte(b'\t'),
         KeyCode::Enter => {
             if k.modifiers.contains(KeyModifiers::ALT) {
-                guard.receive(0x1B);
+                guard.receive_byte(0x1B);
             }
 
             if k.modifiers.contains(KeyModifiers::CONTROL) {
-                guard.receive(b'\n')
+                guard.receive_byte(b'\n')
             } else {
-                guard.receive(b'\r')
+                guard.receive_byte(b'\r')
             }
         }
 
-        KeyCode::Backspace => guard.receive(0x7f),
-        KeyCode::Pause => guard.receive(0x1a),
-        KeyCode::Esc => guard.receive(0x1b),
+        KeyCode::Backspace => guard.receive_byte(0x7f),
+        KeyCode::Pause => guard.receive_byte(0x1a),
+        KeyCode::Esc => guard.receive_byte(0x1b),
 
         KeyCode::Insert => emit_csi_2(b'2', b'~', guard),
         KeyCode::Delete => emit_csi_2(b'3', b'~', guard),
@@ -150,7 +145,7 @@ fn receive_key(k: KeyEvent, target: &mut dyn ByteSink) -> bool {
 
 impl ByteSource for TerminalIOContext {
     #[inline]
-    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+    fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool {
         if !event::poll(Duration::from_millis(0)).unwrap_or(false) {
             return false;
         }

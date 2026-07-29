@@ -22,16 +22,14 @@ impl<'a, S: ByteSink + ?Sized> ReceiveGuard<'a, S> {
     }
 
     #[inline]
-    pub fn receive(&mut self, byte: u8) {
-        self.sink.do_receive(byte);
+    pub fn receive(&mut self, bytes: &[u8]) {
+        self.sink.do_receive(bytes);
         self.has_received = true;
     }
 
     #[inline]
-    pub fn receives(&mut self, bytes: &[u8]) {
-        for &byte in bytes {
-            self.receive(byte);
-        }
+    pub fn receive_byte(&mut self, byte: u8) {
+        self.receive(&[byte]);
     }
 }
 
@@ -41,12 +39,16 @@ impl<'a, S: ByteSink + ?Sized> Drop for ReceiveGuard<'a, S> {
     }
 }
 
+// TODO: `ByteSink::do_receive` only receive one byte at a time,
+// and `ByteSource::drain_to` takes `&mut dyn ByteSink`,
+// may cause performance issue.
+
 /// Use [`ByteSinkExt::receive_guard`] to automatically call [`Self::before_receive`] and [`Self::after_receive`] with RAII.
 /// [`Self::before_receive`] and [`Self::after_receive`] are only guarenteed appear in pair.
 /// They are allowed to be called when nothing received, based on the implementation of [`ByteSource`].
 pub trait ByteSink {
     /// DO NOT USE this method directly, prefer [`ByteSinkExt::receive_guard`].
-    fn do_receive(&mut self, byte: u8);
+    fn do_receive(&mut self, bytes: &[u8]);
     fn before_receive(&mut self);
     fn after_receive(&mut self, has_received: bool);
 }
@@ -58,18 +60,23 @@ pub trait ByteSinkExt: ByteSink {
         ReceiveGuard::new(self)
     }
 
-    fn receive_bytes(&mut self, bytes: impl IntoIterator<Item = u8>) {
+    #[inline]
+    fn receive(&mut self, bytes: &[u8]) {
         let mut guard = self.receive_guard();
-        for byte in bytes.into_iter() {
-            guard.receive(byte);
-        }
+        guard.receive(bytes);
+    }
+
+    #[inline]
+    fn receive_byte(&mut self, byte: u8) {
+        let mut guard = self.receive_guard();
+        guard.receive_byte(byte);
     }
 }
 
 impl<S: ByteSink + ?Sized> ByteSinkExt for S {}
 
 pub trait ByteSource {
-    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool;
+    fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool;
 }
 
 #[cfg(test)]
@@ -100,8 +107,8 @@ mod test {
             self.before_called = true;
         }
 
-        fn do_receive(&mut self, byte: u8) {
-            self.received.push(byte);
+        fn do_receive(&mut self, bytes: &[u8]) {
+            self.received.extend(bytes);
         }
 
         fn after_receive(&mut self, has_received: bool) {
@@ -115,11 +122,9 @@ mod test {
     }
 
     impl ByteSource for MockByteSource {
-        fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+        fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool {
             let mut guard = target.receive_guard();
-            for byte in self.bytes.iter() {
-                guard.receive(*byte);
-            }
+            guard.receive(self.bytes.as_slice());
             guard.has_received
         }
     }
@@ -130,9 +135,7 @@ mod test {
             bytes: vec![1, 2, 3],
         };
         let mut sink = MockByteSink::new();
-        let sink_ref: &mut dyn ByteSink = &mut sink;
-
-        assert!(src.drain_to(sink_ref));
+        assert!(src.drain_to(&mut sink));
         assert_eq!(
             sink,
             MockByteSink {

@@ -446,7 +446,7 @@ impl VirtBoard {
     }
 
     pub fn push_uart_input(&mut self, bytes: &[u8]) {
-        self.uart_port.receive_bytes(bytes.iter().cloned());
+        self.uart_port.receive(bytes);
     }
 
     pub fn take_uart_output(&mut self) -> Vec<u8> {

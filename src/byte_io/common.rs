@@ -5,8 +5,8 @@ use std::collections::VecDeque;
 
 impl ByteSink for VecDeque<u8> {
     #[inline]
-    fn do_receive(&mut self, byte: u8) {
-        self.push_back(byte);
+    fn do_receive(&mut self, bytes: &[u8]) {
+        self.extend(bytes);
     }
 
     fn before_receive(&mut self) {}
@@ -15,8 +15,8 @@ impl ByteSink for VecDeque<u8> {
 
 impl ByteSink for Vec<u8> {
     #[inline]
-    fn do_receive(&mut self, byte: u8) {
-        self.push(byte);
+    fn do_receive(&mut self, bytes: &[u8]) {
+        self.extend(bytes);
     }
 
     fn before_receive(&mut self) {}
@@ -49,8 +49,10 @@ impl ChannelIOContext {
 
 impl ByteSink for ChannelIOContext {
     #[inline]
-    fn do_receive(&mut self, byte: u8) {
-        let _ = self.output_sender.send(byte);
+    fn do_receive(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            let _ = self.output_sender.send(*byte);
+        }
     }
 
     fn before_receive(&mut self) {}
@@ -58,10 +60,10 @@ impl ByteSink for ChannelIOContext {
 }
 
 impl ByteSource for ChannelIOContext {
-    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+    fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool {
         let mut guard = target.receive_guard();
         while let Ok(byte) = self.input_receiver.try_recv() {
-            guard.receive(byte);
+            guard.receive_byte(byte);
         }
 
         guard.has_received

@@ -41,9 +41,12 @@ impl ByteSink for UartBytePort {
         self.uart_io.before_receive();
     }
 
-    fn do_receive(&mut self, byte: u8) {
-        log::trace!("[uart] receive byte 0x{:x} (char {:?})", byte, byte as char);
-        self.uart_io.do_receive(byte);
+    fn do_receive(&mut self, bytes: &[u8]) {
+        log::trace!(
+            "[uart] receive bytes {:?}",
+            bytes.iter().map(|b| *b as char)
+        );
+        self.uart_io.do_receive(bytes);
     }
 
     fn after_receive(&mut self, received: bool) {
@@ -55,7 +58,7 @@ impl ByteSink for UartBytePort {
 }
 
 impl ByteSource for UartBytePort {
-    fn drain_to(&mut self, target: &mut dyn ByteSink) -> bool {
+    fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool {
         self.uart_io.drain_to(target)
     }
 }
@@ -499,7 +502,7 @@ mod test {
     fn input_test() {
         let (mut uart, mut port) = FastUart16550::new();
 
-        port.receive_bytes(['a' as u8, 'b' as u8, 'c' as u8, 'd' as u8]);
+        port.receive(&['a', 'b', 'c', 'd'].map(|x| x as u8));
 
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);
@@ -521,7 +524,7 @@ mod test {
         // No interrupt before any input arrives.
         assert_eq!(uart.irq_status(), None);
 
-        port.receive_bytes([b'x']);
+        port.receive_byte(b'x');
 
         assert_eq!(uart.irq_status(), Some(UART_IRQ));
     }
@@ -531,7 +534,7 @@ mod test {
     fn input_without_rda_enabled_does_not_interrupt() {
         let (uart, mut port) = FastUart16550::new();
 
-        port.receive_bytes([b'x']);
+        port.receive_byte(b'x');
 
         assert_eq!(uart.irq_status(), None);
     }
@@ -542,7 +545,7 @@ mod test {
     fn rda_stays_asserted_until_input_fully_drained() {
         let (mut uart, mut port) = FastUart16550::new();
         uart.write_impl::<u8>(1, 0x01).unwrap(); // enable RDA
-        port.receive_bytes([b'a', b'b']);
+        port.receive(&['a', 'b'].map(|x| x as u8));
 
         assert_eq!(uart.irq_status(), Some(UART_IRQ));
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x04); // IIR: data available
@@ -574,7 +577,7 @@ mod test {
         assert!(!handler.irq_level());
 
         uart.write_impl::<u8>(1, 0x01).unwrap();
-        port.receive_bytes([b'x']);
+        port.receive_byte(b'x');
         assert!(handler.irq_level());
 
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'x');
