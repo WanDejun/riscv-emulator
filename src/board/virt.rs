@@ -7,11 +7,11 @@ use std::{
     sync::atomic::Ordering,
 };
 
+pub use crate::device::fast_uart::{UartIoError, UartIoMode};
+
 use crate::{
     DeviceConfig,
-    background::BackgroundExecutor,
     board::{Board, BoardStatus, VirtBoardPlicContextId},
-    byte_io::{ByteSinkExt, ByteSource},
     clock::{Timer, VirtualClock},
     config::arch_config::WordType,
     device::{
@@ -42,8 +42,10 @@ use crate::{
     load::{ELFLoader, load_bin},
     ram::Ram,
     ram_config,
-    task_spawner::TaskSpawner,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::task_spawner::TaskSpawner;
 
 #[cfg(feature = "test-device")]
 use crate::device::sample_timer::{SAMPLE_TIMER_INTERRUPT_ID, SampleTimerDevice};
@@ -68,12 +70,24 @@ impl MemoryImage {
     }
 }
 
-#[derive(Default)]
 pub struct VirtBoardConfig {
     decoder: Option<Decoder>,
     virtio_devices: Vec<DeviceConfig>,
     memory_images: Vec<MemoryImage>,
     initial_registers: Vec<(u8, WordType)>,
+    uart_io: UartIoMode,
+}
+
+impl Default for VirtBoardConfig {
+    fn default() -> Self {
+        Self {
+            decoder: None,
+            virtio_devices: Vec::new(),
+            memory_images: Vec::new(),
+            initial_registers: Vec::new(),
+            uart_io: UartIoMode::External,
+        }
+    }
 }
 
 impl VirtBoardConfig {
@@ -99,6 +113,11 @@ impl VirtBoardConfig {
 
     pub fn with_reg(mut self, register: u8, value: WordType) -> Self {
         self.initial_registers.push((register, value));
+        self
+    }
+
+    pub fn with_uart_io(mut self, mode: UartIoMode) -> Self {
+        self.uart_io = mode;
         self
     }
 }
@@ -127,9 +146,10 @@ pub struct RVBoardBuilder {
     virtio_devices: Vec<DeviceConfig>,
     mmio_items: Vec<MemoryMapItem>,
     id_allocators: HashMap<TypeId, IdAllocator>,
-    background: BackgroundExecutor,
     decoder: Option<Decoder>,
     initial_registers: Vec<(u8, WordType)>,
+    uart_io: UartIoMode,
+    #[cfg(not(target_arch = "wasm32"))]
     spawner: TaskSpawner,
 }
 
@@ -140,14 +160,15 @@ impl RVBoardBuilder {
             virtio_devices: Vec::new(),
             mmio_items: Vec::new(),
             id_allocators: HashMap::new(),
-            background: BackgroundExecutor::new(),
             decoder: None,
             initial_registers: Vec::new(),
+            uart_io: UartIoMode::External,
             #[cfg(not(target_arch = "wasm32"))]
             spawner: TaskSpawner::new(),
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_spawner(&self) -> TaskSpawner {
         self.spawner.clone()
     }
@@ -187,7 +208,12 @@ impl RVBoardBuilder {
         self
     }
 
-    pub fn build(mut self, ram: Ram) -> VirtBoard {
+    pub fn with_uart_io(mut self, mode: UartIoMode) -> Self {
+        self.uart_io = mode;
+        self
+    }
+
+    pub fn build(mut self, ram: Ram) -> Result<VirtBoard, String> {
         let cycles = Rc::new(Cell::new(0));
         let clock = VirtualClock::new(cycles.clone());
         let timer = Rc::new(UnsafeCell::new(Timer::new(clock.clone())));
@@ -198,32 +224,24 @@ impl RVBoardBuilder {
         let uart1 = Rc::new(RefCell::new(uart1));
         self = self.add_plic_device(uart1, UART_IRQ);
 
+        let mut uart_port = None;
         #[cfg(feature = "native-cli")]
-        {
-            use crate::byte_io::ByteSource;
-            use std::io::IsTerminal;
+        let mut uart_stdin_handle = None;
+        match self.uart_io {
+            UartIoMode::None => drop(uart_port1),
+            UartIoMode::External => uart_port = Some(uart_port1),
+            #[cfg(feature = "native-cli")]
+            UartIoMode::Stdio => {
+                use crate::byte_io::StdinRouter;
 
-            // TODO: make this configurable
-            // uart <-> std I/O
-            use crate::byte_io::TerminalIOContext;
+                let input = uart_port1.input_sender();
+                uart_port1.spawn_stdout(&self.spawner);
 
-            let mut ctx = TerminalIOContext::new();
-            let mut uart_port1 = uart_port1.clone();
-
-            let input_term = std::io::stdin().is_terminal();
-
-            self.background.add_polling_task(move || {
-                let mut progress: bool = false;
-                // stdin -> uart
-                if input_term {
-                    progress |= ctx.drain_to(&mut uart_port1);
-                }
-
-                // uart -> stdout
-                progress |= uart_port1.drain_to(&mut ctx);
-
-                progress
-            });
+                let router = StdinRouter::global();
+                let handle = router.register(input);
+                router.switch_to(handle);
+                uart_stdin_handle = Some(handle);
+            }
         }
 
         const MTIME_OFFSET: u64 = 0xbff8;
@@ -332,12 +350,7 @@ impl RVBoardBuilder {
             VirtBoardPlicContextId::Cpu0SuperviserMode.into(),
         );
 
-        // Hand device background work to the shared executor and start its worker thread.
-        let mut background = self.background;
-        background.start();
-
-        VirtBoard {
-            background,
+        Ok(VirtBoard {
             loader: None,
             cpu,
             cycles,
@@ -346,18 +359,17 @@ impl RVBoardBuilder {
 
             clint,
             plic,
-            uart_port: uart_port1,
+            uart_io: self.uart_io,
+            uart_port,
+            #[cfg(feature = "native-cli")]
+            uart_stdin_handle,
 
             status: BoardStatus::Running,
-        }
+        })
     }
 }
 
 pub struct VirtBoard {
-    // Background threads must stop before the devices they touch are dropped, so this is
-    // the first field (in rust, "fields of a struct are dropped in declaration order").
-    pub background: BackgroundExecutor,
-
     loader: Option<ELFLoader>,
 
     pub cpu: Box<RVCPU>,
@@ -368,7 +380,10 @@ pub struct VirtBoard {
     // interrupt manager.
     pub clint: Rc<RefCell<Clint>>,
     pub plic: Rc<RefCell<PLIC>>,
-    pub uart_port: UartBytePort,
+    uart_io: UartIoMode,
+    uart_port: Option<UartBytePort>,
+    #[cfg(feature = "native-cli")]
+    uart_stdin_handle: Option<crate::byte_io::StdinHandle>,
 
     status: BoardStatus,
 }
@@ -401,6 +416,7 @@ impl VirtBoard {
             virtio_devices,
             memory_images,
             initial_registers,
+            uart_io,
         } = config;
 
         for image in memory_images {
@@ -431,9 +447,10 @@ impl VirtBoard {
 
         builder = builder
             .add_virtio_devices(virtio_devices)
-            .with_initial_registers(initial_registers);
+            .with_initial_registers(initial_registers)
+            .with_uart_io(uart_io);
 
-        #[cfg(feature = "test-device")]
+        #[cfg(all(feature = "test-device", not(target_arch = "wasm32")))]
         {
             let spawner = builder.get_spawner();
             builder = builder.add_plic_device(
@@ -442,21 +459,41 @@ impl VirtBoard {
             );
         }
 
-        Ok(builder.build(ram))
+        builder.build(ram)
     }
 
-    pub fn push_uart_input(&mut self, bytes: &[u8]) {
-        self.uart_port.receive(bytes);
+    #[cfg(test)]
+    pub fn push_uart_input(&self, bytes: &[u8]) -> Result<(), UartIoError> {
+        self.uart_port
+            .as_ref()
+            .ok_or(UartIoError::Unavailable(self.uart_io))?
+            .push_input(bytes)
     }
 
-    pub fn take_uart_output(&mut self) -> Vec<u8> {
-        let mut vec = Vec::new();
-        self.uart_port.drain_to(&mut vec);
-        vec
+    #[cfg(test)]
+    pub fn take_uart_output(&mut self) -> Result<Vec<u8>, UartIoError> {
+        Ok(self
+            .uart_port
+            .as_mut()
+            .ok_or(UartIoError::Unavailable(self.uart_io))?
+            .take_output())
     }
 
-    pub fn uart_port(&self) -> UartBytePort {
-        self.uart_port.clone()
+    pub fn uart_port(&mut self) -> Result<&mut UartBytePort, UartIoError> {
+        self.uart_port
+            .as_mut()
+            .ok_or(UartIoError::Unavailable(self.uart_io))
+    }
+
+    pub fn take_uart_port(&mut self) -> Result<UartBytePort, UartIoError> {
+        self.uart_port
+            .take()
+            .ok_or(UartIoError::Unavailable(self.uart_io))
+    }
+
+    #[cfg(feature = "native-cli")]
+    pub fn uart_stdin_handle(&self) -> Option<crate::byte_io::StdinHandle> {
+        self.uart_stdin_handle
     }
 
     pub fn cycles(&self) -> u64 {
@@ -465,7 +502,6 @@ impl VirtBoard {
 
     fn prepare_cpu_batch(&mut self) {
         unsafe { self.timer.as_mut_unchecked() }.tick();
-        self.background.poll_if_single_thread_mode();
         self.plic.borrow_mut().update_context_irq_lines(&[
             VirtBoardPlicContextId::Cpu0MachineMode.into(),
             VirtBoardPlicContextId::Cpu0SuperviserMode.into(),
@@ -541,20 +577,6 @@ impl Board for VirtBoard {
     fn loader(&self) -> Option<&crate::load::ELFLoader> {
         self.loader.as_ref()
     }
-
-    fn pause_background_work(&mut self) {
-        self.background.pause_and_wait();
-    }
-
-    fn resume_background_work(&mut self) {
-        self.background.resume();
-    }
-
-    fn take_uart_output(&mut self) -> Vec<u8> {
-        let mut vec = Vec::new();
-        self.uart_port.drain_to(&mut vec);
-        vec
-    }
 }
 
 #[cfg(test)]
@@ -619,6 +641,55 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn external_uart_exposes_owned_port() {
+        let mut board = VirtBoard::from_binary_with(&[], VirtBoardConfig::new()).unwrap();
+
+        board.push_uart_input(b"a").unwrap();
+        board.uart_port().unwrap().push_input(b"b").unwrap();
+        assert!(board.take_uart_output().unwrap().is_empty());
+    }
+
+    #[test]
+    fn none_uart_rejects_external_operations() {
+        let mut board =
+            VirtBoard::from_binary_with(&[], VirtBoardConfig::new().with_uart_io(UartIoMode::None))
+                .unwrap();
+
+        assert_eq!(
+            board.push_uart_input(b"a"),
+            Err(UartIoError::Unavailable(UartIoMode::None))
+        );
+        assert_eq!(
+            board.take_uart_output(),
+            Err(UartIoError::Unavailable(UartIoMode::None))
+        );
+        assert!(matches!(
+            board.uart_port(),
+            Err(UartIoError::Unavailable(UartIoMode::None))
+        ));
+    }
+
+    #[cfg(feature = "native-cli")]
+    #[test]
+    fn stdio_uart_exposes_only_router_handle() {
+        let mut board = VirtBoard::from_binary_with(
+            &[],
+            VirtBoardConfig::new().with_uart_io(UartIoMode::Stdio),
+        )
+        .unwrap();
+
+        assert!(board.uart_stdin_handle().is_some());
+        assert_eq!(
+            board.push_uart_input(b"a"),
+            Err(UartIoError::Unavailable(UartIoMode::Stdio))
+        );
+        assert_eq!(
+            board.take_uart_output(),
+            Err(UartIoError::Unavailable(UartIoMode::Stdio))
+        );
     }
 
     #[test]

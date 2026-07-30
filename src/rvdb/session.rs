@@ -7,6 +7,8 @@ use crate::{
     load::{ELFLoader, SymTab},
 };
 
+const PROMPT: &str = "(rvdb) ";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RvdbCommandResponse {
     pub text: String,
@@ -24,8 +26,7 @@ impl<B: Board> RvdbSession<B> {
         Self::with_printer(board, Printer::plain())
     }
 
-    pub fn with_printer(mut board: B, printer: Printer) -> Self {
-        board.pause_background_work();
+    pub fn with_printer(board: B, printer: Printer) -> Self {
         Self {
             dbg: Debugger::new(board),
             watch_list: Vec::new(),
@@ -53,6 +54,34 @@ impl<B: Board> RvdbSession<B> {
             Err(error) => return Err(format_clap_error(error)),
         };
         self.execute_command(cmd)
+    }
+
+    /// Run commands in order, forwarding formatted output to `write_output`.
+    ///
+    /// Returns true when the script executes an exit command.
+    pub fn run_script<E>(
+        &mut self,
+        lines: &[String],
+        mut write_output: impl FnMut(&str) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        for line in lines {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            write_output(&format!("{PROMPT}{line}\n"))?;
+            match self.execute_line(line) {
+                Ok(response) => {
+                    write_output(&response.text)?;
+                    if response.exit {
+                        return Ok(true);
+                    }
+                }
+                Err(error) => write_output(&format!("Error: {error}\n"))?,
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn execute_command(
@@ -95,5 +124,40 @@ impl<B: Board> RvdbSession<B> {
 
     pub fn into_board(self) -> B {
         self.dbg.into_board()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use super::*;
+    use crate::board::virt::{UartIoMode, VirtBoard, VirtBoardConfig};
+
+    #[test]
+    fn run_script_reports_errors_and_stops_on_exit() {
+        let board =
+            VirtBoard::from_binary_with(&[], VirtBoardConfig::new().with_uart_io(UartIoMode::None))
+                .unwrap();
+        let mut session = RvdbSession::new(board);
+        let lines = vec![
+            "unknown-command".to_owned(),
+            String::new(),
+            "quit".to_owned(),
+            "p pc".to_owned(),
+        ];
+        let mut output = String::new();
+
+        let exit = session
+            .run_script(&lines, |text| {
+                output.push_str(text);
+                Ok::<(), Infallible>(())
+            })
+            .unwrap();
+
+        assert!(exit);
+        assert!(output.contains("Error:"));
+        assert!(output.contains("(rvdb) quit\n"));
+        assert!(!output.contains("(rvdb) p pc\n"));
     }
 }

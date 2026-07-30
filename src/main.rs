@@ -6,19 +6,21 @@ mod logging;
 mod welcome;
 
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::time::Instant;
 
 use clap::Parser;
 use here::board::Board;
+use here::byte_io::StdinRouter;
 use here::gdb;
 use here::isa::DebugTarget;
 use here::isa::riscv::debugger::Address;
 use here::isa::riscv::decoder::Decoder;
 use here::isa::riscv::isa_builder::DEFAULT_ISA;
-use here::rvdb::NativeREPL;
+use here::rvdb::{Printer, RvdbSession, SyncREPL};
 use here::{
     DeviceConfig,
-    board::virt::{MemoryImage, VirtBoard, VirtBoardConfig},
+    board::virt::{MemoryImage, UartIoMode, VirtBoard, VirtBoardConfig},
     config::arch_config::WordType,
 };
 
@@ -33,6 +35,31 @@ enum TargetFormat {
 
 const DEFAULT_DTB_ADDRESS: WordType = 0x9f00_0000;
 const DEFAULT_GDB_PORT: u16 = 1234;
+
+struct RawModeGuard {
+    enabled: bool,
+}
+
+impl RawModeGuard {
+    fn new(enabled: bool) -> Result<Self, String> {
+        if enabled {
+            log::debug!("enabling raw mode");
+            crossterm::terminal::enable_raw_mode().map_err(|error| error.to_string())?;
+        }
+        Ok(Self { enabled })
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        if self.enabled {
+            log::debug!("disabling raw mode");
+            if let Err(error) = crossterm::terminal::disable_raw_mode() {
+                eprintln!("failed to restore terminal mode: {error}");
+            }
+        }
+    }
+}
 
 fn parse_address(value: &str) -> Result<WordType, String> {
     let value = value.trim();
@@ -63,7 +90,7 @@ fn display_device_list(devices: &[DeviceConfig]) {
     version,
     next_line_help = true,
     about = "An educational full-system RISC-V emulator written in Rust.",
-    after_help = "Terminal controls:\n  Ctrl+A, then x  Exit during normal execution (not in rvdb REPL or GDB mode)."
+    after_help = "Terminal controls:\n  Ctrl+A, then x  Exit the emulator."
 )]
 struct Args {
     /// RISC-V ELF executable or raw binary image to run.
@@ -167,6 +194,38 @@ struct Args {
     dtb_address: Option<WordType>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RvdbMode {
+    Disabled,
+    Interactive,
+    ScriptOnly,
+    MissingScript,
+}
+
+fn rvdb_mode(args: &Args, stdin_terminal: bool, stdout_terminal: bool) -> RvdbMode {
+    if !args.debug {
+        RvdbMode::Disabled
+    } else if stdin_terminal && stdout_terminal {
+        RvdbMode::Interactive
+    } else if args.script.is_some() {
+        RvdbMode::ScriptOnly
+    } else {
+        RvdbMode::MissingScript
+    }
+}
+
+fn uart_io_mode(args: &Args) -> UartIoMode {
+    if args.gdb {
+        UartIoMode::None
+    } else {
+        UartIoMode::Stdio
+    }
+}
+
+fn should_enable_raw_mode(args: &Args, _mode: RvdbMode, _stdin_term: bool) -> bool {
+    args.gdb == false
+}
+
 fn gdb_config(args: &Args) -> Option<gdb::Config> {
     if !args.gdb {
         return None;
@@ -262,7 +321,24 @@ fn dump_signature(
 
 fn main() {
     let cli_args = Args::parse();
+    let _logger_handle = logging::init(cli_args.log_level);
+
     display_welcome_message();
+
+    let stdin_terminal = std::io::stdin().is_terminal();
+    let stdout_terminal = std::io::stdout().is_terminal();
+    let rvdb_mode = rvdb_mode(&cli_args, stdin_terminal, stdout_terminal);
+    if rvdb_mode == RvdbMode::MissingScript {
+        eprintln!("rvdb requires --script when stdin or stdout is not a terminal");
+        std::process::exit(2);
+    }
+
+    let uart_io = uart_io_mode(&cli_args);
+    let raw_mode = should_enable_raw_mode(&cli_args, rvdb_mode, stdin_terminal);
+    let raw_mode_guard = RawModeGuard::new(raw_mode).unwrap_or_else(|error| {
+        eprintln!("failed to enable terminal raw mode: {error}");
+        std::process::exit(2);
+    });
 
     if cli_args.verbose {
         println!(
@@ -272,15 +348,14 @@ fn main() {
         display_device_list(&cli_args.devices);
     }
 
-    let _logger_handle = logging::init(cli_args.log_level);
-
     let decoder = Decoder::from_isa_str(&cli_args.isa).unwrap_or_else(|e| {
         eprintln!("Invalid ISA string {:?}: {}", cli_args.isa, e);
         std::process::exit(2);
     });
     let mut board_config = VirtBoardConfig::new()
         .with_decoder(decoder)
-        .with_virtio_devices(cli_args.devices.clone());
+        .with_virtio_devices(cli_args.devices.clone())
+        .with_uart_io(uart_io);
 
     if let Some(dtb_path) = &cli_args.dtb {
         let dtb_address = cli_args.dtb_address.unwrap_or(DEFAULT_DTB_ADDRESS);
@@ -331,17 +406,44 @@ fn main() {
         }
     };
 
+    // Stdio boards initialize the router while wiring UART. GDB has no UART
+    // target, but still needs the router's host control sequence handling.
+    StdinRouter::global();
+
     if cli_args.debug {
-        let mut repl = NativeREPL::new(board);
-        if let Some(script) = &cli_args.script {
-            let script_content = std::fs::read_to_string(script).unwrap();
-            let lines: Vec<String> = script_content.lines().map(|s| s.to_string()).collect();
-            let should_exit = repl.run_script(&lines);
-            if should_exit {
+        let script_lines = cli_args.script.as_ref().map(|script| {
+            std::fs::read_to_string(script)
+                .unwrap_or_else(|error| {
+                    panic!("failed to read script {}: {error}", script.display())
+                })
+                .lines()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        });
+
+        if rvdb_mode == RvdbMode::Interactive {
+            let uart_handle = board
+                .uart_stdin_handle()
+                .expect("Stdio board must expose its UART stdin handle");
+            let session = RvdbSession::with_printer(board, Printer::ansi_color());
+            let mut repl = SyncREPL::new(session, uart_handle);
+            if let Some(lines) = &script_lines
+                && repl.run_script(lines)
+            {
                 return;
             }
+            repl.run();
+        } else {
+            let mut session = RvdbSession::with_printer(board, Printer::plain());
+            let lines = script_lines.as_deref().expect("script checked above");
+            let mut stdout = std::io::stdout().lock();
+            let _ = session
+                .run_script(lines, |output| {
+                    stdout.write_all(output.as_bytes())?;
+                    stdout.flush()
+                })
+                .unwrap();
         }
-        repl.run();
         return;
     } else if let Some(config) = gdb_config(&cli_args) {
         if let Err(e) = gdb::event_loop(board, config) {
@@ -353,8 +455,6 @@ fn main() {
             // Create the signature file before running the emulator to ensure the file exists even if the emulator crashes.
             fs::File::create(sig_path).expect("Failed to create signature file");
         }
-
-        crossterm::terminal::enable_raw_mode().unwrap();
 
         let now = Instant::now();
         if cli_args.max_cycles == 0 {
@@ -369,8 +469,6 @@ fn main() {
                 );
             }
         }
-        crossterm::terminal::disable_raw_mode().unwrap();
-
         if let Some(sig_path) = &cli_args.signature {
             if let Err(e) = dump_signature(
                 &mut board,
@@ -382,6 +480,7 @@ fn main() {
         }
 
         drop(board);
+        drop(raw_mode_guard);
 
         println!("Used time: {}s", now.elapsed().as_secs_f32());
     }
@@ -396,6 +495,42 @@ mod arg_tests {
         let args = Args::try_parse_from(["here", "program.elf", "-G"]).unwrap();
 
         assert_eq!(gdb_config(&args), Some(gdb::Config::Tcp(1234)));
+    }
+
+    #[test]
+    fn non_terminal_rvdb_is_script_only() {
+        let args = Args::try_parse_from([
+            "here",
+            "program.bin",
+            "--debug",
+            "--script",
+            "commands.rvdb",
+        ])
+        .unwrap();
+
+        assert_eq!(uart_io_mode(&args), UartIoMode::Stdio);
+        assert_eq!(rvdb_mode(&args, false, false), RvdbMode::ScriptOnly);
+    }
+
+    #[test]
+    fn non_terminal_rvdb_without_script_is_rejected() {
+        let args = Args::try_parse_from(["here", "program.bin", "--debug"]).unwrap();
+
+        assert_eq!(rvdb_mode(&args, false, false), RvdbMode::MissingScript);
+    }
+
+    #[test]
+    fn terminal_rvdb_stays_interactive_after_optional_script() {
+        let args = Args::try_parse_from([
+            "here",
+            "program.bin",
+            "--debug",
+            "--script",
+            "commands.rvdb",
+        ])
+        .unwrap();
+
+        assert_eq!(rvdb_mode(&args, true, true), RvdbMode::Interactive);
     }
 
     #[test]

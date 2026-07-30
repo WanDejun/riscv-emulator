@@ -7,7 +7,6 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-multithreading = []
 native-cli = ["dep:clap", "dep:crossterm", "dep:flexi_logger", "dep:rustyline"]
 web = [
     "dep:clap",
@@ -30,7 +29,6 @@ default = [
     "native-cli",
     "test-device",
     "riscv-tests",
-    "multithreading",
 ]
 
 [dependencies]
@@ -43,7 +41,6 @@ rand_chacha = { version = "0.9.0", default-features = false, features = [
     "std",
 ] }
 thiserror = "1.0"
-crossbeam = "0.8.4"
 smallvec = "1.15.1"
 phf = { version = "0.12", features = ["macros"] }
 bitflags = { version = "2.9.3" }

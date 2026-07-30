@@ -1,5 +1,6 @@
-use std::io::IsTerminal;
-use std::io::stdin;
+//! TODO: Legacy dead code
+
+use std::io::Write;
 
 use crate::board::Board;
 
@@ -7,20 +8,14 @@ use super::printer::Printer;
 use super::session::RvdbSession;
 use rustyline::error::ReadlineError;
 
-const PROMPT: &str = "(rvdb) ";
-
-pub struct NativeREPL<B: Board> {
+pub struct RustylineREPL<B: Board> {
     editor: rustyline::DefaultEditor,
     session: RvdbSession<B>,
     last_line: String,
 }
 
-impl<B: Board> NativeREPL<B> {
+impl<B: Board> RustylineREPL<B> {
     pub fn new(board: B) -> Self {
-        if stdin().is_terminal() {
-            crossterm::terminal::disable_raw_mode().unwrap();
-        }
-
         Self {
             editor: rustyline::DefaultEditor::new().expect("Failed to create line editor of rvdb."),
             session: RvdbSession::with_printer(board, Printer::ansi_color()),
@@ -32,31 +27,23 @@ impl<B: Board> NativeREPL<B> {
     ///
     /// Return true if the script contains an exit command, and false otherwise.
     pub fn run_script(&mut self, lines: &[String]) -> bool {
-        for line in lines {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            println!("{}{}", PROMPT, line);
-
-            match self.session.execute_line(line) {
-                Ok(response) => {
-                    print!("{}", response.text);
-                    if response.exit {
-                        return true;
-                    }
-                }
-                Err(err) => println!("Error: {}", err),
+        let mut stdout = std::io::stdout().lock();
+        match self.session.run_script(lines, |output| {
+            stdout.write_all(output.as_bytes())?;
+            stdout.flush()
+        }) {
+            Ok(exit) => exit,
+            Err(error) => {
+                log::error!("failed to write rvdb output: {error}");
+                false
             }
         }
-
-        false
     }
 
     /// REPL main loop.
     pub fn run(&mut self) {
         loop {
-            match self.editor.readline(PROMPT) {
+            match self.editor.readline(super::PROMPT) {
                 Ok(line) => {
                     let mut line = line.trim();
 
@@ -132,7 +119,7 @@ mod test {
     fn drop_should_not_hang() {
         should_success_within(Duration::from_millis(100), || {
             let board = VirtBoard::from_binary_with(&[], Default::default()).unwrap();
-            let _repl = NativeREPL::new(board);
+            let _repl = RustylineREPL::new(board);
         });
     }
 }

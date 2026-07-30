@@ -4,12 +4,11 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     board::{Board, BoardStatus, virt::VirtBoard},
-    byte_io::{ByteSinkExt, ByteSource},
     config::arch_config::REGFILE_CNT,
     device::fast_uart::UartBytePort,
     isa::DebugTarget,
     load::{ELFLoader, SymTab},
-    rvdb::{NostdREPL, REPLResponse, RvdbChannelTx, RvdbChannels},
+    rvdb::{AsyncREPL, REPLResponse, RvdbChannelTx, RvdbChannels},
 };
 
 #[wasm_bindgen(start)]
@@ -21,24 +20,37 @@ fn init_on_wasm() {
 #[wasm_bindgen]
 pub struct WasmEmulator {
     inner: VirtBoard,
+    uart_port: Rc<RefCell<UartBytePort>>,
 }
 
 #[wasm_bindgen]
 impl WasmEmulator {
     pub fn from_elf_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let inner = VirtBoard::from_elf(bytes.to_vec())
+        let mut inner = VirtBoard::from_elf(bytes.to_vec())
             .map_err(|e| JsValue::from_str(&format!("ELF load failed: {e}")))?;
-        Ok(Self { inner })
+        let uart_port = inner
+            .take_uart_port()
+            .expect("WASM boards use External UART I/O");
+        Ok(Self {
+            inner,
+            uart_port: Rc::new(RefCell::new(uart_port)),
+        })
     }
 
     pub fn from_bin_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let inner = VirtBoard::from_binary_with(bytes, Default::default())
+        let mut inner = VirtBoard::from_binary_with(bytes, Default::default())
             .map_err(|e| JsValue::from_str(&format!("binary load failed: {e}")))?;
-        Ok(Self { inner })
+        let uart_port = inner
+            .take_uart_port()
+            .expect("WASM boards use External UART I/O");
+        Ok(Self {
+            inner,
+            uart_port: Rc::new(RefCell::new(uart_port)),
+        })
     }
 
     pub async fn into_rvdb(self) -> WasmRvdb {
-        WasmRvdb::from_board(self.inner).await
+        WasmRvdb::from_board(self.inner, self.uart_port).await
     }
 
     pub fn step(&mut self) -> Result<(), JsValue> {
@@ -75,21 +87,24 @@ impl WasmEmulator {
             .collect()
     }
 
-    pub fn push_uart_input(&mut self, input: &[u8]) {
-        self.inner.push_uart_input(input);
+    pub fn push_uart_input(&mut self, input: &[u8]) -> Result<(), JsValue> {
+        self.uart_port
+            .borrow()
+            .push_input(input)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
-    pub fn take_uart_output(&mut self) -> Vec<u8> {
-        self.inner.take_uart_output()
+    pub fn take_uart_output(&mut self) -> Result<Vec<u8>, JsValue> {
+        Ok(self.uart_port.borrow_mut().take_output())
     }
 }
 
 #[wasm_bindgen]
 pub struct WasmRvdb {
     channel: RvdbChannelTx,
-    rvdb: NostdREPL<VirtBoard>,
+    rvdb: AsyncREPL<VirtBoard>,
     shared: Rc<RefCell<RvdbSharedState>>,
-    uart_port: UartBytePort,
+    uart_port: Rc<RefCell<UartBytePort>>,
 }
 
 struct RvdbSharedState {
@@ -136,14 +151,13 @@ impl RvdbSharedState {
 pub struct WasmRvdbHandle {
     channel: RvdbChannelTx,
     shared: Rc<RefCell<RvdbSharedState>>,
-    uart_port: UartBytePort,
+    uart_port: Rc<RefCell<UartBytePort>>,
 }
 
 impl WasmRvdb {
-    async fn from_board(board: VirtBoard) -> Self {
+    async fn from_board(board: VirtBoard, uart_port: Rc<RefCell<UartBytePort>>) -> Self {
         let (tx, rx) = RvdbChannels::new();
-        let uart_port = board.uart_port();
-        let rvdb = NostdREPL::new(board, rx).await;
+        let rvdb = AsyncREPL::new(board, rx).await;
         let shared = Rc::new(RefCell::new(RvdbSharedState::new()));
 
         let mut wasm_rvdb = Self {
@@ -164,22 +178,18 @@ impl WasmRvdb {
 #[wasm_bindgen]
 impl WasmRvdb {
     pub async fn from_elf_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let board = VirtBoard::from_elf(bytes.to_vec())
-            .map_err(|e| JsValue::from_str(&format!("ELF load failed: {e}")))?;
-        Ok(Self::from_board(board).await)
+        Ok(WasmEmulator::from_elf_bytes(bytes)?.into_rvdb().await)
     }
 
     pub async fn from_bin_bytes(bytes: &[u8]) -> Result<Self, JsValue> {
-        let board = VirtBoard::from_binary_with(bytes, Default::default())
-            .map_err(|e| JsValue::from_str(&format!("binary load failed: {e}")))?;
-        Ok(Self::from_board(board).await)
+        Ok(WasmEmulator::from_bin_bytes(bytes)?.into_rvdb().await)
     }
 
     pub fn handle(&self) -> WasmRvdbHandle {
         WasmRvdbHandle {
             channel: self.channel.clone(),
             shared: self.shared.clone(),
-            uart_port: self.uart_port.clone(),
+            uart_port: Rc::clone(&self.uart_port),
         }
     }
 
@@ -217,6 +227,7 @@ impl WasmRvdb {
 
         WasmEmulator {
             inner: self.rvdb.into_board(),
+            uart_port: self.uart_port,
         }
     }
 }
@@ -235,14 +246,15 @@ impl WasmRvdbHandle {
         self.channel.take_output()
     }
 
-    pub fn push_uart_input(&mut self, input: &[u8]) {
-        self.uart_port.receive_bytes(input.iter().cloned());
+    pub fn push_uart_input(&mut self, input: &[u8]) -> Result<(), JsValue> {
+        self.uart_port
+            .borrow()
+            .push_input(input)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
-    pub fn take_uart_output(&mut self) -> Vec<u8> {
-        let mut output = Vec::new();
-        self.uart_port.drain_to(&mut output);
-        output
+    pub fn take_uart_output(&mut self) -> Result<Vec<u8>, JsValue> {
+        Ok(self.uart_port.borrow_mut().take_output())
     }
 
     pub fn load_symbol_file(&mut self, bytes: &[u8]) -> Result<(), JsValue> {

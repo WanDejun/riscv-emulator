@@ -11,9 +11,6 @@
 #[cfg(all(feature = "native-cli", target_arch = "wasm32"))]
 compile_error!("feature 'native-cli' is not supported on wasm32 targets");
 
-#[cfg(all(feature = "multithreading", feature = "web"))]
-compile_error!("feature 'multithreading' is not compatible with 'web'");
-
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
 compile_error!("feature 'web' requires wasm32 target");
 
@@ -28,7 +25,6 @@ pub mod gdb;
 #[cfg(any(feature = "native-cli", feature = "web"))]
 pub mod rvdb;
 
-pub mod background;
 pub mod board;
 pub mod byte_io;
 pub mod config;

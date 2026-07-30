@@ -10,10 +10,12 @@ use std::{
     u8,
 };
 
-use crossbeam::channel::{Receiver, Sender};
+use tokio::sync::mpsc::{
+    self, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    error::{TryRecvError, TrySendError},
+};
 
 use crate::{
-    byte_io::{ByteSink, ByteSource, ChannelIOContext},
     config::arch_config::WordType,
     device::{
         DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
@@ -27,39 +29,104 @@ use crate::{
 };
 
 const UART_DATA_LENGTH: u8 = 8;
+pub const UART_INPUT_CAPACITY: usize = 1024;
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UartIoMode {
+    None,
+    #[default]
+    External,
+    #[cfg(feature = "native-cli")]
+    Stdio,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum UartIoError {
+    #[error("UART host I/O is unavailable in {0:?} mode")]
+    Unavailable(UartIoMode),
+    #[error("UART input buffer is full after accepting {accepted} bytes")]
+    InputFull { accepted: usize },
+    #[error("UART input channel is closed after accepting {accepted} bytes")]
+    InputClosed { accepted: usize },
+}
+
 pub struct UartBytePort {
-    uart_io: ChannelIOContext,
-    ier: Arc<AtomicU8>,
-    thre_pending: Arc<AtomicBool>,
+    input_tx: Sender<u8>,
+    output_rx: UnboundedReceiver<u8>,
     rx_pending: Arc<AtomicBool>,
 }
 
-impl ByteSink for UartBytePort {
-    fn before_receive(&mut self) {
-        self.uart_io.before_receive();
+impl UartBytePort {
+    pub fn input_sender(&self) -> Sender<u8> {
+        self.input_tx.clone()
     }
 
-    fn do_receive(&mut self, bytes: &[u8]) {
-        log::trace!(
-            "[uart] receive bytes {:?}",
-            bytes.iter().map(|b| *b as char)
-        );
-        self.uart_io.do_receive(bytes);
-    }
-
-    fn after_receive(&mut self, received: bool) {
-        self.uart_io.after_receive(received);
-        if received {
+    pub fn push_input(&self, bytes: &[u8]) -> Result<(), UartIoError> {
+        for (accepted, &byte) in bytes.iter().enumerate() {
+            match self.input_tx.try_send(byte) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    if accepted != 0 {
+                        self.rx_pending.store(true, Ordering::Release);
+                    }
+                    return Err(UartIoError::InputFull { accepted });
+                }
+                Err(TrySendError::Closed(_)) => {
+                    if accepted != 0 {
+                        self.rx_pending.store(true, Ordering::Release);
+                    }
+                    return Err(UartIoError::InputClosed { accepted });
+                }
+            }
+        }
+        if !bytes.is_empty() {
             self.rx_pending.store(true, Ordering::Release);
         }
+        Ok(())
     }
-}
 
-impl ByteSource for UartBytePort {
-    fn drain_to<S: ByteSink>(&mut self, target: &mut S) -> bool {
-        self.uart_io.drain_to(target)
+    pub fn take_output(&mut self) -> Vec<u8> {
+        let mut output = Vec::new();
+        loop {
+            match self.output_rx.try_recv() {
+                Ok(byte) => output.push(byte),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return output,
+            }
+        }
+    }
+
+    #[cfg(feature = "native-cli")]
+    pub(crate) fn spawn_stdout(self, spawner: &crate::task_spawner::TaskSpawner) {
+        let Self { mut output_rx, .. } = self;
+        spawner.spawn_task(Box::pin(async move {
+            use std::io::Write;
+
+            let mut buffer = [0u8; 4096];
+            while let Some(byte) = output_rx.recv().await {
+                buffer[0] = byte;
+                let mut len = 1;
+                while len < buffer.len() {
+                    match output_rx.try_recv() {
+                        Ok(byte) => {
+                            buffer[len] = byte;
+                            len += 1;
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                let result = (|| -> std::io::Result<()> {
+                    let mut stdout = std::io::stdout().lock();
+                    stdout.write_all(&buffer[..len])?;
+                    stdout.flush()
+                })();
+
+                if let Err(error) = result {
+                    log::error!("failed to write UART output to stdout: {error}");
+                    return;
+                }
+            }
+        }));
     }
 }
 
@@ -152,7 +219,8 @@ pub struct FastUart16550 {
     reg_lcr_ptr: [*mut u8; 8],
 
     input_rx: Receiver<u8>,
-    output_tx: Sender<u8>,
+    input_tx: Sender<u8>,
+    output_tx: UnboundedSender<u8>,
 
     /// Shared IER value sampled by the PLIC source handler.
     ier_shared: Arc<AtomicU8>,
@@ -168,25 +236,26 @@ pub struct FastUart16550 {
 
 impl FastUart16550 {
     pub fn new() -> (Self, UartBytePort) {
-        let (channel1, channel2) = ChannelIOContext::new();
-        let uart = Self::from_channel(channel1.input_receiver, channel1.output_sender);
-
-        let ier = uart.ier_shared.clone();
-        let thre_pending = uart.thre_pending.clone();
+        let (input_tx, input_rx) = mpsc::channel(UART_INPUT_CAPACITY);
+        let (output_tx, output_rx) = mpsc::unbounded_channel();
+        let uart = Self::from_channel(input_rx, input_tx.clone(), output_tx);
         let rx_pending = uart.rx_pending.clone();
 
         (
             uart,
             UartBytePort {
-                uart_io: channel2,
-                ier,
-                thre_pending,
+                input_tx,
+                output_rx,
                 rx_pending,
             },
         )
     }
 
-    pub fn from_channel(input_rx: Receiver<u8>, output_tx: Sender<u8>) -> Self {
+    pub fn from_channel(
+        input_rx: Receiver<u8>,
+        input_tx: Sender<u8>,
+        output_tx: UnboundedSender<u8>,
+    ) -> Self {
         let reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
@@ -231,6 +300,7 @@ impl FastUart16550 {
             reg_mut_ptr,
             reg_lcr_ptr,
             input_rx,
+            input_tx,
             output_tx,
             ier_shared,
             thre_pending,
@@ -296,7 +366,8 @@ impl FastUart16550 {
         Self::eval_irq(
             self.ier_shared.load(Ordering::Acquire),
             self.thre_pending.load(Ordering::Acquire),
-            self.rx_pending.load(Ordering::Acquire),
+            self.rx_pending.load(Ordering::Acquire)
+                || self.input_tx.capacity() < self.input_tx.max_capacity(),
         )
     }
 
@@ -429,6 +500,7 @@ impl FastUart16550 {
             ier: self.ier_shared.clone(),
             thre_pending: self.thre_pending.clone(),
             rx_pending: self.rx_pending.clone(),
+            input_tx: self.input_tx.clone(),
         }
     }
 }
@@ -449,6 +521,7 @@ struct PlicUartHandler {
     ier: Arc<AtomicU8>,
     thre_pending: Arc<AtomicBool>,
     rx_pending: Arc<AtomicBool>,
+    input_tx: Sender<u8>,
 }
 
 impl PlicDeviceHandler for PlicUartHandler {
@@ -456,7 +529,8 @@ impl PlicDeviceHandler for PlicUartHandler {
         FastUart16550::eval_irq(
             self.ier.load(Ordering::Acquire),
             self.thre_pending.load(Ordering::Acquire),
-            self.rx_pending.load(Ordering::Acquire),
+            self.rx_pending.load(Ordering::Acquire)
+                || self.input_tx.capacity() < self.input_tx.max_capacity(),
         )
         .is_some()
     }
@@ -479,9 +553,7 @@ impl MemMappedDeviceTrait for FastUart16550 {
 
 #[cfg(test)]
 mod test {
-    use std::collections::VecDeque;
-
-    use crate::{byte_io::ByteSinkExt, device::config::UART_IRQ};
+    use crate::device::config::UART_IRQ;
 
     use super::*;
 
@@ -491,18 +563,15 @@ mod test {
 
         uart.write_impl(0, 'a' as u8).unwrap();
 
-        let mut deque = VecDeque::new();
-        port.drain_to(&mut deque);
-
-        assert_eq!(deque.len(), 1);
-        assert_eq!(deque[0], 'a' as u8);
+        assert_eq!(port.take_output(), vec![b'a']);
+        assert!(port.take_output().is_empty());
     }
 
     #[test]
     fn input_test() {
-        let (mut uart, mut port) = FastUart16550::new();
+        let (mut uart, port) = FastUart16550::new();
 
-        port.receive(&['a', 'b', 'c', 'd'].map(|x| x as u8));
+        port.push_input(b"abcd").unwrap();
 
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 1);
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), 'a' as u8);
@@ -512,19 +581,32 @@ mod test {
         assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1u8, 0);
     }
 
+    #[test]
+    fn input_is_bounded() {
+        let (mut uart, port) = FastUart16550::new();
+        port.push_input(&vec![b'a'; UART_INPUT_CAPACITY]).unwrap();
+        assert_eq!(
+            port.push_input(b"b"),
+            Err(UartIoError::InputFull { accepted: 0 })
+        );
+
+        assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'a');
+        port.push_input(b"b").unwrap();
+    }
+
     // Interrupt evaluation is exposed as an absolute status for the PLIC
     // source handler. These tests exercise that status directly.
 
     /// Receiving input while RDA (IER bit0) is enabled must raise UART_IRQ.
     #[test]
     fn input_raises_external_interrupt_when_rda_enabled() {
-        let (mut uart, mut port) = FastUart16550::new();
+        let (mut uart, port) = FastUart16550::new();
         uart.write_impl::<u8>(1, 0x01).unwrap(); // enable Received Data Available (IER bit0)
 
         // No interrupt before any input arrives.
         assert_eq!(uart.irq_status(), None);
 
-        port.receive_byte(b'x');
+        port.push_input(b"x").unwrap();
 
         assert_eq!(uart.irq_status(), Some(UART_IRQ));
     }
@@ -532,9 +614,9 @@ mod test {
     /// Without RDA enabled, incoming bytes are buffered but must not interrupt.
     #[test]
     fn input_without_rda_enabled_does_not_interrupt() {
-        let (uart, mut port) = FastUart16550::new();
+        let (uart, port) = FastUart16550::new();
 
-        port.receive_byte(b'x');
+        port.push_input(b"x").unwrap();
 
         assert_eq!(uart.irq_status(), None);
     }
@@ -543,9 +625,9 @@ mod test {
     /// IIR must identify the source as "Received Data Available" (0x04).
     #[test]
     fn rda_stays_asserted_until_input_fully_drained() {
-        let (mut uart, mut port) = FastUart16550::new();
+        let (mut uart, port) = FastUart16550::new();
         uart.write_impl::<u8>(1, 0x01).unwrap(); // enable RDA
-        port.receive(&['a', 'b'].map(|x| x as u8));
+        port.push_input(b"ab").unwrap();
 
         assert_eq!(uart.irq_status(), Some(UART_IRQ));
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x04); // IIR: data available
@@ -571,13 +653,13 @@ mod test {
 
     #[test]
     fn plic_handler_reports_current_uart_irq_level() {
-        let (mut uart, mut port) = FastUart16550::new();
+        let (mut uart, port) = FastUart16550::new();
         let handler = uart.build_plic_handler();
 
         assert!(!handler.irq_level());
 
         uart.write_impl::<u8>(1, 0x01).unwrap();
-        port.receive_byte(b'x');
+        port.input_sender().try_send(b'x').unwrap();
         assert!(handler.irq_level());
 
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'x');

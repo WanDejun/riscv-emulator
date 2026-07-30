@@ -14,7 +14,6 @@ use crate::board::Board;
 use crate::isa::riscv::debugger::DebugEvent;
 use crate::rvdb::{Printer, RvdbCommand, RvdbSession, format_clap_error, is_clap_display};
 
-const PROMPT: &str = "(rvdb) ";
 const CONTINUE_CHUNK: u64 = 100_000;
 
 #[cfg_attr(feature = "web", wasm_bindgen::prelude::wasm_bindgen)]
@@ -144,14 +143,14 @@ impl embedded_io_async::Write for RvdbChannelRx {
 /// An async no-std REPL, provided for the WASM environment.
 ///
 /// I/O is async, and long-time tasks (like `continue` command) will yield periodically.
-pub struct NostdREPL<B: Board> {
+pub struct AsyncREPL<B: Board> {
     editor: Editor<UnboundedBuffer, UnboundedHistory>,
     channel: RvdbChannelRx,
     session: RvdbSession<B>,
     last_line: Option<String>,
 }
 
-impl<B: Board> NostdREPL<B> {
+impl<B: Board> AsyncREPL<B> {
     pub async fn new(board: B, mut channel: RvdbChannelRx) -> Self {
         let editor = EditorBuilder::new_unbounded()
             .with_unbounded_history()
@@ -168,7 +167,10 @@ impl<B: Board> NostdREPL<B> {
     }
 
     pub async fn readline(&mut self) -> Result<String, NolineError> {
-        let line = self.editor.readline(PROMPT, &mut self.channel).await?;
+        let line = self
+            .editor
+            .readline(super::PROMPT, &mut self.channel)
+            .await?;
         Ok(line.to_owned())
     }
 

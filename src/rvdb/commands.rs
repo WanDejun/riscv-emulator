@@ -238,19 +238,12 @@ impl<B: Board> RvdbSession<B> {
     }
 
     fn handle_continue(&mut self, steps: u64) -> Result<CommandOutput, String> {
-        before_continue()?;
-        self.dbg.board_mut().resume_background_work();
-
         let rst = self.dbg.continue_until_step(steps);
-
-        self.dbg.board_mut().pause_background_work();
-        let after_rst = after_continue();
 
         let (event, actual_steps) = match rst {
             Ok(rst) => rst,
             Err(e) => return Err(format!("step failed: {}", e)),
         };
-        after_rst?;
 
         let watch_results = self.collect_watch_results()?;
         let pc = self.dbg.read_pc();
@@ -406,30 +399,6 @@ impl<B: Board> RvdbSession<B> {
             is_current_pc: addr == self.dbg.read_pc(),
         }
     }
-}
-
-fn before_continue() -> Result<(), String> {
-    #[cfg(feature = "native-cli")]
-    {
-        use std::io::{IsTerminal, stdin};
-
-        if stdin().is_terminal() {
-            crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn after_continue() -> Result<(), String> {
-    #[cfg(feature = "native-cli")]
-    {
-        use std::io::{IsTerminal, stdin};
-
-        if stdin().is_terminal() {
-            crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(feature = "native-cli")]

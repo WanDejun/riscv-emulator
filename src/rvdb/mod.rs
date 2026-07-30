@@ -6,6 +6,8 @@ mod nostd_repl;
 
 #[cfg(feature = "native-cli")]
 mod native_repl;
+#[cfg(feature = "native-cli")]
+mod sync_repl;
 
 use crate::config::arch_config::REGFILE_CNT;
 use crate::config::arch_config::WordType;
@@ -21,10 +23,14 @@ use std::fmt;
 pub use printer::Printer;
 pub use session::{RvdbCommandResponse, RvdbSession};
 
-pub use nostd_repl::{NostdREPL, REPLResponse, RvdbChannelRx, RvdbChannelTx, RvdbChannels};
+pub use nostd_repl::{AsyncREPL, REPLResponse, RvdbChannelRx, RvdbChannelTx, RvdbChannels};
 
 #[cfg(feature = "native-cli")]
-pub use native_repl::NativeREPL;
+pub use native_repl::RustylineREPL;
+#[cfg(feature = "native-cli")]
+pub use sync_repl::SyncREPL;
+
+const PROMPT: &str = "(rvdb) ";
 
 #[derive(clap::ValueEnum, Debug, Clone, PartialEq, Eq)]
 enum ClapAccessType {

@@ -1,13 +1,15 @@
 mod common;
+#[allow(unused_imports)]
 pub use common::*;
 
 #[cfg(feature = "native-cli")]
 mod terminal_io;
-
 #[cfg(feature = "native-cli")]
 pub use terminal_io::*;
 
+#[cfg(feature = "native-cli")]
 mod stdio;
+#[cfg(feature = "native-cli")]
 pub use stdio::*;
 
 pub struct ReceiveGuard<'a, S: ByteSink + ?Sized> {

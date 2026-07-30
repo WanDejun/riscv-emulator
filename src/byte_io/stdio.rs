@@ -14,7 +14,10 @@ use tokio::{
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+use crate::device::power_manager::{POWER_OFF_CODE, POWER_STATUS};
+use std::sync::atomic::Ordering;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StdinHandle(u8);
 
 impl StdinHandle {
@@ -40,6 +43,7 @@ impl StdinRouter {
 
             thread::spawn(move || {
                 rt.block_on(async move {
+                    let mut host_commands = HostCommandFilter::default();
                     loop {
                         let mut buf = [0u8; 1024];
                         let Ok(n) = std::io::stdin().read(&mut buf) else {
@@ -48,7 +52,15 @@ impl StdinRouter {
                         if n == 0 {
                             return;
                         }
-                        match forward_bytes(&mut target_rx, &senders_clone, &buf[..n]).await {
+
+                        let (forwarded, shutdown_requested) = host_commands.filter(&mut buf[..n]);
+                        if shutdown_requested {
+                            log::info!("[StdinRouter] Ctrl+A x: requesting exit");
+                            POWER_STATUS.store(POWER_OFF_CODE, Ordering::Release);
+                        }
+
+                        match forward_bytes(&mut target_rx, &senders_clone, &buf[..forwarded]).await
+                        {
                             Err(ForwardError::Closed) => return,
                             _ => continue,
                         }
@@ -74,10 +86,48 @@ impl StdinRouter {
     }
 
     pub fn switch_to(&self, target: StdinHandle) {
-        self.target_tx.send(target).unwrap();
+        self.target_tx.send_replace(target);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn current_target(&self) -> StdinHandle {
+        *self.target_tx.borrow()
     }
 }
 
+#[derive(Default)]
+struct HostCommandFilter {
+    escape_pending: bool,
+}
+
+impl HostCommandFilter {
+    fn filter(&mut self, input: &mut [u8]) -> (usize, bool) {
+        let mut output_len = 0;
+        let mut shutdown_requested = false;
+
+        for index in 0..input.len() {
+            let byte = input[index];
+            if self.escape_pending {
+                self.escape_pending = false;
+                if byte == b'x' {
+                    shutdown_requested = true;
+                } else {
+                    input[output_len] = byte;
+                    output_len += 1;
+                }
+            } else if byte == 0x01 {
+                self.escape_pending = true;
+            } else {
+                input[output_len] = byte;
+                output_len += 1;
+            }
+        }
+
+        (output_len, shutdown_requested)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum ForwardError {
     Closed,
     TargetChanged,
@@ -94,7 +144,12 @@ async fn forward_bytes(
         return Ok(());
     }
     let id = target.0 as usize;
-    let sender = &mut senders.lock().await[id];
+    let sender = senders
+        .lock()
+        .await
+        .get(id)
+        .cloned()
+        .ok_or(ForwardError::TargetClosed)?;
     for &b in buf {
         // use non-blocking send for performance
         match sender.try_send(b) {
@@ -128,4 +183,102 @@ async fn forward_bytes(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::{DeviceTrait, config::UART_IRQ, fast_uart::FastUart16550};
+
+    fn test_router() -> (StdinRouter, watch::Receiver<StdinHandle>) {
+        let (target_tx, target_rx) = watch::channel(StdinHandle::NONE);
+        (
+            StdinRouter {
+                senders: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+                target_tx,
+            },
+            target_rx,
+        )
+    }
+
+    #[test]
+    fn switches_targets_without_moving_old_buffer() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let (router, mut target_rx) = test_router();
+        let (first_tx, mut first_rx) = mpsc::channel(1);
+        let (second_tx, mut second_rx) = mpsc::channel(4);
+        let first = router.register(first_tx);
+        let second = router.register(second_tx);
+        router.switch_to(first);
+
+        runtime.block_on(async {
+            let senders = Arc::clone(&router.senders);
+            let task =
+                tokio::spawn(async move { forward_bytes(&mut target_rx, &senders, b"ab").await });
+            while first_rx.len() == 0 {
+                tokio::task::yield_now().await;
+            }
+            router.switch_to(second);
+
+            assert_eq!(task.await.unwrap(), Err(ForwardError::TargetChanged));
+            assert_eq!(first_rx.try_recv().unwrap(), b'a');
+            assert!(second_rx.try_recv().is_err());
+        });
+    }
+
+    #[test]
+    fn uart_sender_is_registered_directly() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let (router, mut target_rx) = test_router();
+        let (mut uart, port) = FastUart16550::new();
+        let uart_handle = router.register(port.input_sender());
+        router.switch_to(uart_handle);
+        uart.write_u8(1, 0x01).unwrap();
+
+        runtime
+            .block_on(forward_bytes(&mut target_rx, &router.senders, b"uart"))
+            .unwrap();
+
+        assert_eq!(uart.irq_status(), Some(UART_IRQ));
+        for expected in b"uart" {
+            assert_eq!(uart.read_u8(0).unwrap(), *expected);
+        }
+        assert_eq!(uart.irq_status(), None);
+    }
+
+    #[test]
+    fn host_command_is_filtered_before_target_routing() {
+        let mut filter = HostCommandFilter::default();
+        let mut first = *b"a\x01";
+
+        let (forwarded, shutdown) = filter.filter(&mut first);
+        assert!(!shutdown);
+        assert_eq!(&first[..forwarded], b"a");
+
+        let mut second = *b"xb\x01z";
+        let (forwarded, shutdown) = filter.filter(&mut second);
+        assert!(shutdown);
+        assert_eq!(&second[..forwarded], b"bz");
+    }
+
+    #[test]
+    fn host_command_is_recognized_without_a_target() {
+        let (router, mut target_rx) = test_router();
+        assert_eq!(router.current_target(), StdinHandle::NONE);
+
+        let mut filter = HostCommandFilter::default();
+        let mut input = *b"\x01x";
+        let (forwarded, shutdown) = filter.filter(&mut input);
+        assert!(shutdown);
+        assert_eq!(forwarded, 0);
+
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        runtime
+            .block_on(forward_bytes(
+                &mut target_rx,
+                &router.senders,
+                &input[..forwarded],
+            ))
+            .unwrap();
+    }
 }

@@ -50,9 +50,4 @@ pub trait Board {
     fn run(&mut self) {
         self.step_cycles(u64::MAX);
     }
-
-    fn pause_background_work(&mut self);
-    fn resume_background_work(&mut self);
-
-    fn take_uart_output(&mut self) -> Vec<u8>;
 }

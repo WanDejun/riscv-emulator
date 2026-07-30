@@ -754,18 +754,6 @@ mod test {
         fn loader(&self) -> Option<&crate::load::ELFLoader> {
             None
         }
-
-        fn pause_background_work(&mut self) {
-            unimplemented!()
-        }
-
-        fn resume_background_work(&mut self) {
-            unimplemented!()
-        }
-
-        fn take_uart_output(&mut self) -> Vec<u8> {
-            unimplemented!()
-        }
     }
 
     fn create_debugger(cpu: Box<RVCPU>) -> Debugger<TestEmptyBoard> {
