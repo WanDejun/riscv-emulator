@@ -7,6 +7,9 @@ mod terminal_io;
 #[cfg(feature = "native-cli")]
 pub use terminal_io::*;
 
+mod stdio;
+pub use stdio::*;
+
 pub struct ReceiveGuard<'a, S: ByteSink + ?Sized> {
     sink: &'a mut S,
     has_received: bool,
