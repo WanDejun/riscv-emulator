@@ -95,7 +95,7 @@ pub(super) struct Decoder {
     /// table[opcode][funct3]
     ///
     /// If you don't need funct3, fill all 8 element with the same value.
-    decode_table: [[PartialDecode; 1 << 3]; 1 << 7],
+    decode_table: Box<[[PartialDecode; 1 << 3]; 1 << 7]>,
 }
 
 const OPCODE_BITS: u32 = 0b1111111;
@@ -138,7 +138,9 @@ impl Decoder {
 
     pub fn new() -> Self {
         Self {
-            decode_table: std::array::from_fn(|_| std::array::from_fn(|_| PartialDecode::Unknown)),
+            decode_table: Box::new(std::array::from_fn(|_| {
+                std::array::from_fn(|_| PartialDecode::Unknown)
+            })),
         }
     }
 
