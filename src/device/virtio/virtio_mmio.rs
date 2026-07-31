@@ -632,21 +632,11 @@ mod test {
 
     struct MockPlicIRQHandler {
         changes: Rc<RefCell<Vec<(PeriphIrqId, bool)>>>,
-        periphs: Vec<(Box<dyn crate::device::PlicDeviceHandler>, PeriphIrqId)>,
     }
 
     impl PlicIRQHandler for MockPlicIRQHandler {
         fn handle_irq(&mut self, interrupt: PeriphIrqId, level: bool) {
             self.changes.borrow_mut().push((interrupt, level));
-        }
-        fn register_source_handler(
-            &mut self,
-            source_handler: Option<Box<dyn crate::device::PlicDeviceHandler>>,
-            interrupt_id: PeriphIrqId,
-        ) {
-            if let Some(handler) = source_handler {
-                self.periphs.push((handler, interrupt_id));
-            }
         }
     }
 
@@ -677,7 +667,6 @@ mod test {
         let irq_changes = Rc::new(RefCell::new(Vec::new()));
         let mut irq_handler = Box::new(MockPlicIRQHandler {
             changes: irq_changes.clone(),
-            periphs: vec![],
         });
 
         let mut ram = Ram::new();

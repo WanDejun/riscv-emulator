@@ -4,9 +4,7 @@
 //! A simple millisecond timer used to exercise external interrupts.
 
 use std::{
-    cell::Cell,
     hint::cold_path,
-    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -19,12 +17,9 @@ use tokio::{sync::watch, time::Instant};
 use crate::{
     config::arch_config::WordType,
     device::{
-        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
+        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDevice,
         config::{SAMPLE_TIMER_BASE, SAMPLE_TIMER_SIZE},
-        plic::{
-            PeriphIrqId,
-            irq_line::{PlicIRQLine, PlicIRQSource},
-        },
+        plic::PeriphIrqId,
     },
     task_spawner::TaskSpawner,
 };
@@ -34,7 +29,7 @@ const CONTROL_RESET: u32 = 1 << 0;
 
 struct SampleTimerLayout {
     control_register: u32,
-    interrupt_mask_reg: Rc<Cell<u32>>,
+    interrupt_mask_reg: u32,
     interval_low: u32,
     interval_high: u32,
 }
@@ -43,7 +38,7 @@ impl SampleTimerLayout {
     fn new() -> Self {
         Self {
             control_register: 0,
-            interrupt_mask_reg: Rc::new(Cell::new(0)),
+            interrupt_mask_reg: 0,
             interval_low: 0,
             interval_high: 0,
         }
@@ -60,7 +55,6 @@ pub(crate) struct SampleTimerDevice {
     layout: SampleTimerLayout,
     irq_pending: Arc<AtomicBool>,
     sender: watch::Sender<TimerCommand>,
-    plic_irq_line: Option<PlicIRQLine>,
 }
 
 impl SampleTimerDevice {
@@ -74,7 +68,6 @@ impl SampleTimerDevice {
             layout: SampleTimerLayout::new(),
             irq_pending,
             sender: tx,
-            plic_irq_line: None,
         }
     }
 
@@ -127,7 +120,7 @@ impl DeviceTrait for SampleTimerDevice {
 
         let data = match addr {
             0x00 => self.layout.control_register,
-            0x04 => self.layout.interrupt_mask_reg.get(),
+            0x04 => self.layout.interrupt_mask_reg,
             0x08 => self.layout.interval_low,
             0x0c => self.layout.interval_high,
             _ => return Err(MemError::LoadFault),
@@ -154,7 +147,7 @@ impl DeviceTrait for SampleTimerDevice {
                 }
             }
             0x04 => {
-                self.layout.interrupt_mask_reg.set(data);
+                self.layout.interrupt_mask_reg = data;
             }
             0x08 => {
                 self.layout.interval_low = data;
@@ -183,29 +176,9 @@ impl MemMappedDeviceTrait for SampleTimerDevice {
     }
 }
 
-impl PlicIRQSource for SampleTimerDevice {
-    fn set_irq_line(
-        &mut self,
-        target: *mut dyn super::plic::irq_line::PlicIRQHandler,
-        interrupt_id: PeriphIrqId,
-    ) {
-        let handler = Box::new(PlicSampleTimerHandler {
-            irq_pending: self.irq_pending.clone(),
-            imr: self.layout.interrupt_mask_reg.clone(),
-        });
-        let line = PlicIRQLine::new(target, Some(handler), interrupt_id);
-        self.plic_irq_line = Some(line);
-    }
-}
-
-struct PlicSampleTimerHandler {
-    irq_pending: Arc<AtomicBool>,
-    imr: Rc<Cell<u32>>,
-}
-
-impl PlicDeviceHandler for PlicSampleTimerHandler {
+impl PlicDevice for SampleTimerDevice {
     fn irq_level(&self) -> bool {
-        self.irq_pending.load(Ordering::Acquire) && (self.imr.get() & 1) == 1
+        self.irq_pending.load(Ordering::Acquire) && (self.layout.interrupt_mask_reg & 1) == 1
     }
 }
 

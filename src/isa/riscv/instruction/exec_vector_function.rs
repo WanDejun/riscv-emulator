@@ -1708,7 +1708,7 @@ mod test {
                     .unwrap();
             }
         }
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -1778,7 +1778,7 @@ mod test {
                     .unwrap();
             }
         }
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -1960,7 +1960,7 @@ mod test {
                     .unwrap();
             }
         }
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1); // Enable FPU by default for convienience
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -2003,7 +2003,7 @@ mod test {
         let index_base = TEST_DATA_BASE;
         let data_base = TEST_DATA_BASE + 0x4000;
 
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -2070,7 +2070,7 @@ mod test {
         const TEST_VLMUL: Vlmul = Vlmul::M8;
         type ElemType = u32;
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -2145,7 +2145,7 @@ mod test {
                     .unwrap();
             }
         }
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -2225,7 +2225,7 @@ mod test {
         const STRIDE: WordType = (size_of::<u32>() as WordType) * 2;
         type ElemType = u32;
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);
@@ -2271,7 +2271,7 @@ mod test {
         let index_base = TEST_DATA_BASE;
         let data_base = TEST_DATA_BASE + 0x1000;
 
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let mut cpu = RVCPU::from_vaddr_manager(VirtAddrManager::from_ram_and_mmio(ram_ref, mmio));
         cpu.csr.get_by_type_existing::<Mstatus>().set_fs(1);
         cpu.csr.get_by_type_existing::<Mstatus>().set_vs_directly(1);

@@ -510,7 +510,7 @@ impl VirtIODeviceTrait for VirtIOBlkDevice {
 
 impl PlicIRQSource for VirtIOBlkDevice {
     fn set_irq_line(&mut self, target: *mut dyn PlicIRQHandler, interrupt_id: PeriphIrqId) {
-        let line = PlicIRQLine::new(target, None, interrupt_id);
+        let line = PlicIRQLine::new(target, interrupt_id);
         self.irq_line = Some(line);
         self.update_irq();
     }

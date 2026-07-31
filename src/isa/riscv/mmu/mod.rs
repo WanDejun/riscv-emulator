@@ -504,11 +504,10 @@ impl VirtAddrManager {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::sync::atomic::Ordering;
+    use std::{ptr::NonNull, sync::atomic::Ordering};
 
     use super::*;
-    use crate::device::mmio::MemoryMapItem;
+    use crate::device::{device_manager::DeviceArenaBuilder, mmio::MemoryMapItem};
 
     struct MockDevice;
 
@@ -527,12 +526,12 @@ mod tests {
     #[test]
     fn lr_sc_rejects_mmio_and_sc_clears_ram_reservation() {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
-        let table = vec![MemoryMapItem::new(
-            0x1000,
-            8,
-            Rc::new(RefCell::new(MockDevice)),
-        )];
-        let mmio = MemoryMapIO::from_mmio_items(ram.clone(), table);
+        let mut arena_builder = DeviceArenaBuilder::new();
+        let mock_device = arena_builder.register(Box::new(MockDevice));
+        let table = vec![MemoryMapItem::new(0x1000, 8, mock_device)];
+        let mut devices = Box::new(arena_builder.build());
+        let devices_ptr = NonNull::from(devices.as_mut());
+        let mmio = unsafe { MemoryMapIO::from_mmio_items(ram.clone(), devices_ptr, table) };
         let mut memory = VirtAddrManager::from_ram_and_mmio(ram, mmio);
         let mut csr = CsrRegFile::new();
 
@@ -557,7 +556,7 @@ mod tests {
     #[test]
     fn amo_invalidates_lr_reservation() {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
-        let mmio = MemoryMapIO::from_mmio_items(ram.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram.clone());
         let mut memory = VirtAddrManager::from_ram_and_mmio(ram, mmio);
         let mut csr = CsrRegFile::new();
         let addr = ram_config::BASE_ADDR + 8;

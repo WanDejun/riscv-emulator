@@ -41,6 +41,7 @@ macro_rules! dispatch_read_write {
 
 pub(crate) mod aclint;
 pub(crate) mod config;
+pub mod device_manager;
 pub mod fast_uart;
 mod id_allocator;
 pub(crate) use id_allocator::*;
@@ -97,7 +98,7 @@ macro_rules! impl_write_for_type {
 }
 
 // Check align requirement before device.read/write. Most of align requirement was checked in mmio.
-pub trait DeviceTrait {
+pub trait DeviceTrait: 'static {
     fn read(&mut self, addr: WordType, len: u32) -> Result<u64, MemError>;
     fn write(&mut self, addr: WordType, len: u32, data: u64) -> Result<(), MemError>;
 
@@ -114,7 +115,8 @@ pub trait DeviceTrait {
     fn sync(&mut self);
 }
 
-pub trait PlicDeviceHandler {
+/// A device whose level-triggered interrupt state is sampled by the PLIC.
+pub trait PlicDevice: DeviceTrait {
     /// Return the device's current absolute interrupt-line level.
     ///
     /// This sampled interface is intended for level-triggered sources that

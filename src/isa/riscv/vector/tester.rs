@@ -19,7 +19,7 @@ pub(super) struct VectorBuilder {
 impl VectorBuilder {
     pub(super) fn new() -> Self {
         let ram = Rc::new(UnsafeCell::new(Ram::new()));
-        let mmio = MemoryMapIO::from_mmio_items(ram, vec![]);
+        let mmio = MemoryMapIO::from_ram(ram);
         Self {
             vector: Vector::new(),
             mmio,

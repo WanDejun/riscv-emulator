@@ -32,7 +32,7 @@ impl TestCPUBuilder {
     /// Build a RISC-V CPU, only has RAM, don't have other devices.
     pub(super) fn new() -> Self {
         let ram_ref = Rc::new(UnsafeCell::new(Ram::new()));
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), vec![]);
+        let mmio = MemoryMapIO::from_ram(ram_ref.clone());
         let decoder = Decoder::from_isa_str(TEST_ISA).expect("TEST_ISA must be valid");
         let mut cpu = Box::new(RVCPU::from_decoder(
             decoder,

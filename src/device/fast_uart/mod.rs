@@ -1,14 +1,7 @@
 //! TODO: this module is not fully implemented according to the spec.
 //! Some features are missing, and some behavior may be incorrect due to limited test coverage.
 
-use std::{
-    cell::RefCell,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU8, Ordering},
-    },
-    u8,
-};
+use std::{cell::RefCell, sync::Arc, u8};
 
 use tokio::sync::mpsc::{
     self, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -18,12 +11,9 @@ use tokio::sync::mpsc::{
 use crate::{
     config::arch_config::WordType,
     device::{
-        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDeviceHandler,
+        DeviceTrait, MemError, MemMappedDeviceTrait, PlicDevice,
         config::{UART_BASE, UART_DEFAULT_DIV, UART_IRQ, UART_SIZE},
-        plic::{
-            PeriphIrqId,
-            irq_line::{self, PlicIRQLine, PlicIRQSource},
-        },
+        plic::PeriphIrqId,
     },
     utils::{clear_bit, read_bit, set_bit},
 };
@@ -53,7 +43,6 @@ pub enum UartIoError {
 pub struct UartBytePort {
     input_tx: Sender<u8>,
     output_rx: UnboundedReceiver<u8>,
-    rx_pending: Arc<AtomicBool>,
 }
 
 impl UartBytePort {
@@ -66,21 +55,12 @@ impl UartBytePort {
             match self.input_tx.try_send(byte) {
                 Ok(()) => {}
                 Err(TrySendError::Full(_)) => {
-                    if accepted != 0 {
-                        self.rx_pending.store(true, Ordering::Release);
-                    }
                     return Err(UartIoError::InputFull { accepted });
                 }
                 Err(TrySendError::Closed(_)) => {
-                    if accepted != 0 {
-                        self.rx_pending.store(true, Ordering::Release);
-                    }
                     return Err(UartIoError::InputClosed { accepted });
                 }
             }
-        }
-        if !bytes.is_empty() {
-            self.rx_pending.store(true, Ordering::Release);
         }
         Ok(())
     }
@@ -219,43 +199,29 @@ pub struct FastUart16550 {
     reg_lcr_ptr: [*mut u8; 8],
 
     input_rx: Receiver<u8>,
-    input_tx: Sender<u8>,
     output_tx: UnboundedSender<u8>,
 
-    /// Shared IER value sampled by the PLIC source handler.
-    ier_shared: Arc<AtomicU8>,
     /// THRE event latch for simplified ETBEI behavior.
     /// Cleared when IIR reports THRE as the identified interrupt source.
-    thre_pending: Arc<AtomicBool>,
-    /// RX-data-pending latch (mirrors LSR[0] plus any queued input) for the
-    /// PLIC source handler. Set when bytes arrive, cleared once all input is read.
-    rx_pending: Arc<AtomicBool>,
-
-    plic_irq_line: Option<PlicIRQLine>,
+    thre_pending: bool,
 }
 
 impl FastUart16550 {
     pub fn new() -> (Self, UartBytePort) {
         let (input_tx, input_rx) = mpsc::channel(UART_INPUT_CAPACITY);
         let (output_tx, output_rx) = mpsc::unbounded_channel();
-        let uart = Self::from_channel(input_rx, input_tx.clone(), output_tx);
-        let rx_pending = uart.rx_pending.clone();
+        let uart = Self::from_channel(input_rx, output_tx);
 
         (
             uart,
             UartBytePort {
                 input_tx,
                 output_rx,
-                rx_pending,
             },
         )
     }
 
-    pub fn from_channel(
-        input_rx: Receiver<u8>,
-        input_tx: Sender<u8>,
-        output_tx: UnboundedSender<u8>,
-    ) -> Self {
+    pub fn from_channel(input_rx: Receiver<u8>, output_tx: UnboundedSender<u8>) -> Self {
         let reg = Arc::new(RefCell::new(Uart16550Reg::new()));
         let mut reg_ref = reg.borrow_mut();
         let reg_ptr = [
@@ -289,9 +255,7 @@ impl FastUart16550 {
             (&mut reg_ref.SCR) as *mut u8,
         ];
 
-        let ier_shared = Arc::new(AtomicU8::new(0));
-        let thre_pending = Arc::new(AtomicBool::new(true)); // THR is initially empty.
-        let rx_pending = Arc::new(AtomicBool::new(false)); // No RX data at reset.
+        let thre_pending = true; // THR is initially empty.
 
         drop(reg_ref);
         Self {
@@ -300,12 +264,8 @@ impl FastUart16550 {
             reg_mut_ptr,
             reg_lcr_ptr,
             input_rx,
-            input_tx,
             output_tx,
-            ier_shared,
             thre_pending,
-            rx_pending,
-            plic_irq_line: None,
         }
     }
 
@@ -330,11 +290,10 @@ impl FastUart16550 {
         } else if ier & 0x01 != 0 && lsr & 0x01 != 0 {
             // Received Data Available
             iir = (iir & 0xC0) | 0x04;
-        } else if ier & 0x02 != 0 && self.thre_pending.load(std::sync::atomic::Ordering::Acquire) {
+        } else if ier & 0x02 != 0 && self.thre_pending {
             // Transmitter Holding Register Empty (edge-triggered)
             // Reading IIR with THRE identified clears the pending condition.
-            self.thre_pending
-                .store(false, std::sync::atomic::Ordering::Release);
+            self.thre_pending = false;
             iir = (iir & 0xC0) | 0x02;
         } else if ier & 0x08 != 0 {
             // Modem Status
@@ -345,7 +304,7 @@ impl FastUart16550 {
             "[UART] compute_iir: IER={:#04x} LSR={:#04x} thre_pending={} => IIR={:#04x}",
             ier,
             lsr,
-            self.thre_pending.load(std::sync::atomic::Ordering::Relaxed),
+            self.thre_pending,
             iir
         );
 
@@ -363,12 +322,7 @@ impl FastUart16550 {
     /// Snapshot the current interrupt state.
     #[cfg(test)]
     pub fn irq_status(&self) -> Option<PeriphIrqId> {
-        Self::eval_irq(
-            self.ier_shared.load(Ordering::Acquire),
-            self.thre_pending.load(Ordering::Acquire),
-            self.rx_pending.load(Ordering::Acquire)
-                || self.input_tx.capacity() < self.input_tx.max_capacity(),
-        )
+        self.irq_level().then_some(UART_IRQ)
     }
 
     fn read_impl<T>(&mut self, inner_addr: WordType) -> Result<T, MemError>
@@ -448,19 +402,19 @@ impl FastUart16550 {
                     // In a real 16550, writing THR clears LSR[5] (THRE) momentarily,
                     // then sets it again when the shift register accepts the byte.
                     // Since fast_uart sends instantly, we just re-arm the THRE event.
-                    self.thre_pending
-                        .store(true, std::sync::atomic::Ordering::Release);
+                    self.thre_pending = true;
                 } else {
+                    let old_ier = if i == 1 {
+                        Some(self.reg.borrow().IER)
+                    } else {
+                        None
+                    };
                     unsafe { self.reg_mut_ptr[i].write_volatile((data & (0xff)) as u8) };
-                    if i == 1 {
+                    if let Some(old_ier) = old_ier {
                         let new_ier = (data & 0xff) as u8;
-                        let old_ier = self
-                            .ier_shared
-                            .swap(new_ier, std::sync::atomic::Ordering::AcqRel);
                         // Re-arm THRE event when ETBEI (IER bit1) transitions 0->1.
                         if new_ier & 0x02 != 0 && old_ier & 0x02 == 0 {
-                            self.thre_pending
-                                .store(true, std::sync::atomic::Ordering::Release);
+                            self.thre_pending = true;
                             log::trace!(
                                 "[UART] IER write: {:#04x} -> {:#04x}, ETBEI newly set, thre_pending=true",
                                 old_ier,
@@ -481,56 +435,23 @@ impl FastUart16550 {
     #[allow(non_snake_case)]
     fn read_RBR(&mut self) -> u8 {
         clear_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
-        // RDA must stay asserted while more bytes remain queued from the terminal,
-        // and drop once the last one is consumed.
-        self.rx_pending
-            .store(!self.input_rx.is_empty(), Ordering::Release);
         self.reg.borrow().RBR
     }
 
     #[allow(non_snake_case)]
     fn write_RBR(&mut self, data: u8) {
         set_bit(&mut self.reg.borrow_mut().LSR, 0); // receive data ready.
-        self.rx_pending.store(true, Ordering::Release);
         self.reg.borrow_mut().RBR = data
     }
-
-    fn build_plic_handler(&self) -> PlicUartHandler {
-        PlicUartHandler {
-            ier: self.ier_shared.clone(),
-            thre_pending: self.thre_pending.clone(),
-            rx_pending: self.rx_pending.clone(),
-            input_tx: self.input_tx.clone(),
-        }
-    }
 }
 
-impl PlicIRQSource for FastUart16550 {
-    fn set_irq_line(
-        &mut self,
-        target: *mut dyn irq_line::PlicIRQHandler,
-        interrupt_id: PeriphIrqId,
-    ) {
-        let uart_handler = Box::new(self.build_plic_handler());
-        let line = PlicIRQLine::new(target, Some(uart_handler), interrupt_id);
-        self.plic_irq_line = Some(line);
-    }
-}
-
-struct PlicUartHandler {
-    ier: Arc<AtomicU8>,
-    thre_pending: Arc<AtomicBool>,
-    rx_pending: Arc<AtomicBool>,
-    input_tx: Sender<u8>,
-}
-
-impl PlicDeviceHandler for PlicUartHandler {
+impl PlicDevice for FastUart16550 {
     fn irq_level(&self) -> bool {
+        let reg = self.reg.borrow();
         FastUart16550::eval_irq(
-            self.ier.load(Ordering::Acquire),
-            self.thre_pending.load(Ordering::Acquire),
-            self.rx_pending.load(Ordering::Acquire)
-                || self.input_tx.capacity() < self.input_tx.max_capacity(),
+            reg.IER,
+            self.thre_pending,
+            read_bit(&reg.LSR, 0) || !self.input_rx.is_empty(),
         )
         .is_some()
     }
@@ -594,8 +515,7 @@ mod test {
         port.push_input(b"b").unwrap();
     }
 
-    // Interrupt evaluation is exposed as an absolute status for the PLIC
-    // source handler. These tests exercise that status directly.
+    // Interrupt evaluation is exposed as an absolute status for the PLIC.
 
     /// Receiving input while RDA (IER bit0) is enabled must raise UART_IRQ.
     #[test]
@@ -652,22 +572,24 @@ mod test {
     }
 
     #[test]
-    fn plic_handler_reports_current_uart_irq_level() {
+    fn plic_device_reports_current_uart_irq_level() {
         let (mut uart, port) = FastUart16550::new();
-        let handler = uart.build_plic_handler();
 
-        assert!(!handler.irq_level());
+        assert!(!uart.irq_level());
 
         uart.write_impl::<u8>(1, 0x01).unwrap();
         port.input_sender().try_send(b'x').unwrap();
-        assert!(handler.irq_level());
+        assert!(uart.irq_level());
+
+        assert_eq!(uart.read_impl::<u8>(5).unwrap() & 1, 1);
+        assert!(uart.irq_level()); // The channel is empty, but RBR still holds the byte.
 
         assert_eq!(uart.read_impl::<u8>(0).unwrap(), b'x');
-        assert!(!handler.irq_level());
+        assert!(!uart.irq_level());
 
         uart.write_impl::<u8>(1, 0x02).unwrap();
-        assert!(handler.irq_level());
+        assert!(uart.irq_level());
         assert_eq!(uart.read_impl::<u8>(2).unwrap() & 0x0f, 0x02);
-        assert!(!handler.irq_level());
+        assert!(!uart.irq_level());
     }
 }

@@ -1,12 +1,14 @@
 pub mod irq_line;
 pub mod types;
 
-use std::hint::unlikely;
+use std::{hint::unlikely, ptr::NonNull};
 
 use crate::{
     board::virt::RiscvIRQSource,
     config::arch_config::WordType,
-    device::{DeviceTrait, MemError, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler},
+    device::{
+        DeviceTrait, MemError, PlicDevice, config::PLIC_SIZE, plic::irq_line::PlicIRQHandler,
+    },
 };
 use bit_set::BitSet;
 
@@ -376,8 +378,8 @@ pub struct PLIC {
     layout: PLICLayout,
     riscv_irq_line: [Option<crate::board::virt::IRQLine>; VIRT_MAX_CONTEXTS],
     riscv_irq_level: [Option<bool>; VIRT_MAX_CONTEXTS],
-    peripheral_irq_handlers:
-        [Option<Box<dyn crate::device::PlicDeviceHandler>>; VIRT_MAX_INTERRUPTS],
+    // Non-owning pointers to boxed devices held by the board's DeviceArena.
+    peripheral_irq_devices: [Option<NonNull<dyn crate::device::PlicDevice>>; VIRT_MAX_INTERRUPTS],
 }
 
 impl PLIC {
@@ -386,7 +388,7 @@ impl PLIC {
             layout: PLICLayout::new(),
             riscv_irq_line: core::array::from_fn(|_| None),
             riscv_irq_level: [None; VIRT_MAX_CONTEXTS],
-            peripheral_irq_handlers: core::array::from_fn(|_| None),
+            peripheral_irq_devices: core::array::from_fn(|_| None),
         }
     }
 
@@ -440,14 +442,24 @@ impl PLIC {
         self.layout.set_source_level(interrupt_id, level);
     }
 
+    pub(crate) fn register_device(
+        &mut self,
+        device: NonNull<dyn PlicDevice>,
+        interrupt_id: PeriphIrqId,
+    ) {
+        assert!(is_valid_interrupt_id(interrupt_id));
+        self.peripheral_irq_devices[interrupt_id as usize] = Some(device);
+    }
+
     fn sync_peripheral_irq_levels(&mut self) {
-        for (interrupt_id, source_handler) in self.peripheral_irq_handlers.iter().enumerate() {
-            let Some(source_handler) = source_handler else {
+        for (interrupt_id, device) in self.peripheral_irq_devices.iter().enumerate() {
+            let Some(device) = device else {
                 continue;
             };
 
+            let level = unsafe { device.as_ref() }.irq_level();
             self.layout
-                .set_source_level(interrupt_id as PeriphIrqId, source_handler.irq_level());
+                .set_source_level(interrupt_id as PeriphIrqId, level);
         }
     }
 
@@ -522,24 +534,14 @@ impl PlicIRQHandler for PLIC {
         // log::debug!("PLIC, receive an interrupt: {interrupt}, level = {level}");
         self.set_interrupt_level(interrupt, level);
     }
-    fn register_source_handler(
-        &mut self,
-        source_handler: Option<Box<dyn super::PlicDeviceHandler>>,
-        interrupt_id: PeriphIrqId,
-    ) {
-        assert!(is_valid_interrupt_id(interrupt_id));
-        self.peripheral_irq_handlers[interrupt_id as usize] = source_handler;
-    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    };
+    use std::cell::Cell;
 
     use super::*;
+    use crate::device::{PlicDevice, device_manager::DeviceArenaBuilder};
 
     // all methods go through mmio interface.
     impl PLIC {
@@ -801,39 +803,62 @@ mod test {
         assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
     }
 
-    struct AtomicIRQHandler(Arc<AtomicBool>);
+    struct TestPlicDevice {
+        level: bool,
+        samples: Cell<usize>,
+    }
 
-    impl crate::device::PlicDeviceHandler for AtomicIRQHandler {
+    impl TestPlicDevice {
+        fn new(level: bool) -> Self {
+            Self {
+                level,
+                samples: Cell::new(0),
+            }
+        }
+    }
+
+    impl DeviceTrait for TestPlicDevice {
+        fn read(&mut self, _addr: WordType, _len: u32) -> Result<u64, MemError> {
+            Err(MemError::LoadFault)
+        }
+
+        fn write(&mut self, _addr: WordType, _len: u32, _data: u64) -> Result<(), MemError> {
+            Err(MemError::StoreFault)
+        }
+
+        fn sync(&mut self) {}
+    }
+
+    impl PlicDevice for TestPlicDevice {
         fn irq_level(&self) -> bool {
-            self.0.load(Ordering::Acquire)
+            self.samples.set(self.samples.get() + 1);
+            self.level
         }
     }
 
     #[test]
-    fn completion_samples_registered_source_before_rearming() {
-        use crate::device::plic::irq_line::PlicIRQLine;
-
+    fn completion_samples_device_after_arena_registration() {
         let mut plic = PLIC::new();
         plic.set_priority(10, 5).unwrap();
         plic.set_enable_word(0, 0, 1 << 10).unwrap();
 
-        let level = Arc::new(AtomicBool::new(false));
-        let _irq_line = PlicIRQLine::new(
-            &mut plic,
-            Some(Box::new(AtomicIRQHandler(level.clone()))),
-            10,
-        );
+        let mut device = Box::new(TestPlicDevice::new(false));
+        let device_ptr = NonNull::from(&mut *device as &mut dyn PlicDevice);
+        plic.register_device(device_ptr, 10);
+        let mut arena_builder = DeviceArenaBuilder::new();
+        let device = arena_builder.register(device);
+        let mut arena = arena_builder.build();
 
         assert!(plic.update_context_irq_line(0).is_none());
 
-        level.store(true, Ordering::Release);
+        arena.device_mut(device).level = true;
         assert_eq!(plic.update_context_irq_line(0), Some(10));
         assert_eq!(plic.get_claim_complete(0).unwrap(), 10);
 
         // The device clears its line before the guest writes complete. The
         // complete path must sample that state before deciding whether to
         // create another pending request.
-        level.store(false, Ordering::Release);
+        arena.device_mut(device).level = false;
         plic.set_claim_complete(0, 10).unwrap();
         assert!(!plic.get_pending_bit(10).unwrap());
         assert_eq!(plic.get_claim_complete(0).unwrap(), 0);
@@ -875,29 +900,18 @@ mod test {
         assert_eq!(cpu_handler.levels, vec![false, true, false]);
     }
 
-    struct CountingIRQHandler(Arc<AtomicUsize>);
-
-    impl crate::device::PlicDeviceHandler for CountingIRQHandler {
-        fn irq_level(&self) -> bool {
-            self.0.fetch_add(1, Ordering::Relaxed);
-            false
-        }
-    }
-
     #[test]
     fn multiple_contexts_share_one_peripheral_snapshot() {
-        use crate::device::plic::irq_line::PlicIRQLine;
-
-        let samples = Arc::new(AtomicUsize::new(0));
         let mut plic = PLIC::new();
-        let _irq_line = PlicIRQLine::new(
-            &mut plic,
-            Some(Box::new(CountingIRQHandler(samples.clone()))),
-            12,
-        );
+        let mut device = Box::new(TestPlicDevice::new(false));
+        let device_ptr = NonNull::from(&mut *device as &mut dyn PlicDevice);
+        plic.register_device(device_ptr, 12);
+        let mut arena_builder = DeviceArenaBuilder::new();
+        let device = arena_builder.register(device);
+        let arena = arena_builder.build();
 
         plic.update_context_irq_lines(&[0, 1]);
 
-        assert_eq!(samples.load(Ordering::Relaxed), 1);
+        assert_eq!(arena.device(device).samples.get(), 1);
     }
 }

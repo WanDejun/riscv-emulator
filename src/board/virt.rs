@@ -1,8 +1,9 @@
 use std::{
     any::TypeId,
-    cell::{Cell, RefCell, UnsafeCell},
+    cell::{Cell, UnsafeCell},
     collections::HashMap,
     hint::cold_path,
+    ptr::NonNull,
     rc::Rc,
     sync::atomic::Ordering,
 };
@@ -15,15 +16,19 @@ use crate::{
     clock::{Timer, VirtualClock},
     config::arch_config::WordType,
     device::{
-        self, IdAllocator,
+        self, IdAllocator, PlicDevice,
         aclint::Clint,
         config::{
             CLINT_BASE, CLINT_SIZE, PLIC_BASE, PLIC_SIZE, POWER_MANAGER_BASE, POWER_MANAGER_SIZE,
             UART_IRQ, VIRTIO_IRQ_BASE,
         },
+        device_manager::{DeviceArena, DeviceArenaBuilder, DeviceHandle},
         fast_uart::{FastUart16550, UartBytePort},
         mmio::{MemoryMapIO, MemoryMapItem},
-        plic::{PLIC, PeriphIrqId, irq_line::PlicIRQSource},
+        plic::{
+            PLIC, PeriphIrqId,
+            irq_line::{PlicIRQHandler, PlicIRQSource},
+        },
         power_manager::{POWER_OFF_CODE, POWER_STATUS, PowerManager},
         virtio::{
             virtio_blk::VirtIOBlkDeviceBuilder, virtio_device::VirtIODeviceEnum,
@@ -142,9 +147,10 @@ impl IRQLine {
 }
 
 pub struct RVBoardBuilder {
-    extra_plic_devices: Vec<(Rc<RefCell<dyn PlicIRQSource>>, PeriphIrqId)>,
-    virtio_devices: Vec<DeviceConfig>,
+    plic: Box<PLIC>,
+    arena_builder: DeviceArenaBuilder,
     mmio_items: Vec<MemoryMapItem>,
+    virtio_devices: Vec<DeviceConfig>,
     id_allocators: HashMap<TypeId, IdAllocator>,
     decoder: Option<Decoder>,
     initial_registers: Vec<(u8, WordType)>,
@@ -156,9 +162,10 @@ pub struct RVBoardBuilder {
 impl RVBoardBuilder {
     pub fn new() -> Self {
         Self {
-            extra_plic_devices: Vec::new(),
-            virtio_devices: Vec::new(),
+            plic: Box::new(PLIC::new()),
+            arena_builder: DeviceArenaBuilder::new(),
             mmio_items: Vec::new(),
+            virtio_devices: Vec::new(),
             id_allocators: HashMap::new(),
             decoder: None,
             initial_registers: Vec::new(),
@@ -178,9 +185,9 @@ impl RVBoardBuilder {
         self
     }
 
-    pub fn add_plic_device<D: device::MemMappedDeviceTrait + PlicIRQSource + 'static>(
+    pub fn add_plic_device<D: device::MemMappedDeviceTrait + PlicDevice + 'static>(
         mut self,
-        device: Rc<RefCell<D>>,
+        mut device: Box<D>,
         interrupt_id: PeriphIrqId,
     ) -> Self {
         let type_id = TypeId::of::<D>();
@@ -190,10 +197,11 @@ impl RVBoardBuilder {
             .or_insert_with(|| device::IdAllocator::new::<D>(0, stringify!(D).to_string()));
 
         let info = allocator.get();
+        let device_ptr = NonNull::from(&mut *device as &mut dyn PlicDevice);
+        self.plic.register_device(device_ptr, interrupt_id);
+        let handle = self.arena_builder.register(device);
         self.mmio_items
-            .push(MemoryMapItem::new(info.base, info.size, device.clone()));
-
-        self.extra_plic_devices.push((device, interrupt_id));
+            .push(MemoryMapItem::new(info.base, info.size, handle));
 
         self
     }
@@ -221,8 +229,7 @@ impl RVBoardBuilder {
 
         // Construct devices
         let (uart1, uart_port1) = FastUart16550::new();
-        let uart1 = Rc::new(RefCell::new(uart1));
-        self = self.add_plic_device(uart1, UART_IRQ);
+        self = self.add_plic_device(Box::new(uart1), UART_IRQ);
 
         let mut uart_port = None;
         #[cfg(feature = "native-cli")]
@@ -247,28 +254,23 @@ impl RVBoardBuilder {
         const MTIME_OFFSET: u64 = 0xbff8;
         const MTIMECMP_OFFSET: u64 = 0x4000;
 
-        let power_manager = Rc::new(RefCell::new(PowerManager::new()));
-        let clint = Rc::new(RefCell::new(Clint::new(
+        let power_manager = Box::new(PowerManager::new());
+        let clint = Box::new(Clint::new(
             1,
             0,
             MTIME_OFFSET,
             MTIMECMP_OFFSET,
             clock.clone(),
             timer.clone(),
-        )));
+        ));
 
-        // PLIC init.
-        let plic = Rc::new(RefCell::new(PLIC::new()));
-        for (plic_device, interrupt_id) in self.extra_plic_devices {
-            plic_device
-                .borrow_mut()
-                .set_irq_line(&mut *plic.borrow_mut(), interrupt_id);
-        }
+        let plic_ptr = &mut *self.plic as *mut dyn PlicIRQHandler;
 
-        self.mmio_items.append(&mut vec![
+        let power_manager = self.arena_builder.register(power_manager);
+        let clint = self.arena_builder.register(clint);
+        self.mmio_items.extend([
             MemoryMapItem::new(POWER_MANAGER_BASE, POWER_MANAGER_SIZE, power_manager),
-            MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint.clone()),
-            MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic.clone()),
+            MemoryMapItem::new(CLINT_BASE, CLINT_SIZE, clint),
         ]);
 
         // Add VirtIO device.
@@ -291,19 +293,25 @@ impl RVBoardBuilder {
                 }
             };
             let mut virtio_mmio_device = VirtIOMMIO::new(Box::new(UnsafeCell::new(virtio_device)));
-            virtio_mmio_device.set_irq_line(
-                &mut *plic.borrow_mut(),
-                VIRTIO_IRQ_BASE + virtio_index as u32,
-            );
+            virtio_mmio_device.set_irq_line(plic_ptr, VIRTIO_IRQ_BASE + virtio_index as u32);
             let virtio_info = virtio_allocator.get();
+            let virtio_handle = self.arena_builder.register(Box::new(virtio_mmio_device));
             self.mmio_items.push(MemoryMapItem::new(
                 virtio_info.base,
                 virtio_info.size,
-                Rc::new(RefCell::new(virtio_mmio_device)),
+                virtio_handle,
             ));
         }
 
-        let mmio = MemoryMapIO::from_mmio_items(ram_ref.clone(), self.mmio_items);
+        let plic = self.arena_builder.register(self.plic);
+        self.mmio_items
+            .push(MemoryMapItem::new(PLIC_BASE, PLIC_SIZE, plic));
+
+        let mut device_arena = Box::new(self.arena_builder.build());
+        let device_arena_ptr = NonNull::from(device_arena.as_mut());
+        let mmio = unsafe {
+            MemoryMapIO::from_mmio_items(ram_ref.clone(), device_arena_ptr, self.mmio_items)
+        };
         let vaddr_manager = VirtAddrManager::from_ram_and_mmio(ram_ref.clone(), mmio);
 
         let decoder = self.decoder.take().unwrap_or_else(Decoder::new);
@@ -314,14 +322,15 @@ impl RVBoardBuilder {
         }
 
         // register irq line for timer.
-        clint.borrow_mut().set_irq_line(
+        let arena = device_arena.as_mut();
+        arena.device_mut(clint).set_irq_line(
             IRQLine::new(
                 &mut *cpu as *mut dyn RiscvIRQHandler,
                 Interrupt::MachineTimer,
             ),
             0,
         );
-        clint.borrow_mut().set_irq_line(
+        arena.device_mut(clint).set_irq_line(
             IRQLine::new(
                 &mut *cpu as *mut dyn RiscvIRQHandler,
                 Interrupt::MachineSoft,
@@ -341,11 +350,11 @@ impl RVBoardBuilder {
             Interrupt::SupervisorExternal,
         );
 
-        plic.borrow_mut().set_irq_line(
+        arena.device_mut(plic).set_irq_line(
             plic_machine_irq_line,
             VirtBoardPlicContextId::Cpu0MachineMode.into(),
         );
-        plic.borrow_mut().set_irq_line(
+        arena.device_mut(plic).set_irq_line(
             plic_supervisor_irq_line,
             VirtBoardPlicContextId::Cpu0SuperviserMode.into(),
         );
@@ -365,6 +374,7 @@ impl RVBoardBuilder {
             uart_stdin_handle,
 
             status: BoardStatus::Running,
+            device_arena,
         })
     }
 }
@@ -377,20 +387,30 @@ pub struct VirtBoard {
     pub clock: VirtualClock,
     pub timer: Rc<UnsafeCell<Timer<VirtualClock>>>,
 
-    // interrupt manager.
-    pub clint: Rc<RefCell<Clint>>,
-    pub plic: Rc<RefCell<PLIC>>,
+    pub clint: DeviceHandle<Clint>,
+    pub plic: DeviceHandle<PLIC>,
     uart_io: UartIoMode,
     uart_port: Option<UartBytePort>,
     #[cfg(feature = "native-cli")]
     uart_stdin_handle: Option<crate::byte_io::StdinHandle>,
 
     status: BoardStatus,
+
+    // Must remain after `cpu`: MemoryMapIO stores a non-owning pointer into this arena.
+    device_arena: Box<DeviceArena>,
 }
 
 const STEP_BATCH_CYCLES: u64 = 1024;
 
 impl VirtBoard {
+    pub fn device<D: device::DeviceTrait>(&self, handle: DeviceHandle<D>) -> &D {
+        self.device_arena.device(handle)
+    }
+
+    pub fn device_mut<D: device::DeviceTrait>(&mut self, handle: DeviceHandle<D>) -> &mut D {
+        self.device_arena.device_mut(handle)
+    }
+
     pub fn from_binary_with(bytes: &[u8], config: VirtBoardConfig) -> Result<Self, String> {
         let mut ram = Ram::new();
         load_bin(&mut ram, bytes);
@@ -454,7 +474,7 @@ impl VirtBoard {
         {
             let spawner = builder.get_spawner();
             builder = builder.add_plic_device(
-                Rc::new(RefCell::new(SampleTimerDevice::new(spawner))),
+                Box::new(SampleTimerDevice::new(spawner)),
                 SAMPLE_TIMER_INTERRUPT_ID,
             );
         }
@@ -502,7 +522,8 @@ impl VirtBoard {
 
     fn prepare_cpu_batch(&mut self) {
         unsafe { self.timer.as_mut_unchecked() }.tick();
-        self.plic.borrow_mut().update_context_irq_lines(&[
+        let plic = self.plic;
+        self.device_mut(plic).update_context_irq_lines(&[
             VirtBoardPlicContextId::Cpu0MachineMode.into(),
             VirtBoardPlicContextId::Cpu0SuperviserMode.into(),
         ]);
@@ -694,10 +715,11 @@ mod tests {
 
     #[test]
     fn test_clint_mmio_access() {
-        let board = create_test_board();
+        let mut board = create_test_board();
 
         // 直接测试 CLINT 设备
-        let mut clint = board.clint.borrow_mut();
+        let clint_handle = board.clint;
+        let clint = board.device_mut(clint_handle);
         // 测试 mtime 读取
         let _ = clint.read_u64(0xbff8).unwrap();
 
@@ -744,7 +766,8 @@ mod tests {
 
         let target_time = 5;
         {
-            let mut clint = board.clint.borrow_mut();
+            let clint_handle = board.clint;
+            let clint = board.device_mut(clint_handle);
             clint.write_u64(0x4000, target_time).unwrap();
         }
 
@@ -780,7 +803,8 @@ mod tests {
         board.cpu_mut().debug_csr(csr_index::mie, Some(1 << 3));
 
         {
-            let mut clint = board.clint.borrow_mut();
+            let clint_handle = board.clint;
+            let clint = board.device_mut(clint_handle);
             clint.write_u64(0x0, 1).unwrap();
         }
 
@@ -816,7 +840,8 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(1);
             loop {
                 board.step();
-                let claimed_id = board.plic.borrow_mut().read_u32(claim_addr).unwrap();
+                let plic_handle = board.plic;
+                let claimed_id = board.device_mut(plic_handle).read_u32(claim_addr).unwrap();
                 if claimed_id != 0 {
                     return claimed_id;
                 }
@@ -831,7 +856,8 @@ mod tests {
         let mut board = create_test_board();
 
         {
-            let mut plic = board.plic.borrow_mut();
+            let plic_handle = board.plic;
+            let plic = board.device_mut(plic_handle);
             // priority_threshold
             let addr = CONTEXT_CONFIG_OFFSET + (0 * CONTEXT_CONFIG_SIZE);
             plic.write_u32(addr, 1).unwrap();
@@ -878,14 +904,12 @@ mod tests {
             .write_memory(Address::Phys(SAMPLE_TIMER_BASE), 1u32)
             .unwrap();
         board
-            .plic
-            .borrow_mut()
+            .device_mut(board.plic)
             .write_u32(CLAIM_COMPLETE_OFFSET, first_claim)
             .unwrap();
         assert_eq!(
             board
-                .plic
-                .borrow_mut()
+                .device_mut(board.plic)
                 .read_u32(CLAIM_COMPLETE_OFFSET)
                 .unwrap(),
             0
